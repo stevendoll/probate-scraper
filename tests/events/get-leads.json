@@ -1,6 +1,9 @@
 {
   "httpMethod": "GET",
   "path": "/real-estate/probate-leads/collin-tx/leads",
+  "pathParameters": {
+    "location_path": "collin-tx"
+  },
   "headers": {
     "x-api-key": "test-key"
   },

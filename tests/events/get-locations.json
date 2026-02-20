@@ -1,0 +1,11 @@
+{
+  "httpMethod": "GET",
+  "path": "/real-estate/probate-leads/locations",
+  "pathParameters": null,
+  "headers": {
+    "x-api-key": "test-key"
+  },
+  "queryStringParameters": null,
+  "body": null,
+  "isBase64Encoded": false
+}

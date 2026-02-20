@@ -13,7 +13,9 @@ STACK_NAME   := probate-scraper-collin-tx
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
                     AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
-                    DYNAMO_TABLE_NAME=probate-leads-collin-tx
+                    DYNAMO_TABLE_NAME=leads \
+                    LOCATIONS_TABLE_NAME=locations \
+                    SUBSCRIBERS_TABLE_NAME=subscribers
 
 help:
 	@echo ""
@@ -22,8 +24,8 @@ help:
 	@echo "  Local development:"
 	@echo "    local-db-start   Start DynamoDB Local (Docker)"
 	@echo "    local-db-stop    Stop DynamoDB Local"
-	@echo "    local-db-seed    Create table + load CSV data"
-	@echo "    local-db-shell   Scan table (quick sanity check)"
+	@echo "    local-db-seed    Create tables + load CSV data + seed locations"
+	@echo "    local-db-shell   Scan leads table (quick sanity check)"
 	@echo "    local-api-start  Start API server locally (no Docker)"
 	@echo "    test             Run unit tests"
 	@echo ""
@@ -44,8 +46,8 @@ help:
 	@echo "    logs-scraper     Tail /ecs/probate-scraper CloudWatch logs"
 	@echo "    logs-api         Tail ApiFunction Lambda logs"
 	@echo "    get-api-key      Print the API Gateway key value"
-	@echo "    invoke-trigger   Invoke POST /update locally via sam local"
-	@echo "    invoke-api       Invoke GET /leads locally via sam local"
+	@echo "    invoke-trigger   Invoke POST /{location_path}/update locally via sam local"
+	@echo "    invoke-api       Invoke GET /{location_path}/leads locally via sam local"
 	@echo ""
 
 # ── One-time setup ──────────────────────────────────────────────────────────
@@ -131,10 +133,14 @@ get-api-key:
 		--query 'value' --output text
 
 invoke-trigger:
-	sam local invoke TriggerFunction -e tests/events/post-update.json
+	sam local invoke TriggerFunction \
+		-e tests/events/post-update.json \
+		--env-vars env.local.json
 
 invoke-api:
-	sam local invoke ApiFunction -e tests/events/get-leads.json
+	sam local invoke ApiFunction \
+		-e tests/events/get-leads.json \
+		--env-vars env.local.json
 
 local-api-start:
 	pipenv run python scripts/local_api_server.py
@@ -156,6 +162,6 @@ local-db-seed:
 
 local-db-shell:
 	$(LOCAL_ENV) aws dynamodb scan \
-		--table-name probate-leads-collin-tx \
+		--table-name leads \
 		--endpoint-url $(LOCAL_DYNAMO_URL) \
 		--select COUNT

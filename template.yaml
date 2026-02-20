@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Collin County probate leads — ECS Fargate scraper + API Gateway REST API backed by DynamoDB.
+  Probate leads — ECS Fargate scraper + API Gateway REST API backed by DynamoDB.
+  Supports multiple counties via the locations table.
 
 # ---------------------------------------------------------------------------
 # Parameters
@@ -28,6 +29,18 @@ Parameters:
     Default: "cron(0 6 * * ? *)"
     Description: EventBridge schedule expression for the daily scrape (UTC)
 
+  StripeSecretKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Stripe secret key (sk_live_... or sk_test_...)
+
+  StripeWebhookSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Stripe webhook signing secret (whsec_...)
+
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
@@ -37,20 +50,28 @@ Globals:
     Architectures: [x86_64]
     Environment:
       Variables:
-        DYNAMO_TABLE_NAME: !Ref ProbateLeadsTable
+        DYNAMO_TABLE_NAME: !Ref LeadsTable
+        LOCATIONS_TABLE_NAME: !Ref LocationsTable
+        SUBSCRIBERS_TABLE_NAME: !Ref SubscribersTable
         GSI_NAME: recorded-date-index
+        LOCATION_DATE_GSI: location-date-index
+        STRIPE_SECRET_KEY: !Ref StripeSecretKey
+        STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
 
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
 Resources:
 
-  # ── DynamoDB ──────────────────────────────────────────────────────────────
+  # ── DynamoDB — Leads ──────────────────────────────────────────────────────
+  # NOTE: renamed from probate-leads-collin-tx → leads.
+  # CloudFormation will replace (delete + recreate) the table on first deploy.
+  # Migrate data before deploying if the live table has records you need.
 
-  ProbateLeadsTable:
+  LeadsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: probate-leads-collin-tx
+      TableName: leads
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: doc_number
@@ -59,16 +80,75 @@ Resources:
           AttributeType: S
         - AttributeName: recorded_date
           AttributeType: S
+        - AttributeName: location_code
+          AttributeType: S
       KeySchema:
         - AttributeName: doc_number
           KeyType: HASH
       GlobalSecondaryIndexes:
+        # Legacy GSI — kept for backward compatibility
         - IndexName: recorded-date-index
           KeySchema:
             - AttributeName: doc_type
               KeyType: HASH
             - AttributeName: recorded_date
               KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # New GSI — query leads by location efficiently
+        - IndexName: location-date-index
+          KeySchema:
+            - AttributeName: location_code
+              KeyType: HASH
+            - AttributeName: recorded_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB — Locations ──────────────────────────────────────────────────
+
+  LocationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: locations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: location_code
+          AttributeType: S
+        - AttributeName: location_path
+          AttributeType: S
+      KeySchema:
+        - AttributeName: location_code
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        # Allows API to resolve location_path → location_code
+        - IndexName: location-path-index
+          KeySchema:
+            - AttributeName: location_path
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB — Subscribers ────────────────────────────────────────────────
+
+  SubscribersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: subscribers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: subscriber_id
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: subscriber_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
           Projection:
             ProjectionType: ALL
 
@@ -113,7 +193,7 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: DynamoDBWrite
+        - PolicyName: DynamoDBAccess
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -122,7 +202,12 @@ Resources:
                   - dynamodb:BatchWriteItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
-                Resource: !GetAtt ProbateLeadsTable.Arn
+                Resource: !GetAtt LeadsTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt LocationsTable.Arn
 
   ScraperSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -155,9 +240,13 @@ Resources:
           Essential: true
           Environment:
             - Name: DYNAMO_TABLE_NAME
-              Value: !Ref ProbateLeadsTable
+              Value: !Ref LeadsTable
+            - Name: LOCATIONS_TABLE_NAME
+              Value: !Ref LocationsTable
             - Name: AWS_DEFAULT_REGION
               Value: !Ref AWS::Region
+            - Name: LOCATION_CODE
+              Value: CollinTx
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -180,7 +269,113 @@ Resources:
             RateLimit: 10
             BurstLimit: 20
 
-  # ── Lambda — POST /update ─────────────────────────────────────────────────
+  # ── Lambda — API (leads + locations + subscribers + stripe webhook) ────────
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: probate-leads-api
+      CodeUri: src/api/
+      Handler: app.handler
+      MemorySize: 256
+      Timeout: 10
+      Policies:
+        # Leads — read only
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt LeadsTable.Arn
+                - !Sub "${LeadsTable.Arn}/index/*"
+        # Locations — read only
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt LocationsTable.Arn
+                - !Sub "${LocationsTable.Arn}/index/*"
+        # Subscribers — full CRUD
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt SubscribersTable.Arn
+                - !Sub "${SubscribersTable.Arn}/index/*"
+      Events:
+        # Leads — dynamic by location_path
+        GetLeads:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/{location_path}/leads
+            Method: GET
+        # Locations
+        ListLocations:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/locations
+            Method: GET
+        GetLocation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/locations/{location_code}
+            Method: GET
+        # Subscribers
+        ListSubscribers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/subscribers
+            Method: GET
+        CreateSubscriber:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/subscribers
+            Method: POST
+        GetSubscriber:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/subscribers/{subscriber_id}
+            Method: GET
+        UpdateSubscriber:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/subscribers/{subscriber_id}
+            Method: PATCH
+        DeleteSubscriber:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/subscribers/{subscriber_id}
+            Method: DELETE
+        # Stripe webhook — no API key required (verified by signature)
+        StripeWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/stripe/webhook
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+
+  # ── Lambda — POST /{location_path}/update ─────────────────────────────────
 
   TriggerFunction:
     Type: AWS::Serverless::Function
@@ -196,6 +391,7 @@ Resources:
           TASK_DEFINITION_ARN: !Ref ScraperTaskDefinition
           TASK_SUBNETS: !Join [",", !Ref SubnetIds]
           TASK_SECURITY_GROUP: !Ref ScraperSecurityGroup
+          LOCATIONS_TABLE_NAME: !Ref LocationsTable
       Policies:
         - Statement:
             - Effect: Allow
@@ -206,34 +402,21 @@ Resources:
               Resource:
                 - !GetAtt ScraperTaskExecutionRole.Arn
                 - !GetAtt ScraperTaskRole.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt LocationsTable.Arn
+                - !Sub "${LocationsTable.Arn}/index/*"
       Events:
         PostUpdate:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/collin-tx/update
+            Path: /real-estate/probate-leads/{location_path}/update
             Method: POST
-
-  # ── Lambda — GET /leads ───────────────────────────────────────────────────
-
-  ApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: probate-leads-api
-      CodeUri: src/api/
-      Handler: app.handler
-      MemorySize: 256
-      Timeout: 10
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref ProbateLeadsTable
-      Events:
-        GetLeads:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/collin-tx/leads
-            Method: GET
 
   # ── EventBridge — daily scheduled scrape ─────────────────────────────────
 
@@ -306,10 +489,18 @@ Outputs:
     Description: Scraper task definition ARN
     Value: !Ref ScraperTaskDefinition
 
-  DynamoTableName:
-    Description: DynamoDB table name
-    Value: !Ref ProbateLeadsTable
+  LeadsTableName:
+    Description: Leads DynamoDB table name
+    Value: !Ref LeadsTable
 
-  DynamoTableArn:
-    Description: DynamoDB table ARN
-    Value: !GetAtt ProbateLeadsTable.Arn
+  LeadsTableArn:
+    Description: Leads DynamoDB table ARN
+    Value: !GetAtt LeadsTable.Arn
+
+  LocationsTableName:
+    Description: Locations DynamoDB table name
+    Value: !Ref LocationsTable
+
+  SubscribersTableName:
+    Description: Subscribers DynamoDB table name
+    Value: !Ref SubscribersTable
