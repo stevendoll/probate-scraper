@@ -1,0 +1,33 @@
+# SAM CLI configuration for the probate-scraper stack.
+# Run `sam deploy` from the project root — all defaults are set here.
+#
+# Before first deploy:
+#   1. Create ECR repo and push the scraper image (see Makefile: make ecr-create build push)
+#   2. Set ScraperImageUri below to the pushed image URI
+#   3. Set SubnetIds to your VPC's public subnet IDs (comma-separated, no spaces)
+#   4. Set VpcId to your VPC ID
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "probate-scraper-collin-tx"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+region                = "us-east-1"
+capabilities          = "CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset     = false
+resolve_s3            = true
+s3_prefix             = "probate-scraper-collin-tx"
+
+# ── Update these before deploying ─────────────────────────────────────────
+parameter_overrides = """
+  VpcId=vpc-REPLACE_ME
+  SubnetIds=subnet-REPLACE_ME_1,subnet-REPLACE_ME_2
+  ScraperImageUri=600775874112.dkr.ecr.us-east-1.amazonaws.com/probate-scraper/scraper:latest
+  ScrapeSchedule=cron(0 6 * * ? *)
+"""

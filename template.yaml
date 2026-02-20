@@ -1,0 +1,315 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Collin County probate leads — ECS Fargate scraper + API Gateway REST API backed by DynamoDB.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC in which the Fargate task will run (default VPC is fine)
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >
+      Public subnets for the Fargate task (assignPublicIp=ENABLED is used so
+      the task can reach the internet without a NAT Gateway)
+
+  ScraperImageUri:
+    Type: String
+    Description: >
+      Full ECR image URI for the scraper container,
+      e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/probate-scraper/scraper:latest
+
+  ScrapeSchedule:
+    Type: String
+    Default: "cron(0 6 * * ? *)"
+    Description: EventBridge schedule expression for the daily scrape (UTC)
+
+# ---------------------------------------------------------------------------
+# Globals
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        DYNAMO_TABLE_NAME: !Ref ProbateLeadsTable
+        GSI_NAME: recorded-date-index
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ── DynamoDB ──────────────────────────────────────────────────────────────
+
+  ProbateLeadsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: probate-leads-collin-tx
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: doc_number
+          AttributeType: S
+        - AttributeName: doc_type
+          AttributeType: S
+        - AttributeName: recorded_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: doc_number
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: recorded-date-index
+          KeySchema:
+            - AttributeName: doc_type
+              KeyType: HASH
+            - AttributeName: recorded_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ── CloudWatch Log Group ──────────────────────────────────────────────────
+
+  ScraperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/probate-scraper
+      RetentionInDays: 30
+
+  # ── ECS ───────────────────────────────────────────────────────────────────
+
+  ScraperCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: probate-scraper-cluster
+
+  ScraperTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: probate-scraper-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ScraperTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: probate-scraper-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt ProbateLeadsTable.Arn
+
+  ScraperSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Fargate scraper — outbound only
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ScraperTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: probate-scraper
+      Cpu: "1024"
+      Memory: "2048"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ScraperTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ScraperTaskRole.Arn
+      ContainerDefinitions:
+        - Name: scraper
+          Image: !Ref ScraperImageUri
+          Essential: true
+          Environment:
+            - Name: DYNAMO_TABLE_NAME
+              Value: !Ref ProbateLeadsTable
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AWS::Region
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ScraperLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scraper
+
+  # ── API Gateway ───────────────────────────────────────────────────────────
+
+  ProbateApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: probate-leads-api
+      StageName: prod
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          Throttle:
+            RateLimit: 10
+            BurstLimit: 20
+
+  # ── Lambda — POST /update ─────────────────────────────────────────────────
+
+  TriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: probate-leads-trigger
+      CodeUri: src/trigger/
+      Handler: app.handler
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          ECS_CLUSTER_ARN: !GetAtt ScraperCluster.Arn
+          TASK_DEFINITION_ARN: !Ref ScraperTaskDefinition
+          TASK_SUBNETS: !Join [",", !Ref SubnetIds]
+          TASK_SECURITY_GROUP: !Ref ScraperSecurityGroup
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ecs:RunTask
+              Resource: !Ref ScraperTaskDefinition
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource:
+                - !GetAtt ScraperTaskExecutionRole.Arn
+                - !GetAtt ScraperTaskRole.Arn
+      Events:
+        PostUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/collin-tx/update
+            Method: POST
+
+  # ── Lambda — GET /leads ───────────────────────────────────────────────────
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: probate-leads-api
+      CodeUri: src/api/
+      Handler: app.handler
+      MemorySize: 256
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProbateLeadsTable
+      Events:
+        GetLeads:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/collin-tx/leads
+            Method: GET
+
+  # ── EventBridge — daily scheduled scrape ─────────────────────────────────
+
+  EventBridgeEcsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: probate-scraper-eventbridge-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RunEcsTask
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref ScraperTaskDefinition
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ScraperTaskExecutionRole.Arn
+                  - !GetAtt ScraperTaskRole.Arn
+
+  ScheduledScrapeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: probate-scraper-daily
+      Description: Daily trigger for the Collin County probate scraper
+      ScheduleExpression: !Ref ScrapeSchedule
+      State: ENABLED
+      Targets:
+        - Id: ScraperFargateTask
+          Arn: !GetAtt ScraperCluster.Arn
+          RoleArn: !GetAtt EventBridgeEcsRole.Arn
+          EcsParameters:
+            TaskDefinitionArn: !Ref ScraperTaskDefinition
+            TaskCount: 1
+            LaunchType: FARGATE
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                Subnets: !Ref SubnetIds
+                SecurityGroups:
+                  - !Ref ScraperSecurityGroup
+                AssignPublicIp: ENABLED
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway base URL
+    Value: !Sub "https://${ProbateApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  ApiKeyId:
+    Description: >
+      API key ID — retrieve the value with:
+      aws apigateway get-api-key --api-key <this-value> --include-value --query value --output text
+    Value: !Sub "${ProbateApi}ApiKey"
+
+  EcsClusterName:
+    Description: ECS cluster name
+    Value: !Ref ScraperCluster
+
+  TaskDefinitionArn:
+    Description: Scraper task definition ARN
+    Value: !Ref ScraperTaskDefinition
+
+  DynamoTableName:
+    Description: DynamoDB table name
+    Value: !Ref ProbateLeadsTable
+
+  DynamoTableArn:
+    Description: DynamoDB table ARN
+    Value: !GetAtt ProbateLeadsTable.Arn

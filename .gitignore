@@ -1,0 +1,5 @@
+.env
+.claude
+.DS_Store
+.aws-sam/
+.vscode/

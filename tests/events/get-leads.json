@@ -1,0 +1,14 @@
+{
+  "httpMethod": "GET",
+  "path": "/real-estate/probate-leads/collin-tx/leads",
+  "headers": {
+    "x-api-key": "test-key"
+  },
+  "queryStringParameters": {
+    "from_date": "2026-01-01",
+    "to_date": "2026-02-20",
+    "limit": "10"
+  },
+  "body": null,
+  "isBase64Encoded": false
+}
