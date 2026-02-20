@@ -1,6 +1,9 @@
 {
   "httpMethod": "POST",
   "path": "/real-estate/probate-leads/collin-tx/update",
+  "pathParameters": {
+    "location_path": "collin-tx"
+  },
   "headers": {
     "Content-Type": "application/json",
     "x-api-key": "test-key"

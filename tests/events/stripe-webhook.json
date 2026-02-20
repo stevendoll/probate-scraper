@@ -1,0 +1,12 @@
+{
+  "httpMethod": "POST",
+  "path": "/real-estate/probate-leads/stripe/webhook",
+  "pathParameters": null,
+  "headers": {
+    "Content-Type": "application/json",
+    "Stripe-Signature": "t=1234567890,v1=test_signature"
+  },
+  "queryStringParameters": null,
+  "body": "{\"type\": \"customer.subscription.updated\", \"data\": {\"object\": {\"id\": \"sub_test\", \"customer\": \"cus_test\", \"status\": \"active\"}}}",
+  "isBase64Encoded": false
+}

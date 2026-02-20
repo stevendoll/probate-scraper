@@ -4,7 +4,8 @@ Ported from probate-scraper.ipynb — functions kept at same names for traceabil
 Key changes from notebook:
   - initialize_driver() uses CHROMEDRIVER_PATH env var (not webdriver-manager)
   - scrape_all() replaces scrape_collin_county_records(): no max_pages cap,
-    writes to DynamoDB after each page (resilient to crashes)
+    writes to DynamoDB after each page (resilient to crashes),
+    accepts location_code so records are tagged with their source location.
 """
 
 import os
@@ -242,10 +243,14 @@ def extract_page_data(driver):
 # Main scrape loop (replaces scrape_collin_county_records)
 # ---------------------------------------------------------------------------
 
-def scrape_all(scrape_run_id: str):
+def scrape_all(scrape_run_id: str, location_code: str):
     """
     Scrape every page of results, writing to DynamoDB after each page.
     No max_pages cap — runs until has_more_pages() returns False.
+
+    Args:
+        scrape_run_id:  Unique identifier for this run (injected by ECS or caller).
+        location_code:  FK into the locations table (e.g. "CollinTx").
     """
     table_name = os.environ["DYNAMO_TABLE_NAME"]
     limit = int(SEARCH_PARAMS["limit"])
@@ -270,7 +275,9 @@ def scrape_all(scrape_run_id: str):
                     rec["page_number"] = page_num
                     rec["offset"] = current_offset
 
-                written = dynamo.write_records(page_records, table_name, scrape_run_id)
+                written = dynamo.write_records(
+                    page_records, table_name, scrape_run_id, location_code
+                )
                 total_written += written
                 log.info("Wrote %d records (total so far: %d)", written, total_written)
             else:
@@ -289,5 +296,8 @@ def scrape_all(scrape_run_id: str):
         driver.quit()
         log.info("WebDriver closed")
 
-    log.info("Scrape finished: %d total records written across %d pages", total_written, page_num)
+    log.info(
+        "Scrape finished: %d total records written across %d pages (location=%s)",
+        total_written, page_num, location_code,
+    )
     return total_written
