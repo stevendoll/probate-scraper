@@ -152,21 +152,53 @@ jobs:
       - name: Get API key
         id: api-key
         run: |
-          # Find the physical resource ID of the SAM-generated API key
           KEY_ID=$(aws cloudformation describe-stack-resources \
             --stack-name $STACK_NAME \
+            --region $AWS_REGION \
             --query 'StackResources[?ResourceType==`AWS::ApiGateway::ApiKey`].PhysicalResourceId | [0]' \
             --output text)
+          echo "API key resource ID: $KEY_ID"
 
           KEY_VALUE=$(aws apigateway get-api-key \
             --api-key "$KEY_ID" \
             --include-value \
             --query 'value' \
-            --output text)
+            --output text \
+            --region $AWS_REGION)
+          echo "API key length: ${#KEY_VALUE}"
+
+          if [ -z "$KEY_VALUE" ] || [ "$KEY_VALUE" = "None" ]; then
+            echo "ERROR: Failed to retrieve API key value"
+            exit 1
+          fi
 
           # Mask the key so it never appears in logs
           echo "::add-mask::$KEY_VALUE"
           echo "api_key=$KEY_VALUE" >> $GITHUB_OUTPUT
+
+      # ── Seed locations table ───────────────────────────────────────────────
+      - name: Seed locations table
+        run: |
+          python3 - <<'EOF'
+          import boto3, os
+          client = boto3.client("dynamodb", region_name=os.environ["AWS_REGION"])
+          # Put CollinTx only if it doesn't already exist
+          try:
+              client.put_item(
+                  TableName="locations",
+                  Item={
+                      "location_code": {"S": "CollinTx"},
+                      "location_path": {"S": "collin-tx"},
+                      "location_name": {"S": "Collin County TX"},
+                      "search_url":    {"S": "https://collin.tx.publicsearch.us"},
+                      "retrieved_at":  {"S": ""},
+                  },
+                  ConditionExpression="attribute_not_exists(location_code)",
+              )
+              print("Seeded CollinTx location")
+          except client.exceptions.ConditionalCheckFailedException:
+              print("CollinTx already exists — skipping")
+          EOF
 
       # ── Python env for smoke tests ─────────────────────────────────────────
       - name: Set up Python 3.13
