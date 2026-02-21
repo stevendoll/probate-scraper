@@ -82,12 +82,23 @@ jobs:
             --query 'Vpcs[0].VpcId' \
             --output text)
 
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "ERROR: No default VPC found in $AWS_REGION."
+            echo "Create one with: aws ec2 create-default-vpc --region $AWS_REGION"
+            exit 1
+          fi
+
           SUBNET_IDS=$(aws ec2 describe-subnets \
-            --filters Name=vpc-id,Values=$VPC_ID \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
             --query 'Subnets[*].SubnetId' \
             --output text | tr '\t' ',')
 
-          echo "vpc_id=$VPC_ID"       >> $GITHUB_OUTPUT
+          if [ -z "$SUBNET_IDS" ] || [ "$SUBNET_IDS" = "None" ]; then
+            echo "ERROR: No subnets found in VPC $VPC_ID."
+            exit 1
+          fi
+
+          echo "vpc_id=$VPC_ID"         >> $GITHUB_OUTPUT
           echo "subnet_ids=$SUBNET_IDS" >> $GITHUB_OUTPUT
           echo "Discovered VPC: $VPC_ID"
           echo "Discovered subnets: $SUBNET_IDS"
@@ -109,16 +120,18 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         run: |
+          # Each key=value is a separate quoted argument so spaces in values
+          # (e.g. the cron expression) are handled correctly.
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              "VpcId=$VPC_ID \
-               SubnetIds=$SUBNET_IDS \
-               ScraperImageUri=$ECR_URI:latest \
-               ScrapeSchedule=cron(0 6 * * ? *) \
-               StripeSecretKey=$STRIPE_SECRET_KEY \
-               StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET"
+              "VpcId=$VPC_ID" \
+              "SubnetIds=$SUBNET_IDS" \
+              "ScraperImageUri=$ECR_URI" \
+              "ScrapeSchedule=cron(0 6 * * ? *)" \
+              "StripeSecretKey=$STRIPE_SECRET_KEY" \
+              "StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET"
 
       # ── Retrieve stack outputs ─────────────────────────────────────────────
       - name: Get stack outputs
