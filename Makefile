@@ -8,7 +8,7 @@ STACK_NAME   := probate-scraper-collin-tx
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-shell \
-        local-api-start test
+        local-api-start test smoke-test
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -28,6 +28,7 @@ help:
 	@echo "    local-db-shell   Scan leads table (quick sanity check)"
 	@echo "    local-api-start  Start API server locally (no Docker)"
 	@echo "    test             Run unit tests"
+	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
 	@echo ""
 	@echo "  Setup (one-time):"
 	@echo "    ecr-create       Create the ECR repository"
@@ -147,6 +148,17 @@ local-api-start:
 
 test:
 	pipenv run python -m unittest discover -s tests -p "test_*.py" -v
+
+# Run smoke tests against the deployed API.
+# Requires SMOKE_BASE_URL and SMOKE_API_KEY to be set:
+#   export SMOKE_BASE_URL=$(aws cloudformation describe-stacks \
+#     --stack-name probate-scraper-collin-tx \
+#     --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+#     --output text)
+#   export SMOKE_API_KEY=$(make get-api-key)
+#   make smoke-test
+smoke-test:
+	pipenv run python scripts/smoke_test.py
 
 # ── Local DynamoDB ───────────────────────────────────────────────────────────
 
