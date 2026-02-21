@@ -57,6 +57,15 @@ jobs:
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Create ECR repository if it does not exist
+        run: |
+          aws ecr describe-repositories --repository-names "$ECR_REPO" \
+            --region "$AWS_REGION" 2>/dev/null \
+          || aws ecr create-repository --repository-name "$ECR_REPO" \
+            --region "$AWS_REGION" \
+            --image-scanning-configuration scanOnPush=true \
+            --tags Key=Project,Value=probate-scraper
+
       - name: Build and push scraper Docker image
         env:
           ECR_URI: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
