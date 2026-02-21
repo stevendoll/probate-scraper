@@ -122,11 +122,13 @@ jobs:
         run: |
           # Build overrides array. Stripe params are optional — SAM rejects
           # "Key=" (empty value), so only include them when the secret is set.
+          # ScrapeSchedule is intentionally omitted — it contains spaces which
+          # SAM CLI cannot handle in --parameter-overrides. The template
+          # Default "cron(0 6 * * ? *)" is used automatically.
           OVERRIDES=(
             "VpcId=$VPC_ID"
             "SubnetIds=$SUBNET_IDS"
             "ScraperImageUri=$ECR_URI"
-            "ScrapeSchedule=cron(0 6 * * ? *)"
           )
           [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
