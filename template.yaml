@@ -212,7 +212,7 @@ Resources:
   ScraperSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Fargate scraper — outbound only
+      GroupDescription: Fargate scraper - outbound only
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: tcp
