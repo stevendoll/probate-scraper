@@ -23,7 +23,7 @@ REGION="us-east-1"
 
 # ── Managed policies ────────────────────────────────────────────────────────
 MANAGED_POLICIES=(
-  "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+  "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
   "arn:aws:iam::aws:policy/AWSCloudFormationFullAccess"
   "arn:aws:iam::aws:policy/AmazonS3FullAccess"
   "arn:aws:iam::aws:policy/AWSLambda_FullAccess"
