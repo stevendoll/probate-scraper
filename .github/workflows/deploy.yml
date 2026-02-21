@@ -120,18 +120,21 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         run: |
-          # Each key=value is a separate quoted argument so spaces in values
-          # (e.g. the cron expression) are handled correctly.
+          # Build overrides array. Stripe params are optional — SAM rejects
+          # "Key=" (empty value), so only include them when the secret is set.
+          OVERRIDES=(
+            "VpcId=$VPC_ID"
+            "SubnetIds=$SUBNET_IDS"
+            "ScraperImageUri=$ECR_URI"
+            "ScrapeSchedule=cron(0 6 * * ? *)"
+          )
+          [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
+          [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
+
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "VpcId=$VPC_ID" \
-              "SubnetIds=$SUBNET_IDS" \
-              "ScraperImageUri=$ECR_URI" \
-              "ScrapeSchedule=cron(0 6 * * ? *)" \
-              "StripeSecretKey=$STRIPE_SECRET_KEY" \
-              "StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET"
+            --parameter-overrides "${OVERRIDES[@]}"
 
       # ── Retrieve stack outputs ─────────────────────────────────────────────
       - name: Get stack outputs
