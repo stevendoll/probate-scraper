@@ -1,0 +1,161 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ACCOUNT_ID: "600775874112"
+  ECR_REPO: probate-scraper/scraper
+  STACK_NAME: probate-scraper-collin-tx
+
+jobs:
+  # ── Unit tests (must pass before deploy) ───────────────────────────────────
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pipenv
+        run: pip install pipenv
+
+      - name: Install dependencies
+        run: pipenv install --dev
+
+      - name: Run unit tests
+        run: pipenv run python -m unittest discover -s tests -p "test_*.py" -v
+
+  # ── Deploy to AWS ───────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to AWS
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production   # optional: add required-reviewers in GitHub settings
+    outputs:
+      api_endpoint: ${{ steps.stack-outputs.outputs.endpoint }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── AWS credentials ────────────────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── Docker — build & push scraper image ───────────────────────────────
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push scraper Docker image
+        env:
+          ECR_URI: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+        run: |
+          docker build -t $ECR_URI:latest src/scraper/
+          docker push $ECR_URI:latest
+
+      # ── Discover default VPC + public subnets ─────────────────────────────
+      - name: Discover VPC and subnets
+        id: vpc
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters Name=is-default,Values=true \
+            --query 'Vpcs[0].VpcId' \
+            --output text)
+
+          SUBNET_IDS=$(aws ec2 describe-subnets \
+            --filters Name=vpc-id,Values=$VPC_ID \
+            --query 'Subnets[*].SubnetId' \
+            --output text | tr '\t' ',')
+
+          echo "vpc_id=$VPC_ID"       >> $GITHUB_OUTPUT
+          echo "subnet_ids=$SUBNET_IDS" >> $GITHUB_OUTPUT
+          echo "Discovered VPC: $VPC_ID"
+          echo "Discovered subnets: $SUBNET_IDS"
+
+      # ── SAM build + deploy ─────────────────────────────────────────────────
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: SAM build
+        run: sam build --parallel
+
+      - name: SAM deploy
+        env:
+          VPC_ID: ${{ steps.vpc.outputs.vpc_id }}
+          SUBNET_IDS: ${{ steps.vpc.outputs.subnet_ids }}
+          ECR_URI: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "VpcId=$VPC_ID \
+               SubnetIds=$SUBNET_IDS \
+               ScraperImageUri=$ECR_URI:latest \
+               ScrapeSchedule=cron(0 6 * * ? *) \
+               StripeSecretKey=$STRIPE_SECRET_KEY \
+               StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET"
+
+      # ── Retrieve stack outputs ─────────────────────────────────────────────
+      - name: Get stack outputs
+        id: stack-outputs
+        run: |
+          ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+            --output text)
+          echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
+          echo "API endpoint: $ENDPOINT"
+
+      - name: Get API key
+        id: api-key
+        run: |
+          # Find the physical resource ID of the SAM-generated API key
+          KEY_ID=$(aws cloudformation describe-stack-resources \
+            --stack-name $STACK_NAME \
+            --query 'StackResources[?ResourceType==`AWS::ApiGateway::ApiKey`].PhysicalResourceId | [0]' \
+            --output text)
+
+          KEY_VALUE=$(aws apigateway get-api-key \
+            --api-key "$KEY_ID" \
+            --include-value \
+            --query 'value' \
+            --output text)
+
+          # Mask the key so it never appears in logs
+          echo "::add-mask::$KEY_VALUE"
+          echo "api_key=$KEY_VALUE" >> $GITHUB_OUTPUT
+
+      # ── Python env for smoke tests ─────────────────────────────────────────
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pipenv
+        run: pip install pipenv
+
+      - name: Install dependencies
+        run: pipenv install
+
+      # ── Smoke tests ────────────────────────────────────────────────────────
+      - name: Run smoke tests
+        env:
+          SMOKE_BASE_URL: ${{ steps.stack-outputs.outputs.endpoint }}
+          SMOKE_API_KEY: ${{ steps.api-key.outputs.api_key }}
+        run: pipenv run python scripts/smoke_test.py
