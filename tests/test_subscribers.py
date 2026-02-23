@@ -50,6 +50,7 @@ _mock_tracer.capture_method = lambda f: f
 with patch("boto3.resource", return_value=MagicMock()), \
      patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
     import app  # noqa: E402
+    import db   # noqa: E402
 
 
 class MockContext:
@@ -93,7 +94,7 @@ class TestListSubscribers(unittest.TestCase):
 
     def setUp(self):
         self.mock_sub_table = MagicMock()
-        app.subscribers_table = self.mock_sub_table
+        db.subscribers_table = self.mock_sub_table
         # Return copies to avoid set mutation issues across tests
         self.mock_sub_table.scan.return_value = {"Items": [copy.deepcopy(s) for s in MOCK_SUBSCRIBERS]}
 
@@ -127,8 +128,8 @@ class TestCreateSubscriber(unittest.TestCase):
     def setUp(self):
         self.mock_sub_table = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.subscribers_table = self.mock_sub_table
-        app.locations_table   = self.mock_loc_table
+        db.subscribers_table = self.mock_sub_table
+        db.locations_table   = self.mock_loc_table
         self.mock_loc_table.get_item.return_value = {"Item": COLLIN_TX}
         self.mock_sub_table.put_item.return_value = {}
 
@@ -190,7 +191,7 @@ class TestGetSubscriber(unittest.TestCase):
 
     def setUp(self):
         self.mock_sub_table = MagicMock()
-        app.subscribers_table = self.mock_sub_table
+        db.subscribers_table = self.mock_sub_table
 
     def test_returns_200_for_existing_subscriber(self):
         self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
@@ -219,8 +220,8 @@ class TestUpdateSubscriber(unittest.TestCase):
     def setUp(self):
         self.mock_sub_table = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.subscribers_table = self.mock_sub_table
-        app.locations_table   = self.mock_loc_table
+        db.subscribers_table = self.mock_sub_table
+        db.locations_table   = self.mock_loc_table
         self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
         self.mock_loc_table.get_item.return_value = {"Item": COLLIN_TX}
 
@@ -259,7 +260,7 @@ class TestDeleteSubscriber(unittest.TestCase):
 
     def setUp(self):
         self.mock_sub_table = MagicMock()
-        app.subscribers_table = self.mock_sub_table
+        db.subscribers_table = self.mock_sub_table
         self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
         deleted = copy.deepcopy(ALICE)
         deleted["status"] = "inactive"
@@ -290,7 +291,7 @@ class TestStripeWebhook(unittest.TestCase):
 
     def setUp(self):
         self.mock_sub_table = MagicMock()
-        app.subscribers_table = self.mock_sub_table
+        db.subscribers_table = self.mock_sub_table
 
     def _webhook(self, event_type: str, customer_id: str, stripe_status: str = "active"):
         """Helper to post a Stripe-style webhook event (no signature verification in tests)."""

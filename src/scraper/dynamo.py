@@ -68,6 +68,8 @@ def _to_dynamo_item(record: dict, scrape_run_id: str, location_code: str) -> dic
         "recorded_date":     normalize_date(record.get("recorded_date", "")),
         "book_volume_page":  record.get("book_volume_page", "N/A"),
         "legal_description": record.get("legal_description", "N/A"),
+        # Document PDF/image link extracted by the scraper (may be empty string)
+        "pdf_url":           record.get("pdf_url") or "",
         # FK to locations table
         "location_code":     location_code,
         # Numeric metadata (store as strings to avoid DDB number precision issues)
