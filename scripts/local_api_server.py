@@ -1,5 +1,6 @@
 """
-local_api_server.py — run the ApiFunction Lambda handler as a local HTTP server.
+local_api_server.py — run the ApiFunction and TriggerFunction Lambda handlers
+as a single local HTTP server.
 
 Usage:
     pipenv run python scripts/local_api_server.py [port]
@@ -7,17 +8,19 @@ Usage:
 Defaults to port 3000. Connects to DynamoDB Local at http://localhost:8000.
 
 Supported routes:
-  GET  /real-estate/probate-leads/{location_path}/leads
-  GET  /real-estate/probate-leads/locations
-  GET  /real-estate/probate-leads/locations/{location_code}
-  GET  /real-estate/probate-leads/subscribers
-  POST /real-estate/probate-leads/subscribers
-  GET  /real-estate/probate-leads/subscribers/{subscriber_id}
-  PATCH /real-estate/probate-leads/subscribers/{subscriber_id}
+  GET    /real-estate/probate-leads/{location_path}/leads
+  GET    /real-estate/probate-leads/locations
+  GET    /real-estate/probate-leads/locations/{location_code}
+  GET    /real-estate/probate-leads/subscribers
+  POST   /real-estate/probate-leads/subscribers
+  GET    /real-estate/probate-leads/subscribers/{subscriber_id}
+  PATCH  /real-estate/probate-leads/subscribers/{subscriber_id}
   DELETE /real-estate/probate-leads/subscribers/{subscriber_id}
-  POST /real-estate/probate-leads/stripe/webhook
+  POST   /real-estate/probate-leads/stripe/webhook
+  POST   /real-estate/probate-leads/{location_path}/update   (ECS stubbed locally)
 """
 
+import importlib.util
 import json
 import os
 import sys
@@ -40,12 +43,18 @@ os.environ.setdefault("STRIPE_WEBHOOK_SECRET",   "")
 os.environ.setdefault("POWERTOOLS_TRACE_DISABLED", "true")
 os.environ.setdefault("LOG_LEVEL",               "INFO")
 
+# Dummy ECS env vars so the TriggerFunction handler can be imported
+os.environ.setdefault("ECS_CLUSTER_ARN",     "arn:aws:ecs:us-east-1:000000000000:cluster/local")
+os.environ.setdefault("TASK_DEFINITION_ARN", "arn:aws:ecs:us-east-1:000000000000:task-definition/local:1")
+os.environ.setdefault("TASK_SUBNETS",        "subnet-00000000000000000")
+os.environ.setdefault("TASK_SECURITY_GROUP", "sg-00000000000000000")
+
 # ── mock Tracer (aws-xray-sdk not needed locally) ─────────────────────────────
 _mock_tracer = MagicMock()
 _mock_tracer.capture_lambda_handler = lambda f: f
 _mock_tracer.capture_method = lambda f: f
 
-# ── load the Lambda handler ───────────────────────────────────────────────────
+# ── load the ApiFunction handler ──────────────────────────────────────────────
 # Add src/api/ to sys.path so that app.py and all its sub-modules
 # (db, models, utils, routers/*) are importable as top-level packages.
 _src_api_path = os.path.join(os.path.dirname(__file__), "..", "src", "api")
@@ -54,7 +63,25 @@ sys.path.insert(0, os.path.abspath(_src_api_path))
 with patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
     import app as _api_app  # noqa: E402
 
-handler_fn = _api_app.handler
+api_handler = _api_app.handler
+
+# ── load the TriggerFunction handler (with ECS stubbed) ───────────────────────
+# The trigger handler creates `ecs = boto3.client("ecs")` at module load time.
+# We intercept that with a mock so no real ECS calls are made locally.
+_mock_ecs = MagicMock()
+_mock_ecs.run_task.return_value = {
+    "tasks": [{"taskArn": "arn:aws:ecs:us-east-1:000000000000:task/local-stub"}],
+    "failures": [],
+}
+
+_trigger_file = os.path.join(os.path.dirname(__file__), "..", "src", "trigger", "app.py")
+with patch("boto3.client", return_value=_mock_ecs):
+    _tspec = importlib.util.spec_from_file_location("_trigger_app", _trigger_file)
+    _trigger_mod = importlib.util.module_from_spec(_tspec)
+    _tspec.loader.exec_module(_trigger_mod)
+
+trigger_handler = _trigger_mod.handler
+
 
 # ── mock Lambda context ────────────────────────────────────────────────────────
 class _LocalContext:
@@ -94,6 +121,10 @@ class LambdaHandler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[1] == "leads":
             return {"location_path": parts[0]}
 
+        # /{location_path}/update
+        if len(parts) == 2 and parts[1] == "update":
+            return {"location_path": parts[0]}
+
         # /locations/{location_code}
         if len(parts) == 2 and parts[0] == "locations":
             return {"location_code": parts[1]}
@@ -114,12 +145,30 @@ class LambdaHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": f"Not found: {parsed.path}"})
             return
 
+        suffix = parsed.path[len(BASE_PATH):]
+        parts  = [p for p in suffix.split("/") if p]
         qs_raw = parse_qs(parsed.query, keep_blank_values=True)
         qs     = {k: v[0] for k, v in qs_raw.items()}
         body   = self._read_body() if method in ("POST", "PATCH", "PUT") else None
 
+        # POST /{location_path}/update → TriggerFunction (ECS stubbed locally)
+        if method == "POST" and len(parts) == 2 and parts[1] == "update":
+            event  = self._build_event(method, parsed.path, qs, body, dict(self.headers))
+            result = trigger_handler(event, _LocalContext())
+            all_headers = {**result.get("headers", {}), **result.get("multiValueHeaders", {})}
+            body_str = result.get("body", "{}")
+            try:
+                body_obj = json.loads(body_str)
+                # Annotate so callers know this is the local stub
+                body_obj["_local"] = "ECS task was not started — this is a local dev stub"
+            except Exception:
+                body_obj = {"raw": body_str}
+            self._send(result["statusCode"], body_obj, all_headers)
+            return
+
+        # All other routes → ApiFunction
         event  = self._build_event(method, parsed.path, qs, body, dict(self.headers))
-        result = handler_fn(event, _LocalContext())
+        result = api_handler(event, _LocalContext())
 
         all_headers = {**result.get("headers", {}), **result.get("multiValueHeaders", {})}
         body_str    = result.get("body", "{}")
@@ -161,5 +210,6 @@ if __name__ == "__main__":
     print(f"    GET  http://localhost:{port}{BASE_PATH}/locations")
     print(f"    GET  http://localhost:{port}{BASE_PATH}/collin-tx/leads?from_date=2026-01-01")
     print(f"    POST http://localhost:{port}{BASE_PATH}/subscribers")
+    print(f"    POST http://localhost:{port}{BASE_PATH}/collin-tx/update   (ECS stubbed)")
     print("  Ctrl+C to stop\n")
     HTTPServer(("", port), LambdaHandler).serve_forever()
