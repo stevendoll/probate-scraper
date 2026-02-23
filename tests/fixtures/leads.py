@@ -16,6 +16,7 @@ MOCK_LEADS = [
         "extracted_at": "2026-01-29T20:00:15.989922",
         "processed_at": "2026-02-20T14:09:56+00:00",
         "scrape_run_id": "seed-local",
+        "pdf_url": "https://collin.tx.publicsearch.us/doc/2026000009280",
     },
     {
         "doc_number": "2026000009450",
@@ -32,6 +33,7 @@ MOCK_LEADS = [
         "extracted_at": "2026-01-29T20:00:15.944810",
         "processed_at": "2026-02-20T14:09:56+00:00",
         "scrape_run_id": "seed-local",
+        "pdf_url": "https://collin.tx.publicsearch.us/doc/2026000009450",
     },
     {
         "doc_number": "2026000008491",
@@ -48,6 +50,7 @@ MOCK_LEADS = [
         "extracted_at": "2026-01-29T20:00:16.036722",
         "processed_at": "2026-02-20T14:09:56+00:00",
         "scrape_run_id": "seed-local",
+        "pdf_url": "https://collin.tx.publicsearch.us/doc/2026000008491",
     },
     {
         "doc_number": "2026000007100",
@@ -64,6 +67,7 @@ MOCK_LEADS = [
         "extracted_at": "2026-01-29T20:00:16.100000",
         "processed_at": "2026-02-20T14:09:56+00:00",
         "scrape_run_id": "seed-local",
+        "pdf_url": "",
     },
     {
         "doc_number": "2026000006200",
@@ -80,6 +84,7 @@ MOCK_LEADS = [
         "extracted_at": "2026-01-29T20:00:16.200000",
         "processed_at": "2026-02-20T14:09:56+00:00",
         "scrape_run_id": "seed-local",
+        "pdf_url": "",
     },
 ]
 

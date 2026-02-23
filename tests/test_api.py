@@ -44,6 +44,7 @@ _mock_tracer.capture_method = lambda f: f
 with patch("boto3.resource", return_value=MagicMock()), \
      patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
     import app  # noqa: E402
+    import db   # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +103,8 @@ class TestHandlerDateRangeQuery(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
 
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": MOCK_LEADS[:3]}
@@ -174,7 +175,7 @@ class TestHandlerLocationNotFound(unittest.TestCase):
 
     def setUp(self):
         self.mock_loc_table = MagicMock()
-        app.locations_table = self.mock_loc_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": []}
 
     def test_returns_404(self):
@@ -198,8 +199,8 @@ class TestHandlerToDateOnly(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": MOCK_LEADS[:2]}
 
@@ -223,8 +224,8 @@ class TestHandlerLimit(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": []}
 
@@ -255,8 +256,8 @@ class TestHandlerDateValidation(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
 
     def test_invalid_from_date_returns_400(self):
@@ -281,8 +282,8 @@ class TestHandlerPagination(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
 
     def test_next_key_present_when_more_pages(self):
@@ -325,8 +326,8 @@ class TestHandlerDocType(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": []}
 
@@ -345,8 +346,8 @@ class TestHandlerErrors(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        app.table           = self.mock_table
-        app.locations_table = self.mock_loc_table
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
 
     def test_dynamo_query_exception_returns_500(self):
@@ -422,8 +423,8 @@ class TestHelpers(unittest.TestCase):
         """Resolver returns a well-formed Lambda proxy response."""
         mock_table     = MagicMock()
         mock_loc_table = MagicMock()
-        app.table           = mock_table
-        app.locations_table = mock_loc_table
+        db.table           = mock_table
+        db.locations_table = mock_loc_table
         mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         mock_table.query.return_value     = {"Items": []}
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})

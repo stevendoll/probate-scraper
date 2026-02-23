@@ -18,7 +18,6 @@ Supported routes:
   POST /real-estate/probate-leads/stripe/webhook
 """
 
-import importlib.util
 import json
 import os
 import sys
@@ -47,18 +46,15 @@ _mock_tracer.capture_lambda_handler = lambda f: f
 _mock_tracer.capture_method = lambda f: f
 
 # ── load the Lambda handler ───────────────────────────────────────────────────
+# Add src/api/ to sys.path so that app.py and all its sub-modules
+# (db, models, utils, routers/*) are importable as top-level packages.
 _src_api_path = os.path.join(os.path.dirname(__file__), "..", "src", "api")
-# Ensure stripe_helpers.py is importable from the same package
-sys.path.insert(0, _src_api_path)
-
-_api_file = os.path.join(_src_api_path, "app.py")
+sys.path.insert(0, os.path.abspath(_src_api_path))
 
 with patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
-    spec = importlib.util.spec_from_file_location("api_app", _api_file)
-    api_app = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(api_app)
+    import app as _api_app  # noqa: E402
 
-handler_fn = api_app.handler
+handler_fn = _api_app.handler
 
 # ── mock Lambda context ────────────────────────────────────────────────────────
 class _LocalContext:

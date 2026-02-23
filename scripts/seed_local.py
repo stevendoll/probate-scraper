@@ -208,6 +208,7 @@ def seed_leads_csv(csv_path: Path):
             "recorded_date":     normalize_date(row.get("recorded_date", "")),
             "book_volume_page":  row.get("book_volume_page", "N/A"),
             "legal_description": row.get("legal_description", "N/A"),
+            "pdf_url":           row.get("pdf_url", ""),
             "location_code":     row.get("location_code", "CollinTx"),
             "record_number":     row.get("record_number", "0"),
             "page_number":       row.get("page_number", "0"),

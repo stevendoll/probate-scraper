@@ -45,6 +45,7 @@ _mock_tracer.capture_method = lambda f: f
 with patch("boto3.resource", return_value=MagicMock()), \
      patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
     import app  # noqa: E402
+    import db   # noqa: E402
 
 
 class MockContext:
@@ -97,7 +98,7 @@ class TestListLocations(unittest.TestCase):
 
     def setUp(self):
         self.mock_loc_table = MagicMock()
-        app.locations_table = self.mock_loc_table
+        db.locations_table = self.mock_loc_table
         self.mock_loc_table.scan.return_value = {"Items": MOCK_LOCATIONS}
 
     def test_returns_200(self):
@@ -141,7 +142,7 @@ class TestGetLocation(unittest.TestCase):
 
     def setUp(self):
         self.mock_loc_table = MagicMock()
-        app.locations_table = self.mock_loc_table
+        db.locations_table = self.mock_loc_table
 
     def test_returns_200_for_existing_location(self):
         self.mock_loc_table.get_item.return_value = {"Item": COLLIN_TX}
