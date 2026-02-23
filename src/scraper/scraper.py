@@ -3,9 +3,10 @@ Collin County probate records scraper.
 Ported from probate-scraper.ipynb — functions kept at same names for traceability.
 Key changes from notebook:
   - initialize_driver() uses CHROMEDRIVER_PATH env var (not webdriver-manager)
-  - scrape_all() replaces scrape_collin_county_records(): no max_pages cap,
-    writes to DynamoDB after each page (resilient to crashes),
-    accepts location_code so records are tagged with their source location.
+  - scrape_all() scrapes only the first page (most-recent records, sorted desc).
+  - extract_page_data() adds pdf_url to every record:
+      first checks for an inline document link in the row;
+      if absent, clicks the row to open the detail panel and extracts it there.
 """
 
 import os
@@ -16,6 +17,7 @@ from datetime import datetime
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
@@ -49,7 +51,34 @@ SEARCH_PARAMS = {
 }
 
 PAGE_LOAD_WAIT = 10   # seconds to sleep after driver.get()
-DELAY_BETWEEN_PAGES = int(os.environ.get("DELAY_BETWEEN_PAGES", "3"))
+DETAIL_WAIT    = 3    # seconds to wait for the detail panel to open
+
+# CSS selectors tried in order when looking for a document link directly in the row
+ROW_PDF_SELECTORS = [
+    'a[href*="/doc/"]',
+    'a[href*=".pdf"]',
+    'a[href*="/document/"]',
+    'a[href*="/images/"]',
+]
+
+# CSS selectors tried in order to locate the detail panel after clicking a row
+DETAIL_PANEL_SELECTORS = [
+    ".document-detail",
+    ".record-detail",
+    ".doc-viewer",
+    ".document-viewer",
+    '[class*="document-detail"]',
+    '[class*="record-detail"]',
+]
+
+# CSS selectors tried in order to find the document link inside the detail panel
+PANEL_PDF_SELECTORS = [
+    'a[href*="/doc/"]',
+    'a[href*=".pdf"]',
+    'a[href*="/document/"]',
+    'a[href*="/images/"]',
+    ".document-pdf-link",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -113,50 +142,7 @@ def load_page(driver, url, wait_time=PAGE_LOAD_WAIT):
 
 
 # ---------------------------------------------------------------------------
-# Cell 5: Pagination sentinel
-# ---------------------------------------------------------------------------
-
-def has_more_pages(driver, current_offset, limit=50):
-    """
-    Return True if there are more pages beyond current_offset.
-    Primary: count records on the current page; if < limit, we're at the end.
-    Secondary: look for explicit 'no results' DOM indicators.
-    """
-    record_selectors = [
-        ".record", ".result-item", ".search-result",
-        "tr.record-row", ".data-row", "[data-record]", ".result",
-    ]
-    actual_count = 0
-    for sel in record_selectors:
-        try:
-            elems = driver.find_elements(By.CSS_SELECTOR, sel)
-            if elems:
-                actual_count = len(elems)
-                break
-        except Exception:
-            continue
-
-    if actual_count < limit:
-        log.info("Found %d records (< limit %d) — end of results", actual_count, limit)
-        return False
-
-    no_results_selectors = [
-        ".no-results", ".no-more-results", ".end-of-results", "[data-no-results]",
-    ]
-    for sel in no_results_selectors:
-        try:
-            elem = driver.find_element(By.CSS_SELECTOR, sel)
-            if elem.is_displayed():
-                log.info("'No more results' indicator found")
-                return False
-        except Exception:
-            continue
-
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Cell 6: Data extraction
+# Cell 5: Data extraction helpers
 # ---------------------------------------------------------------------------
 
 def get_total_results(driver):
@@ -191,10 +177,90 @@ def get_total_results(driver):
         return None
 
 
+def get_pdf_url_from_row(row) -> str | None:
+    """
+    Return the document URL if a link is directly present in the row, else None.
+    Tries ROW_PDF_SELECTORS in order.
+    """
+    for sel in ROW_PDF_SELECTORS:
+        try:
+            link = row.find_element(By.CSS_SELECTOR, sel)
+            href = link.get_attribute("href")
+            if href:
+                log.debug("Inline PDF link found (%s): %s", sel, href)
+                return href
+        except Exception:
+            continue
+    return None
+
+
+def get_pdf_url_by_clicking(driver, row) -> str | None:
+    """
+    Click the row to open its detail panel, extract the document URL,
+    then dismiss the panel with Escape. Returns the URL or None on failure.
+    """
+    try:
+        row.click()
+        time.sleep(DETAIL_WAIT)
+
+        # Find the detail panel
+        panel = None
+        for sel in DETAIL_PANEL_SELECTORS:
+            try:
+                panel = WebDriverWait(driver, 5).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, sel))
+                )
+                log.debug("Detail panel found (%s)", sel)
+                break
+            except Exception:
+                continue
+
+        if panel is None:
+            log.warning("No detail panel found after clicking row")
+            return None
+
+        # Find the document link inside the panel
+        for sel in PANEL_PDF_SELECTORS:
+            try:
+                link = panel.find_element(By.CSS_SELECTOR, sel)
+                href = link.get_attribute("href")
+                if href:
+                    log.debug("PDF link found in panel (%s): %s", sel, href)
+                    # Dismiss the panel
+                    try:
+                        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                        time.sleep(0.5)
+                    except Exception:
+                        pass
+                    return href
+            except Exception:
+                continue
+
+        log.warning("No document link found in detail panel")
+        return None
+
+    except Exception as exc:
+        log.warning("get_pdf_url_by_clicking error: %s", exc)
+        return None
+
+
+def get_pdf_url(driver, row) -> str | None:
+    """
+    Get the PDF/document URL for a result row.
+    First checks for an inline link in the row; falls back to clicking the row
+    to open the detail panel.
+    """
+    url = get_pdf_url_from_row(row)
+    if url:
+        return url
+    log.debug("No inline PDF link — clicking row to open detail panel")
+    return get_pdf_url_by_clicking(driver, row)
+
+
 def extract_page_data(driver):
     """
     Extract all record rows from the current page.
-    Returns a list of dicts with 9 fields (grantor … legal_description + metadata).
+    Returns a list of dicts with fields including pdf_url.
     Skips the first two table rows (header + empty spacer).
     Continues past individual row errors rather than aborting the whole page.
     """
@@ -224,6 +290,7 @@ def extract_page_data(driver):
                     "doc_number":        _text('td.col-7[column="[object Object]"] span'),
                     "book_volume_page":  _text('td.col-8[column="[object Object]"] span'),
                     "legal_description": _text("td.col-9"),
+                    "pdf_url":           get_pdf_url(driver, row),
                     "record_number":     i,
                     "extracted_at":      datetime.utcnow().isoformat(),
                 }
@@ -240,64 +307,50 @@ def extract_page_data(driver):
 
 
 # ---------------------------------------------------------------------------
-# Main scrape loop (replaces scrape_collin_county_records)
+# Main scrape entry point
 # ---------------------------------------------------------------------------
 
 def scrape_all(scrape_run_id: str, location_code: str):
     """
-    Scrape every page of results, writing to DynamoDB after each page.
-    No max_pages cap — runs until has_more_pages() returns False.
+    Scrape the first page of results (most recent, sorted descending) and
+    write records to DynamoDB.  Each record includes a pdf_url field — sourced
+    directly from the row link if present, otherwise by clicking the row to
+    open the detail panel.
 
     Args:
         scrape_run_id:  Unique identifier for this run (injected by ECS or caller).
         location_code:  FK into the locations table (e.g. "CollinTx").
     """
     table_name = os.environ["DYNAMO_TABLE_NAME"]
-    limit = int(SEARCH_PARAMS["limit"])
-    current_offset = 0
-    page_num = 1
-    total_written = 0
 
     driver = initialize_driver()
     try:
-        while True:
-            log.info("=== Page %d (offset %d) ===", page_num, current_offset)
-            url = build_search_url(SEARCH_PARAMS, offset=current_offset)
+        url = build_search_url(SEARCH_PARAMS, offset=0)
+        log.info("=== Scraping first page ===")
 
-            if not load_page(driver, url):
-                log.error("Failed to load page %d — stopping", page_num)
-                break
+        if not load_page(driver, url):
+            log.error("Failed to load first page — aborting")
+            return 0
 
-            page_records = extract_page_data(driver)
+        page_records = extract_page_data(driver)
 
-            if page_records:
-                for rec in page_records:
-                    rec["page_number"] = page_num
-                    rec["offset"] = current_offset
+        if not page_records:
+            log.warning("No records found on first page")
+            return 0
 
-                written = dynamo.write_records(
-                    page_records, table_name, scrape_run_id, location_code
-                )
-                total_written += written
-                log.info("Wrote %d records (total so far: %d)", written, total_written)
-            else:
-                log.warning("No records on page %d — stopping", page_num)
-                break
+        for rec in page_records:
+            rec["page_number"] = 1
+            rec["offset"] = 0
 
-            if not has_more_pages(driver, current_offset, limit):
-                log.info("No more pages — scrape complete")
-                break
-
-            current_offset += limit
-            page_num += 1
-            time.sleep(DELAY_BETWEEN_PAGES)
+        written = dynamo.write_records(
+            page_records, table_name, scrape_run_id, location_code
+        )
+        log.info(
+            "Scrape finished: %d records written (location=%s)",
+            written, location_code,
+        )
+        return written
 
     finally:
         driver.quit()
         log.info("WebDriver closed")
-
-    log.info(
-        "Scrape finished: %d total records written across %d pages (location=%s)",
-        total_written, page_num, location_code,
-    )
-    return total_written

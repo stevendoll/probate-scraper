@@ -125,13 +125,13 @@ logs-api:
 	sam logs -n ApiFunction --stack-name $(STACK_NAME) --tail
 
 get-api-key:
-	@KEY_ID=$$(aws apigateway get-api-keys \
-		--name-query "probate-leads-api" \
-		--include-values \
-		--query 'items[0].id' \
+	@KEY_ID=$$(aws cloudformation describe-stack-resources \
+		--stack-name $(STACK_NAME) \
+		--region $(REGION) \
+		--query 'StackResources[?ResourceType==`AWS::ApiGateway::ApiKey`].PhysicalResourceId | [0]' \
 		--output text); \
 	aws apigateway get-api-key --api-key $$KEY_ID --include-value \
-		--query 'value' --output text
+		--query 'value' --output text --region $(REGION)
 
 invoke-trigger:
 	sam local invoke TriggerFunction \
