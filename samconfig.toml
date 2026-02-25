@@ -30,4 +30,10 @@ parameter_overrides = """
   SubnetIds=subnet-REPLACE_ME_1,subnet-REPLACE_ME_2
   ScraperImageUri=600775874112.dkr.ecr.us-east-1.amazonaws.com/probate-scraper/scraper:latest
   ScrapeSchedule=cron(0 6 * * ? *)
+  ScraperUsername=REPLACE_ME
+  ScraperPassword=REPLACE_ME
 """
+# ── Sensitive values (keep out of version control) ────────────────────────
+# ScraperPassword has NoEcho=true in template.yaml so it won't appear in the
+# CloudFormation console.  Alternatively, store it in SSM Parameter Store and
+# reference it here as:  ScraperPassword=/probate-scraper/password

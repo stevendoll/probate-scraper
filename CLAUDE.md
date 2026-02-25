@@ -93,17 +93,38 @@ POST /{location_path}/update              trigger Fargate scrape (TriggerFunctio
 | `LOCATION_CODE` | scraper | `CollinTx` | injected by ECS task override |
 | `STRIPE_SECRET_KEY` | api | `""` | |
 | `STRIPE_WEBHOOK_SECRET` | api | `""` | empty = skip signature check |
+| `SCRAPER_USERNAME` | scraper | `""` | login email; leave blank to skip login |
+| `SCRAPER_PASSWORD` | scraper | `""` | login password |
+| `DOCUMENTS_BUCKET` | scraper | `""` | S3 bucket for document archiving; leave blank to skip |
+| `DOWNLOAD_DIR` | scraper | `/tmp/scraper_downloads` | local dir for Chrome downloads |
 | `CHROME_BIN` | scraper | `/usr/bin/chromium` | set in Dockerfile |
 | `CHROMEDRIVER_PATH` | scraper | `/usr/bin/chromedriver` | set in Dockerfile |
 
-To run the scraper locally (outside Docker), override the Chrome paths:
+To run the scraper locally (outside Docker), first start DynamoDB Local, then:
 ```bash
+make local-db-start   # start DynamoDB Local (Docker required)
+make local-db-seed    # create tables + seed CollinTx location (first time only)
+
 CHROMEDRIVER_PATH=/opt/homebrew/bin/chromedriver \
 CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
 DYNAMO_TABLE_NAME=leads \
+LOCATIONS_TABLE_NAME=locations \
 LOCATION_CODE=CollinTx \
+SCRAPER_USERNAME=your@email.com \
+SCRAPER_PASSWORD='your-password' \
 pipenv run python src/scraper/app.py
 ```
+
+> Single-quote the password so shell special characters (e.g. `!`) are not interpreted.
+> Omit `SCRAPER_USERNAME` / `SCRAPER_PASSWORD` entirely to skip login (public access only).
+
+**Deploying with credentials** — add to `samconfig.toml` `parameter_overrides`:
+```
+ScraperUsername=your@email.com
+ScraperPassword=your-password
+```
+`ScraperPassword` has `NoEcho: true` so it won't appear in the CloudFormation console.
+Alternatively use an SSM reference: `ScraperPassword=/probate-scraper/password`
 
 ## Adding a new county
 
