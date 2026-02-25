@@ -255,5 +255,110 @@ class TestFetchAndUpload(unittest.TestCase):
         self.assertEqual(call_kwargs["ContentType"], "image/png")
 
 
+# ---------------------------------------------------------------------------
+# upload_local_file
+# ---------------------------------------------------------------------------
+
+class TestUploadLocalFile(unittest.TestCase):
+
+    def setUp(self):
+        self._s3_client = MagicMock()
+        s3_mod._s3 = self._s3_client
+        sys.modules["s3"] = s3_mod
+
+    def test_returns_s3_uri_on_success(self):
+        pdf_bytes = b"%PDF-1.4 test content"
+        with patch("builtins.open", unittest.mock.mock_open(read_data=pdf_bytes)):
+            with patch("s3.os.path.isfile", return_value=True):
+                result = s3_mod.upload_local_file(
+                    local_path="/tmp/20240001234.pdf",
+                    bucket="my-bucket",
+                    location_code="CollinTx",
+                    doc_number="20240001234",
+                )
+        self.assertEqual(result, "s3://my-bucket/documents/CollinTx/20240001234.pdf")
+        self._s3_client.put_object.assert_called_once()
+
+    def test_uses_correct_key(self):
+        with patch("builtins.open", unittest.mock.mock_open(read_data=b"data")):
+            with patch("s3.os.path.isfile", return_value=True):
+                s3_mod.upload_local_file(
+                    local_path="/tmp/DOC-999.tif",
+                    bucket="my-bucket",
+                    location_code="CollinTx",
+                    doc_number="DOC-999",
+                )
+        call_kwargs = self._s3_client.put_object.call_args[1]
+        self.assertEqual(call_kwargs["Key"], "documents/CollinTx/DOC-999.tif")
+
+    def test_returns_none_when_bucket_empty(self):
+        result = s3_mod.upload_local_file(
+            local_path="/tmp/file.pdf",
+            bucket="",
+            location_code="CollinTx",
+            doc_number="123",
+        )
+        self.assertIsNone(result)
+        self._s3_client.put_object.assert_not_called()
+
+    def test_returns_none_when_file_not_found(self):
+        with patch("s3.os.path.isfile", return_value=False):
+            result = s3_mod.upload_local_file(
+                local_path="/tmp/nonexistent.pdf",
+                bucket="my-bucket",
+                location_code="CollinTx",
+                doc_number="ghost",
+            )
+        self.assertIsNone(result)
+        self._s3_client.put_object.assert_not_called()
+
+    def test_returns_none_on_s3_upload_error(self):
+        self._s3_client.put_object.side_effect = Exception("S3 unavailable")
+        with patch("builtins.open", unittest.mock.mock_open(read_data=b"data")):
+            with patch("s3.os.path.isfile", return_value=True):
+                result = s3_mod.upload_local_file(
+                    local_path="/tmp/file.pdf",
+                    bucket="my-bucket",
+                    location_code="CollinTx",
+                    doc_number="err",
+                )
+        self.assertIsNone(result)
+
+    def test_guesses_content_type_from_extension(self):
+        with patch("builtins.open", unittest.mock.mock_open(read_data=b"data")):
+            with patch("s3.os.path.isfile", return_value=True):
+                s3_mod.upload_local_file(
+                    local_path="/tmp/image.png",
+                    bucket="my-bucket",
+                    location_code="CollinTx",
+                    doc_number="imgdoc",
+                )
+        call_kwargs = self._s3_client.put_object.call_args[1]
+        self.assertEqual(call_kwargs["ContentType"], "image/png")
+
+    def test_defaults_content_type_to_octet_stream_for_unknown_extension(self):
+        with patch("builtins.open", unittest.mock.mock_open(read_data=b"data")):
+            with patch("s3.os.path.isfile", return_value=True):
+                s3_mod.upload_local_file(
+                    local_path="/tmp/file.xyz",
+                    bucket="my-bucket",
+                    location_code="CollinTx",
+                    doc_number="unk",
+                )
+        call_kwargs = self._s3_client.put_object.call_args[1]
+        self.assertEqual(call_kwargs["ContentType"], "application/octet-stream")
+
+    def test_uses_bin_extension_when_no_extension_in_path(self):
+        with patch("builtins.open", unittest.mock.mock_open(read_data=b"data")):
+            with patch("s3.os.path.isfile", return_value=True):
+                result = s3_mod.upload_local_file(
+                    local_path="/tmp/nodotfile",
+                    bucket="my-bucket",
+                    location_code="CollinTx",
+                    doc_number="noext",
+                )
+        self.assertIn(".bin", result)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -70,6 +70,8 @@ def _to_dynamo_item(record: dict, scrape_run_id: str, location_code: str) -> dic
         "legal_description": record.get("legal_description", "N/A"),
         # Document PDF/image link extracted by the scraper (may be empty string)
         "pdf_url":           record.get("pdf_url") or "",
+        # Local filesystem path written by Chrome's Download button (ephemeral on Fargate)
+        "doc_local_path":    record.get("doc_local_path") or "",
         # S3 URI of the uploaded document copy, e.g. s3://bucket/documents/CollinTx/123.pdf
         "doc_s3_uri":        record.get("doc_s3_uri") or "",
         # FK to locations table

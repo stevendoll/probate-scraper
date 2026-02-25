@@ -41,6 +41,19 @@ Parameters:
     NoEcho: true
     Description: Stripe webhook signing secret (whsec_...)
 
+  ScraperUsername:
+    Type: String
+    Default: ""
+    Description: >
+      Login email / username for the county search portal.
+      Leave blank to skip authentication (public access only).
+
+  ScraperPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Login password for the county search portal.
+
   DocumentsBucketName:
     Type: String
     Default: ""
@@ -294,6 +307,10 @@ Resources:
               Value: CollinTx
             - Name: DOCUMENTS_BUCKET
               Value: !Ref DocumentsBucket
+            - Name: SCRAPER_USERNAME
+              Value: !Ref ScraperUsername
+            - Name: SCRAPER_PASSWORD
+              Value: !Ref ScraperPassword
           LogConfiguration:
             LogDriver: awslogs
             Options:

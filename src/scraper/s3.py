@@ -3,6 +3,7 @@ S3 helpers for the probate scraper.
 
 Responsibilities:
   - doc_key(): build a deterministic S3 object key for a scraped document.
+  - upload_local_file(): upload a file already on the local filesystem to S3.
   - fetch_and_upload(): download a document URL (honouring the Selenium session
     cookies for sites that require authentication) and upload it to S3.
     Returns the S3 URI on success or None on failure.
@@ -91,6 +92,52 @@ def doc_key(location_code: str, doc_number: str, ext: str = ".pdf") -> str:
     """
     safe_doc = doc_number.replace("/", "-").replace(" ", "_")
     return f"documents/{location_code}/{safe_doc}{ext}"
+
+
+def upload_local_file(
+    local_path: str,
+    bucket: str,
+    location_code: str,
+    doc_number: str,
+) -> str | None:
+    """
+    Upload a file already present on the local filesystem to *bucket*.
+
+    Uses the file extension of *local_path* to build the S3 key and guesses the
+    Content-Type via stdlib mimetypes.
+
+    Returns ``s3://{bucket}/{key}`` on success, or None on any failure.
+    Returns None immediately when *bucket* is empty or *local_path* is not a file.
+    """
+    if not bucket:
+        return None
+    if not os.path.isfile(local_path):
+        log.warning("upload_local_file: path not found: %s", local_path)
+        return None
+
+    ext = os.path.splitext(local_path)[1].lower() or ".bin"
+    key = doc_key(location_code, doc_number, ext)
+    content_type, _ = mimetypes.guess_type(local_path)
+    content_type = content_type or "application/octet-stream"
+
+    try:
+        with open(local_path, "rb") as fh:
+            _s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=fh.read(),
+                ContentType=content_type,
+            )
+    except Exception as exc:
+        log.warning(
+            "S3 upload of local file failed for %s → s3://%s/%s: %s",
+            local_path, bucket, key, exc,
+        )
+        return None
+
+    s3_uri = f"s3://{bucket}/{key}"
+    log.info("Local file uploaded: %s → %s", local_path, s3_uri)
+    return s3_uri
 
 
 def fetch_and_upload(
