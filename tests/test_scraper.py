@@ -15,9 +15,12 @@ from unittest.mock import MagicMock, patch, call
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "scraper"))
 
-# dynamo is only needed for scrape_all(); mock it before the module loads
+# dynamo and s3 are only needed for scrape_all(); mock them before the module loads
 dynamo_mock = MagicMock()
 sys.modules["dynamo"] = dynamo_mock
+
+s3_mock = MagicMock()
+sys.modules["s3"] = s3_mock
 
 from selenium.webdriver.common.by import By                     # noqa: E402
 from selenium.common.exceptions import NoSuchElementException   # noqa: E402
@@ -464,6 +467,160 @@ class TestScrapeAll(unittest.TestCase):
                 scrape_all("run-005", "CollinTx")
 
         driver.quit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# scrape_all — S3 upload integration
+# ---------------------------------------------------------------------------
+
+class TestScrapeAllWithS3(unittest.TestCase):
+    """
+    Tests for the S3 document-upload path added to scrape_all().
+    Requires DOCUMENTS_BUCKET env var to be set.
+    """
+
+    def setUp(self):
+        # Reset the module-level s3_helper mock before every test so call
+        # counts don't bleed between tests.
+        scraper.s3_helper.reset_mock()
+
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_called_for_each_record_with_pdf_url(
+        self, mock_init, mock_load, mock_extract, mock_dynamo
+    ):
+        """fetch_and_upload should be called once per record that has a pdf_url."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1"},
+            {"doc_number": "DOC2", "pdf_url": "https://site.com/doc/DOC2"},
+        ]
+        mock_dynamo.write_records.return_value = 2
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://bucket/documents/CollinTx/DOC1.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-01", "CollinTx")
+
+        self.assertEqual(scraper.s3_helper.fetch_and_upload.call_count, 2)
+
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_not_called_when_bucket_unset(
+        self, mock_init, mock_load, mock_extract, mock_dynamo
+    ):
+        """No S3 calls should be made when DOCUMENTS_BUCKET is absent."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1"},
+        ]
+        mock_dynamo.write_records.return_value = 1
+
+        env = {"DYNAMO_TABLE_NAME": "leads"}
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("DOCUMENTS_BUCKET", None)
+            scrape_all("run-s3-02", "CollinTx")
+
+        scraper.s3_helper.fetch_and_upload.assert_not_called()
+
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_not_called_when_pdf_url_missing(
+        self, mock_init, mock_load, mock_extract, mock_dynamo
+    ):
+        """Records without a pdf_url should not trigger an S3 upload."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": None},
+        ]
+        mock_dynamo.write_records.return_value = 1
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-03", "CollinTx")
+
+        scraper.s3_helper.fetch_and_upload.assert_not_called()
+
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_s3_uri_stored_on_record(
+        self, mock_init, mock_load, mock_extract, mock_dynamo
+    ):
+        """The S3 URI returned by fetch_and_upload must appear on the written record."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        record = {"doc_number": "DOC99", "pdf_url": "https://site.com/doc/DOC99"}
+        mock_extract.return_value = [record]
+        mock_dynamo.write_records.return_value = 1
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://my-bucket/documents/CollinTx/DOC99.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-04", "CollinTx")
+
+        written = mock_dynamo.write_records.call_args[0][0]
+        self.assertEqual(written[0]["doc_s3_uri"],
+                         "s3://my-bucket/documents/CollinTx/DOC99.pdf")
+
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_session_cookies_passed_to_upload(
+        self, mock_init, mock_load, mock_extract, mock_dynamo
+    ):
+        """Selenium session cookies should be forwarded to fetch_and_upload."""
+        driver = MagicMock()
+        driver.get_cookies.return_value = [{"name": "sess", "value": "tok123"}]
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1"},
+        ]
+        mock_dynamo.write_records.return_value = 1
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://b/k.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-05", "CollinTx")
+
+        _, kwargs = scraper.s3_helper.fetch_and_upload.call_args
+        self.assertEqual(kwargs["selenium_cookies"], [{"name": "sess", "value": "tok123"}])
+
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_failure_does_not_abort_scrape(
+        self, mock_init, mock_load, mock_extract, mock_dynamo
+    ):
+        """A None return from fetch_and_upload (upload failure) must not stop the run."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1"},
+            {"doc_number": "DOC2", "pdf_url": "https://site.com/doc/DOC2"},
+        ]
+        mock_dynamo.write_records.return_value = 2
+        scraper.s3_helper.fetch_and_upload.return_value = None  # all uploads fail
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            result = scrape_all("run-s3-06", "CollinTx")
+
+        # Scrape still completes and writes to DynamoDB
+        self.assertEqual(result, 2)
+        mock_dynamo.write_records.assert_called_once()
 
 
 if __name__ == "__main__":

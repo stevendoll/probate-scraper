@@ -24,6 +24,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
 import dynamo
+import s3 as s3_helper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -312,16 +313,24 @@ def extract_page_data(driver):
 
 def scrape_all(scrape_run_id: str, location_code: str):
     """
-    Scrape the first page of results (most recent, sorted descending) and
-    write records to DynamoDB.  Each record includes a pdf_url field — sourced
-    directly from the row link if present, otherwise by clicking the row to
-    open the detail panel.
+    Scrape the first page of results (most recent, sorted descending),
+    optionally upload each document to S3, then write records to DynamoDB.
+
+    Each record includes:
+      - pdf_url      — remote URL sourced from the row or detail panel
+      - doc_s3_uri   — ``s3://bucket/key`` if DOCUMENTS_BUCKET is configured,
+                       otherwise an empty string
+
+    S3 upload is skipped when DOCUMENTS_BUCKET env var is not set.
+    Session cookies from the Selenium driver are forwarded to the download
+    request so that authenticated documents can be fetched.
 
     Args:
         scrape_run_id:  Unique identifier for this run (injected by ECS or caller).
         location_code:  FK into the locations table (e.g. "CollinTx").
     """
     table_name = os.environ["DYNAMO_TABLE_NAME"]
+    bucket = os.environ.get("DOCUMENTS_BUCKET", "")
 
     driver = initialize_driver()
     try:
@@ -338,9 +347,25 @@ def scrape_all(scrape_run_id: str, location_code: str):
             log.warning("No records found on first page")
             return 0
 
+        # Capture session cookies once; forwarded to S3 upload download requests
+        # so that documents behind auth are accessible.
+        session_cookies = driver.get_cookies() if bucket else []
+
         for rec in page_records:
             rec["page_number"] = 1
             rec["offset"] = 0
+
+            # Upload document to S3 (no-op when bucket is empty)
+            if bucket and rec.get("pdf_url") and rec.get("doc_number"):
+                rec["doc_s3_uri"] = s3_helper.fetch_and_upload(
+                    pdf_url=rec["pdf_url"],
+                    bucket=bucket,
+                    location_code=location_code,
+                    doc_number=rec["doc_number"],
+                    selenium_cookies=session_cookies,
+                )
+            else:
+                rec["doc_s3_uri"] = None
 
         written = dynamo.write_records(
             page_records, table_name, scrape_run_id, location_code
