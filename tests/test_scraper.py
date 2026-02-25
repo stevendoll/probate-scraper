@@ -15,9 +15,12 @@ from unittest.mock import MagicMock, patch, call
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "scraper"))
 
-# dynamo is only needed for scrape_all(); mock it before the module loads
+# dynamo and s3 are only needed for scrape_all(); mock them before the module loads
 dynamo_mock = MagicMock()
 sys.modules["dynamo"] = dynamo_mock
+
+s3_mock = MagicMock()
+sys.modules["s3"] = s3_mock
 
 from selenium.webdriver.common.by import By                     # noqa: E402
 from selenium.common.exceptions import NoSuchElementException   # noqa: E402
@@ -31,6 +34,7 @@ from scraper import (
     extract_page_data,
     get_total_results,
     scrape_all,
+    login,
     SEARCH_PARAMS,
 )
 
@@ -184,7 +188,7 @@ class TestGetPdfUrlFromRow(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# get_pdf_url_by_clicking
+# get_pdf_url_by_clicking  — returns (url, local_path)
 # ---------------------------------------------------------------------------
 
 class TestGetPdfUrlByClicking(unittest.TestCase):
@@ -197,38 +201,41 @@ class TestGetPdfUrlByClicking(unittest.TestCase):
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_returns_href_from_panel(self, mock_sleep, mock_wait):
+    def test_returns_url_from_panel(self, mock_sleep, mock_wait):
         driver = MagicMock()
         row = MagicMock()
         panel = self._make_panel("https://collin.tx.publicsearch.us/doc/99999")
 
         mock_wait.return_value.until.return_value = panel
 
-        result = get_pdf_url_by_clicking(driver, row)
-        self.assertEqual(result, "https://collin.tx.publicsearch.us/doc/99999")
+        url, local_path = get_pdf_url_by_clicking(driver, row)
+        self.assertEqual(url, "https://collin.tx.publicsearch.us/doc/99999")
+        self.assertIsNone(local_path)  # no download_dir given
         row.click.assert_called_once()
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_returns_none_when_panel_not_found(self, mock_sleep, mock_wait):
+    def test_returns_none_url_when_panel_not_found(self, mock_sleep, mock_wait):
         driver = MagicMock()
         row = MagicMock()
         mock_wait.return_value.until.side_effect = Exception("timeout")
 
-        result = get_pdf_url_by_clicking(driver, row)
-        self.assertIsNone(result)
+        url, local_path = get_pdf_url_by_clicking(driver, row)
+        self.assertIsNone(url)
+        self.assertIsNone(local_path)
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_returns_none_when_link_not_in_panel(self, mock_sleep, mock_wait):
+    def test_returns_none_url_when_link_not_in_panel(self, mock_sleep, mock_wait):
         driver = MagicMock()
         row = MagicMock()
         panel = MagicMock()
         panel.find_element.side_effect = NoSuchElementException("not found")
         mock_wait.return_value.until.return_value = panel
 
-        result = get_pdf_url_by_clicking(driver, row)
-        self.assertIsNone(result)
+        url, local_path = get_pdf_url_by_clicking(driver, row)
+        self.assertIsNone(url)
+        self.assertIsNone(local_path)
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
@@ -243,9 +250,45 @@ class TestGetPdfUrlByClicking(unittest.TestCase):
         get_pdf_url_by_clicking(driver, row)
         body.send_keys.assert_called_once()  # Escape key sent
 
+    @patch("scraper._wait_for_new_download")
+    @patch("scraper.os.listdir", return_value=[])
+    @patch("scraper.os.path.isdir", return_value=True)
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_clicks_download_button_when_download_dir_given(
+        self, mock_sleep, mock_wait, mock_isdir, mock_listdir, mock_wait_dl
+    ):
+        """When download_dir is provided and a download button exists, it is clicked."""
+        driver = MagicMock()
+        row = MagicMock()
+
+        # Panel with a download button
+        panel = MagicMock()
+        link = _link("https://collin.tx.publicsearch.us/doc/DLTEST")
+        download_btn = MagicMock()
+        # find_element: first call returns link (PANEL_PDF_SELECTORS), later download button
+        panel.find_element.side_effect = [link, download_btn]
+        mock_wait.return_value.until.return_value = panel
+        mock_wait_dl.return_value = "/tmp/scraper_downloads/20240001234.pdf"
+
+        url, local_path = get_pdf_url_by_clicking(driver, row, download_dir="/tmp/scraper_downloads")
+        self.assertEqual(local_path, "/tmp/scraper_downloads/20240001234.pdf")
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_local_path_none_when_no_download_dir(self, mock_sleep, mock_wait):
+        """Without download_dir the download-button path is skipped."""
+        driver = MagicMock()
+        row = MagicMock()
+        panel = self._make_panel("https://collin.tx.publicsearch.us/doc/NODL")
+        mock_wait.return_value.until.return_value = panel
+
+        url, local_path = get_pdf_url_by_clicking(driver, row, download_dir="")
+        self.assertIsNone(local_path)
+
 
 # ---------------------------------------------------------------------------
-# get_pdf_url  (orchestrator)
+# get_pdf_url  (orchestrator) — returns (url, local_path)
 # ---------------------------------------------------------------------------
 
 class TestGetPdfUrl(unittest.TestCase):
@@ -253,23 +296,37 @@ class TestGetPdfUrl(unittest.TestCase):
     def test_uses_inline_link_when_available(self):
         driver = MagicMock()
         row = _make_row(pdf_href="https://collin.tx.publicsearch.us/doc/INLINE")
-        result = get_pdf_url(driver, row)
-        self.assertEqual(result, "https://collin.tx.publicsearch.us/doc/INLINE")
+        url, local_path = get_pdf_url(driver, row)
+        self.assertEqual(url, "https://collin.tx.publicsearch.us/doc/INLINE")
+        self.assertIsNone(local_path)
 
-    @patch("scraper.get_pdf_url_by_clicking", return_value="https://collin.tx.publicsearch.us/doc/CLICKED")
+    @patch("scraper.get_pdf_url_by_clicking",
+           return_value=("https://collin.tx.publicsearch.us/doc/CLICKED", None))
     def test_falls_back_to_clicking_when_no_inline_link(self, mock_click):
         driver = MagicMock()
         row = _make_row(pdf_href=None)
-        result = get_pdf_url(driver, row)
-        self.assertEqual(result, "https://collin.tx.publicsearch.us/doc/CLICKED")
-        mock_click.assert_called_once_with(driver, row)
+        url, local_path = get_pdf_url(driver, row)
+        self.assertEqual(url, "https://collin.tx.publicsearch.us/doc/CLICKED")
+        self.assertIsNone(local_path)
+        mock_click.assert_called_once_with(driver, row, "")
 
-    @patch("scraper.get_pdf_url_by_clicking", return_value=None)
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
     def test_returns_none_when_both_strategies_fail(self, mock_click):
         driver = MagicMock()
         row = _make_row(pdf_href=None)
-        result = get_pdf_url(driver, row)
-        self.assertIsNone(result)
+        url, local_path = get_pdf_url(driver, row)
+        self.assertIsNone(url)
+        self.assertIsNone(local_path)
+
+    @patch("scraper.get_pdf_url_by_clicking",
+           return_value=("https://collin.tx.publicsearch.us/doc/DL", "/tmp/x.pdf"))
+    def test_propagates_local_path_from_click(self, mock_click):
+        """Local path returned by clicking is propagated through get_pdf_url."""
+        driver = MagicMock()
+        row = _make_row(pdf_href=None)
+        url, local_path = get_pdf_url(driver, row, download_dir="/tmp/dl")
+        self.assertEqual(local_path, "/tmp/x.pdf")
+        mock_click.assert_called_once_with(driver, row, "/tmp/dl")
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +352,7 @@ class TestExtractPageData(unittest.TestCase):
         self.assertEqual(r["pdf_url"],           ROW_WITH_PDF["pdf_url"])
 
     @patch("scraper.get_pdf_url_by_clicking",
-           return_value="https://collin.tx.publicsearch.us/doc/20240005678")
+           return_value=("https://collin.tx.publicsearch.us/doc/20240005678", None))
     def test_extracts_pdf_via_click_when_not_inline(self, mock_click):
         row = _make_row(pdf_href=None)
         driver = _make_driver_with_rows(row)
@@ -316,6 +373,25 @@ class TestExtractPageData(unittest.TestCase):
         self.assertEqual(records[0]["record_number"], 1)
         self.assertIn("extracted_at", records[0])
         self.assertIsNotNone(records[0]["extracted_at"])
+
+    def test_includes_doc_local_path_field(self):
+        """Every record must have a doc_local_path key (empty string when not downloaded)."""
+        row = _make_row(pdf_href="https://collin.tx.publicsearch.us/doc/X")
+        driver = _make_driver_with_rows(row)
+
+        records = extract_page_data(driver)
+        self.assertIn("doc_local_path", records[0])
+        self.assertEqual(records[0]["doc_local_path"], "")
+
+    @patch("scraper.get_pdf_url_by_clicking",
+           return_value=("https://collin.tx.publicsearch.us/doc/DL", "/tmp/20240001.pdf"))
+    def test_stores_local_path_when_download_button_used(self, mock_click):
+        """doc_local_path is populated when the Download button produced a local file."""
+        row = _make_row(pdf_href=None)
+        driver = _make_driver_with_rows(row)
+
+        records = extract_page_data(driver, download_dir="/tmp/dl")
+        self.assertEqual(records[0]["doc_local_path"], "/tmp/20240001.pdf")
 
     def test_returns_empty_list_for_empty_table(self):
         driver = MagicMock()
@@ -353,7 +429,7 @@ class TestExtractPageData(unittest.TestCase):
         # Second call returns a valid URL
         mock_get_pdf.side_effect = [
             Exception("unexpected DOM explosion"),
-            "https://collin.tx.publicsearch.us/doc/OK",
+            ("https://collin.tx.publicsearch.us/doc/OK", None),
         ]
         row1 = _make_row()
         row2 = _make_row()
@@ -385,16 +461,111 @@ class TestExtractPageData(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# login
+# ---------------------------------------------------------------------------
+
+class TestLogin(unittest.TestCase):
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_skips_when_no_credentials(self, mock_sleep, mock_wait):
+        """login() returns True immediately when env vars are not set."""
+        driver = MagicMock()
+        env = {"SCRAPER_USERNAME": "", "SCRAPER_PASSWORD": ""}
+        with patch.dict(os.environ, env):
+            result = login(driver)
+        self.assertTrue(result)
+        driver.get.assert_not_called()
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_navigates_to_login_page(self, mock_sleep, mock_wait):
+        """login() navigates to BASE_URL/login when credentials are set."""
+        driver = MagicMock()
+        # Make WebDriverWait return a mock element (email field found)
+        mock_wait.return_value.until.return_value = MagicMock()
+        env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
+        with patch.dict(os.environ, env):
+            login(driver)
+        driver.get.assert_called_once_with(f"{scraper.BASE_URL}/login")
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_returns_false_when_email_field_not_found(self, mock_sleep, mock_wait):
+        """login() returns False when the email field cannot be located."""
+        driver = MagicMock()
+        mock_wait.return_value.until.side_effect = Exception("not found")
+        env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
+        with patch.dict(os.environ, env):
+            result = login(driver)
+        self.assertFalse(result)
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_returns_false_when_password_field_not_found(self, mock_sleep, mock_wait):
+        """login() returns False when the password field cannot be located."""
+        driver = MagicMock()
+        email_field = MagicMock()
+        mock_wait.return_value.until.return_value = email_field
+        # Password field not found
+        driver.find_element.side_effect = NoSuchElementException("no password field")
+        env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
+        with patch.dict(os.environ, env):
+            result = login(driver)
+        self.assertFalse(result)
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_returns_true_on_successful_login(self, mock_sleep, mock_wait):
+        """login() returns True when both fields are found and form submitted."""
+        driver = MagicMock()
+        email_field = MagicMock()
+        password_field = MagicMock()
+        mock_wait.return_value.until.return_value = email_field
+        # find_element: first call for password, subsequent calls for submit button
+        driver.find_element.return_value = password_field
+        env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "secret"}
+        with patch.dict(os.environ, env):
+            result = login(driver)
+        self.assertTrue(result)
+
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_types_credentials_character_by_character(self, mock_sleep, mock_wait):
+        """Credentials are sent as individual characters (human-like typing)."""
+        driver = MagicMock()
+        email_field = MagicMock()
+        password_field = MagicMock()
+        mock_wait.return_value.until.return_value = email_field
+        driver.find_element.return_value = password_field
+
+        username = "ab@c.com"
+        password = "pw1"
+        env = {"SCRAPER_USERNAME": username, "SCRAPER_PASSWORD": password}
+        with patch.dict(os.environ, env):
+            login(driver)
+
+        # send_keys calls on email_field should be one character at a time
+        email_calls = [str(c.args[0]) for c in email_field.send_keys.call_args_list]
+        self.assertEqual(email_calls, list(username))
+
+        # send_keys calls on password_field should be one character at a time
+        pw_calls = [str(c.args[0]) for c in password_field.send_keys.call_args_list]
+        self.assertEqual(pw_calls, list(password))
+
+
+# ---------------------------------------------------------------------------
 # scrape_all
 # ---------------------------------------------------------------------------
 
 class TestScrapeAll(unittest.TestCase):
 
+    @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
     @patch("scraper.extract_page_data")
     @patch("scraper.load_page", return_value=True)
     @patch("scraper.initialize_driver")
-    def test_scrapes_only_one_page(self, mock_init, mock_load, mock_extract, mock_dynamo):
+    def test_scrapes_only_one_page(self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login):
         driver = MagicMock()
         mock_init.return_value = driver
         mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
@@ -406,14 +577,34 @@ class TestScrapeAll(unittest.TestCase):
         # load_page called exactly once (first page only)
         mock_load.assert_called_once()
         # extract_page_data called exactly once
-        mock_extract.assert_called_once_with(driver)
+        mock_extract.assert_called_once()
 
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_login_called_after_driver_init(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """login() must be invoked with the driver returned by initialize_driver()."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
+        mock_dynamo.write_records.return_value = 1
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+            scrape_all("run-login", "CollinTx")
+
+        mock_login.assert_called_once_with(driver)
+
+    @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
     @patch("scraper.extract_page_data")
     @patch("scraper.load_page", return_value=True)
     @patch("scraper.initialize_driver")
     def test_adds_page_number_and_offset_to_records(
-        self, mock_init, mock_load, mock_extract, mock_dynamo
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
     ):
         driver = MagicMock()
         mock_init.return_value = driver
@@ -428,20 +619,22 @@ class TestScrapeAll(unittest.TestCase):
         self.assertEqual(written_records[0]["page_number"], 1)
         self.assertEqual(written_records[0]["offset"], 0)
 
+    @patch("scraper.login", return_value=True)
     @patch("scraper.load_page", return_value=False)
     @patch("scraper.initialize_driver")
-    def test_returns_zero_when_page_fails_to_load(self, mock_init, mock_load):
+    def test_returns_zero_when_page_fails_to_load(self, mock_init, mock_load, mock_login):
         mock_init.return_value = MagicMock()
         with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
             result = scrape_all("run-003", "CollinTx")
         self.assertEqual(result, 0)
 
+    @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
     @patch("scraper.extract_page_data", return_value=[])
     @patch("scraper.load_page", return_value=True)
     @patch("scraper.initialize_driver")
     def test_returns_zero_when_no_records_extracted(
-        self, mock_init, mock_load, mock_extract, mock_dynamo
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
     ):
         mock_init.return_value = MagicMock()
         with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
@@ -449,11 +642,12 @@ class TestScrapeAll(unittest.TestCase):
         self.assertEqual(result, 0)
         mock_dynamo.write_records.assert_not_called()
 
+    @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
     @patch("scraper.extract_page_data")
     @patch("scraper.load_page", return_value=True)
     @patch("scraper.initialize_driver")
-    def test_driver_always_quit(self, mock_init, mock_load, mock_extract, mock_dynamo):
+    def test_driver_always_quit(self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login):
         """WebDriver must be closed even if extract_page_data raises."""
         driver = MagicMock()
         mock_init.return_value = driver
@@ -464,6 +658,198 @@ class TestScrapeAll(unittest.TestCase):
                 scrape_all("run-005", "CollinTx")
 
         driver.quit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# scrape_all — S3 upload integration
+# ---------------------------------------------------------------------------
+
+class TestScrapeAllWithS3(unittest.TestCase):
+    """
+    Tests for the S3 document-upload path in scrape_all().
+    Requires DOCUMENTS_BUCKET env var to be set.
+    """
+
+    def setUp(self):
+        # Reset the module-level s3_helper mock before every test so call
+        # counts don't bleed between tests.
+        scraper.s3_helper.reset_mock()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_fetch_and_upload_called_when_no_local_path(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """fetch_and_upload used as fallback when doc_local_path is absent."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
+            {"doc_number": "DOC2", "pdf_url": "https://site.com/doc/DOC2", "doc_local_path": ""},
+        ]
+        mock_dynamo.write_records.return_value = 2
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://bucket/documents/CollinTx/DOC1.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-01", "CollinTx")
+
+        self.assertEqual(scraper.s3_helper.fetch_and_upload.call_count, 2)
+        scraper.s3_helper.upload_local_file.assert_not_called()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    @patch("scraper.os.path.isfile", return_value=True)
+    def test_upload_local_file_preferred_over_fetch(
+        self, mock_isfile, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """upload_local_file is used (not fetch_and_upload) when doc_local_path exists."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {
+                "doc_number": "DOC1",
+                "pdf_url": "https://site.com/doc/DOC1",
+                "doc_local_path": "/tmp/20240001.pdf",
+            },
+        ]
+        mock_dynamo.write_records.return_value = 1
+        scraper.s3_helper.upload_local_file.return_value = "s3://bucket/documents/CollinTx/DOC1.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-localfile", "CollinTx")
+
+        scraper.s3_helper.upload_local_file.assert_called_once()
+        scraper.s3_helper.fetch_and_upload.assert_not_called()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_not_called_when_bucket_unset(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """No S3 calls should be made when DOCUMENTS_BUCKET is absent."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
+        ]
+        mock_dynamo.write_records.return_value = 1
+
+        env = {"DYNAMO_TABLE_NAME": "leads"}
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("DOCUMENTS_BUCKET", None)
+            scrape_all("run-s3-02", "CollinTx")
+
+        scraper.s3_helper.fetch_and_upload.assert_not_called()
+        scraper.s3_helper.upload_local_file.assert_not_called()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_not_called_when_pdf_url_missing(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """Records without a pdf_url or local path should not trigger an S3 upload."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": None, "doc_local_path": ""},
+        ]
+        mock_dynamo.write_records.return_value = 1
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-03", "CollinTx")
+
+        scraper.s3_helper.fetch_and_upload.assert_not_called()
+        scraper.s3_helper.upload_local_file.assert_not_called()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_s3_uri_stored_on_record(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """The S3 URI returned by fetch_and_upload must appear on the written record."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        record = {"doc_number": "DOC99", "pdf_url": "https://site.com/doc/DOC99", "doc_local_path": ""}
+        mock_extract.return_value = [record]
+        mock_dynamo.write_records.return_value = 1
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://my-bucket/documents/CollinTx/DOC99.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-04", "CollinTx")
+
+        written = mock_dynamo.write_records.call_args[0][0]
+        self.assertEqual(written[0]["doc_s3_uri"],
+                         "s3://my-bucket/documents/CollinTx/DOC99.pdf")
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_session_cookies_passed_to_fetch_and_upload(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """Selenium session cookies should be forwarded to fetch_and_upload."""
+        driver = MagicMock()
+        driver.get_cookies.return_value = [{"name": "sess", "value": "tok123"}]
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
+        ]
+        mock_dynamo.write_records.return_value = 1
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://b/k.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-05", "CollinTx")
+
+        _, kwargs = scraper.s3_helper.fetch_and_upload.call_args
+        self.assertEqual(kwargs["selenium_cookies"], [{"name": "sess", "value": "tok123"}])
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_upload_failure_does_not_abort_scrape(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """A None return from fetch_and_upload (upload failure) must not stop the run."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
+            {"doc_number": "DOC2", "pdf_url": "https://site.com/doc/DOC2", "doc_local_path": ""},
+        ]
+        mock_dynamo.write_records.return_value = 2
+        scraper.s3_helper.fetch_and_upload.return_value = None  # all uploads fail
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            result = scrape_all("run-s3-06", "CollinTx")
+
+        # Scrape still completes and writes to DynamoDB
+        self.assertEqual(result, 2)
+        mock_dynamo.write_records.assert_called_once()
 
 
 if __name__ == "__main__":

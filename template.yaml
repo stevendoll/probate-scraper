@@ -41,6 +41,32 @@ Parameters:
     NoEcho: true
     Description: Stripe webhook signing secret (whsec_...)
 
+  ScraperUsername:
+    Type: String
+    Default: ""
+    Description: >
+      Login email / username for the county search portal.
+      Leave blank to skip authentication (public access only).
+
+  ScraperPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Login password for the county search portal.
+
+  DocumentsBucketName:
+    Type: String
+    Default: ""
+    Description: >
+      S3 bucket name for storing scraped documents. Leave blank to let
+      CloudFormation generate a unique name.
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+  HasDocumentsBucketName: !Not [!Equals [!Ref DocumentsBucketName, ""]]
+
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
@@ -62,6 +88,29 @@ Globals:
 # Resources
 # ---------------------------------------------------------------------------
 Resources:
+
+  # ── S3 — Documents ────────────────────────────────────────────────────────
+  # Stores a copy of each scraped PDF / image, keyed as:
+  #   documents/{location_code}/{doc_number}{ext}
+  # The DOCUMENTS_BUCKET env var is injected into the ECS task definition so
+  # the scraper can upload directly from the Fargate container.
+
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - HasDocumentsBucketName
+        - !Ref DocumentsBucketName
+        - !Ref AWS::NoValue
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   # ── DynamoDB — Leads ──────────────────────────────────────────────────────
   # NOTE: renamed from probate-leads-collin-tx → leads.
@@ -208,6 +257,15 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                 Resource: !GetAtt LocationsTable.Arn
+        - PolicyName: S3DocumentsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "${DocumentsBucket.Arn}/documents/*"
 
   ScraperSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -247,6 +305,12 @@ Resources:
               Value: !Ref AWS::Region
             - Name: LOCATION_CODE
               Value: CollinTx
+            - Name: DOCUMENTS_BUCKET
+              Value: !Ref DocumentsBucket
+            - Name: SCRAPER_USERNAME
+              Value: !Ref ScraperUsername
+            - Name: SCRAPER_PASSWORD
+              Value: !Ref ScraperPassword
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -504,3 +568,11 @@ Outputs:
   SubscribersTableName:
     Description: Subscribers DynamoDB table name
     Value: !Ref SubscribersTable
+
+  DocumentsBucketName:
+    Description: S3 bucket storing scraped documents (documents/{location_code}/{doc_number}.pdf)
+    Value: !Ref DocumentsBucket
+
+  DocumentsBucketArn:
+    Description: S3 documents bucket ARN
+    Value: !GetAtt DocumentsBucket.Arn
