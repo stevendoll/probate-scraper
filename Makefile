@@ -157,12 +157,13 @@ local-api-start:
 	pipenv run python scripts/local_api_server.py
 
 local-scraper-run:
+	@set -a; [ -f .env ] && source .env; set +a; \
 	$(LOCAL_ENV) \
 	LOCATION_CODE="$(LOCATION_CODE)" \
 	CHROMEDRIVER_PATH="$(CHROMEDRIVER_PATH)" \
 	CHROME_BIN="$(CHROME_BIN)" \
-	SCRAPER_USERNAME="$(SCRAPER_USERNAME)" \
-	SCRAPER_PASSWORD="$(SCRAPER_PASSWORD)" \
+	SCRAPER_USERNAME="$${SCRAPER_USERNAME:-$(SCRAPER_USERNAME)}" \
+	SCRAPER_PASSWORD="$${SCRAPER_PASSWORD:-$(SCRAPER_PASSWORD)}" \
 	pipenv run python src/scraper/app.py
 
 test:
