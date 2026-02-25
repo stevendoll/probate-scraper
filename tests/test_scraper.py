@@ -37,6 +37,8 @@ from scraper import (
     login,
     SEARCH_PARAMS,
 )
+# helpers tested directly
+import scraper as _scraper_mod
 
 from tests.fixtures.scraper_html import ROW_WITH_PDF, ROW_WITHOUT_PDF_INLINE  # noqa: E402
 
@@ -461,10 +463,64 @@ class TestExtractPageData(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# login helpers
+# ---------------------------------------------------------------------------
+
+class TestIsLoggedIn(unittest.TestCase):
+
+    def test_returns_true_when_sign_out_in_page_source(self):
+        driver = MagicMock()
+        driver.page_source = "<html><a>Sign Out</a></html>"
+        self.assertTrue(scraper._is_logged_in(driver))
+
+    def test_returns_true_when_logout_link_present(self):
+        driver = MagicMock()
+        driver.page_source = "<html></html>"
+        # find_element succeeds for logout selector
+        driver.find_element.return_value = MagicMock()
+        self.assertTrue(scraper._is_logged_in(driver))
+
+    def test_returns_false_when_no_sign_out_indicators(self):
+        driver = MagicMock()
+        driver.page_source = "<html><a>Sign In</a></html>"
+        driver.find_element.side_effect = NoSuchElementException("not found")
+        self.assertFalse(scraper._is_logged_in(driver))
+
+    def test_handles_page_source_exception_gracefully(self):
+        """If page_source raises, fall through to CSS selector check."""
+        driver = MagicMock()
+        type(driver).page_source = property(lambda self: (_ for _ in ()).throw(Exception("err")))
+        driver.find_element.side_effect = NoSuchElementException("not found")
+        self.assertFalse(scraper._is_logged_in(driver))
+
+
+# ---------------------------------------------------------------------------
 # login
 # ---------------------------------------------------------------------------
 
 class TestLogin(unittest.TestCase):
+
+    def _make_logged_out_driver(self, mock_wait, email_field, password_field):
+        """Helper: driver that appears logged-out, then provides login form fields."""
+        driver = MagicMock()
+        driver.page_source = "<html><a>Sign In</a></html>"  # not logged in
+        driver.find_element.side_effect = NoSuchElementException("not found")
+
+        # After _click_sign_in_trigger + wait, WebDriverWait returns email_field
+        # (first call for sign-in trigger times out, subsequent call finds email)
+        def wait_until_side_effect(condition):
+            # Simulate trigger click failing, then email field found
+            raise Exception("no trigger")
+        mock_wait.return_value.until.side_effect = [
+            Exception("no trigger"),   # _click_sign_in_trigger fails
+            email_field,               # email field found
+        ]
+        driver.find_element.side_effect = [
+            NoSuchElementException("no logout"),   # _is_logged_in CSS check
+            password_field,                        # password field found
+            password_field,                        # submit button
+        ]
+        return driver
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
@@ -479,20 +535,37 @@ class TestLogin(unittest.TestCase):
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_navigates_to_login_page(self, mock_sleep, mock_wait):
-        """login() navigates to BASE_URL/login when credentials are set."""
+    def test_navigates_to_base_url(self, mock_sleep, mock_wait):
+        """login() navigates to BASE_URL (not /login) to check for sign-out first."""
         driver = MagicMock()
-        # Make WebDriverWait return a mock element (email field found)
+        driver.page_source = "<html></html>"
         mock_wait.return_value.until.return_value = MagicMock()
         env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
         with patch.dict(os.environ, env):
             login(driver)
-        driver.get.assert_called_once_with(f"{scraper.BASE_URL}/login")
+        driver.get.assert_called_once_with(scraper.BASE_URL)
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_returns_false_when_email_field_not_found(self, mock_sleep, mock_wait):
-        """login() returns False when the email field cannot be located."""
+    def test_skips_login_when_already_logged_in(self, mock_sleep, mock_wait):
+        """login() returns True without filling the form when 'sign out' is in the banner."""
+        driver = MagicMock()
+        driver.page_source = "<html><a>Sign Out</a></html>"
+        env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
+        with patch.dict(os.environ, env):
+            result = login(driver)
+        self.assertTrue(result)
+        # Should not attempt to find form fields
+        mock_wait.return_value.until.assert_not_called()
+
+    @patch("scraper._click_sign_in_trigger", return_value=False)
+    @patch("scraper._is_logged_in", return_value=False)
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_returns_false_when_email_field_not_found(
+        self, mock_sleep, mock_wait, mock_is_logged_in, mock_trigger
+    ):
+        """login() returns False when the email field cannot be located after trigger click."""
         driver = MagicMock()
         mock_wait.return_value.until.side_effect = Exception("not found")
         env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
@@ -500,58 +573,86 @@ class TestLogin(unittest.TestCase):
             result = login(driver)
         self.assertFalse(result)
 
+    @patch("scraper._click_sign_in_trigger", return_value=False)
+    @patch("scraper._is_logged_in", return_value=False)
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_returns_false_when_password_field_not_found(self, mock_sleep, mock_wait):
+    def test_returns_false_when_password_field_not_found(
+        self, mock_sleep, mock_wait, mock_is_logged_in, mock_trigger
+    ):
         """login() returns False when the password field cannot be located."""
         driver = MagicMock()
         email_field = MagicMock()
         mock_wait.return_value.until.return_value = email_field
-        # Password field not found
         driver.find_element.side_effect = NoSuchElementException("no password field")
         env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "pass"}
         with patch.dict(os.environ, env):
             result = login(driver)
         self.assertFalse(result)
 
+    @patch("scraper._click_sign_in_trigger", return_value=False)
+    @patch("scraper._is_logged_in")
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_returns_true_on_successful_login(self, mock_sleep, mock_wait):
-        """login() returns True when both fields are found and form submitted."""
+    def test_returns_true_when_sign_out_appears_after_submit(
+        self, mock_sleep, mock_wait, mock_is_logged_in, mock_trigger
+    ):
+        """login() returns True when 'sign out' appears in the banner after submitting."""
         driver = MagicMock()
         email_field = MagicMock()
         password_field = MagicMock()
+        mock_is_logged_in.side_effect = [False, True]  # not logged in → then logged in
         mock_wait.return_value.until.return_value = email_field
-        # find_element: first call for password, subsequent calls for submit button
         driver.find_element.return_value = password_field
         env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "secret"}
         with patch.dict(os.environ, env):
             result = login(driver)
         self.assertTrue(result)
 
+    @patch("scraper._click_sign_in_trigger", return_value=False)
+    @patch("scraper._is_logged_in", return_value=False)
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_types_credentials_character_by_character(self, mock_sleep, mock_wait):
-        """Credentials are sent as individual characters (human-like typing)."""
+    def test_returns_false_when_sign_out_absent_after_submit(
+        self, mock_sleep, mock_wait, mock_is_logged_in, mock_trigger
+    ):
+        """login() returns False when sign-out never appears (wrong credentials)."""
         driver = MagicMock()
         email_field = MagicMock()
         password_field = MagicMock()
         mock_wait.return_value.until.return_value = email_field
         driver.find_element.return_value = password_field
+        env = {"SCRAPER_USERNAME": "user@example.com", "SCRAPER_PASSWORD": "wrongpass"}
+        with patch.dict(os.environ, env):
+            result = login(driver)
+        self.assertFalse(result)
+
+    @patch("scraper._click_sign_in_trigger", return_value=False)
+    @patch("scraper._is_logged_in")
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_types_credentials_character_by_character(
+        self, mock_sleep, mock_wait, mock_is_logged_in, mock_trigger
+    ):
+        """Credentials are sent as individual characters (human-like typing)."""
+        driver = MagicMock()
+        email_field = MagicMock()
+        password_field = MagicMock()
+        mock_is_logged_in.side_effect = [False, True]
+        mock_wait.return_value.until.return_value = email_field
+        driver.find_element.return_value = password_field
 
         username = "ab@c.com"
-        password = "pw1"
-        env = {"SCRAPER_USERNAME": username, "SCRAPER_PASSWORD": password}
+        pw = "pw1"
+        env = {"SCRAPER_USERNAME": username, "SCRAPER_PASSWORD": pw}
         with patch.dict(os.environ, env):
             login(driver)
 
-        # send_keys calls on email_field should be one character at a time
         email_calls = [str(c.args[0]) for c in email_field.send_keys.call_args_list]
         self.assertEqual(email_calls, list(username))
 
-        # send_keys calls on password_field should be one character at a time
         pw_calls = [str(c.args[0]) for c in password_field.send_keys.call_args_list]
-        self.assertEqual(pw_calls, list(password))
+        self.assertEqual(pw_calls, list(pw))
 
 
 # ---------------------------------------------------------------------------

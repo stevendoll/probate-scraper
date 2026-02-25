@@ -150,6 +150,30 @@ _LOGIN_SUBMIT_SELECTORS = [
     'button[class*="login"]',
 ]
 
+# CSS selectors / text fragments indicating the user is already logged in.
+# The banner "Sign Out" link is the most reliable indicator.
+_LOGGED_IN_TEXT = ["sign out", "signout", "log out", "logout"]
+_LOGGED_IN_SELECTORS = [
+    'a[href*="logout"]',
+    'a[href*="signout"]',
+    'a[href*="sign-out"]',
+    '[class*="logout"]',
+    '[class*="signout"]',
+]
+
+# CSS selectors tried in order to find the Sign In trigger (button/link that
+# opens the login modal or navigates to the login form).
+_SIGN_IN_TRIGGER_SELECTORS = [
+    'a[href*="/login"]',
+    'button[class*="sign-in"]',
+    'a[class*="sign-in"]',
+    'button[class*="signin"]',
+    'a[class*="signin"]',
+    '[class*="login-button"]',
+    'button[class*="login"]',
+    'a[class*="login"]',
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -264,6 +288,50 @@ def initialize_driver():
 
 
 # ---------------------------------------------------------------------------
+# Login helpers
+# ---------------------------------------------------------------------------
+
+def _is_logged_in(driver) -> bool:
+    """
+    Return True if the current page shows sign-out indicators in the banner.
+    Checks page source text first (fast), then falls back to CSS selectors.
+    """
+    try:
+        src = driver.page_source.lower()
+        if any(t in src for t in _LOGGED_IN_TEXT):
+            return True
+    except Exception:
+        pass
+    for sel in _LOGGED_IN_SELECTORS:
+        try:
+            driver.find_element(By.CSS_SELECTOR, sel)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _click_sign_in_trigger(driver) -> bool:
+    """
+    Find and click the Sign In button/link that opens the login form.
+    Returns True if a trigger was clicked, False if none was found
+    (in which case the form may already be visible on the page).
+    """
+    for sel in _SIGN_IN_TRIGGER_SELECTORS:
+        try:
+            btn = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, sel))
+            )
+            btn.click()
+            log.debug("Sign-in trigger clicked (%s)", sel)
+            return True
+        except Exception:
+            continue
+    log.debug("No sign-in trigger found — form may already be visible")
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
 
@@ -273,8 +341,13 @@ def login(driver) -> bool:
     Skips silently when credentials are not configured.
     Returns True on success (or skip), False if login could not be completed.
 
-    Keystrokes are sent character-by-character with micro-delays to mimic
-    human typing and reduce the chance of bot-detection heuristics triggering.
+    Flow:
+      1. Navigate to BASE_URL and check for "Sign Out" in the banner.
+         If already logged in, return True immediately.
+      2. Click the Sign In trigger (button/link) to open the login form/modal.
+      3. Fill in credentials character-by-character (human-like pacing).
+      4. Submit the form.
+      5. Verify login succeeded by checking for "Sign Out" in the banner.
     """
     username = os.environ.get("SCRAPER_USERNAME", "")
     password = os.environ.get("SCRAPER_PASSWORD", "")
@@ -283,12 +356,23 @@ def login(driver) -> bool:
         log.info("No credentials configured (SCRAPER_USERNAME/SCRAPER_PASSWORD) — skipping login")
         return True
 
-    log.info("Logging in as %s", username)
+    log.info("Checking login state at %s", BASE_URL)
     try:
-        driver.get(f"{BASE_URL}/login")
+        driver.get(BASE_URL)
         _random_sleep(2, 4)
 
-        # Locate email / username field
+        # Step 1 — already logged in?
+        if _is_logged_in(driver):
+            log.info("Already logged in — skipping login")
+            return True
+
+        log.info("Not logged in — attempting login as %s", username)
+
+        # Step 2 — open the login form (may be a modal or a nav link)
+        _click_sign_in_trigger(driver)
+        _random_sleep(1, 2)
+
+        # Step 3 — locate email / username field
         email_field = None
         for sel in _LOGIN_EMAIL_SELECTORS:
             try:
@@ -301,7 +385,7 @@ def login(driver) -> bool:
                 continue
 
         if email_field is None:
-            log.warning("Could not find email/username field on login page")
+            log.warning("Could not find email/username field")
             return False
 
         # Locate password field
@@ -315,7 +399,7 @@ def login(driver) -> bool:
                 continue
 
         if password_field is None:
-            log.warning("Could not find password field on login page")
+            log.warning("Could not find password field")
             return False
 
         # Type credentials character-by-character (human-like)
@@ -333,7 +417,7 @@ def login(driver) -> bool:
 
         _random_sleep(0.5, 1.0)
 
-        # Submit — prefer an explicit button; fall back to Enter in the password field
+        # Step 4 — submit: prefer an explicit button; fall back to Enter
         submitted = False
         for sel in _LOGIN_SUBMIT_SELECTORS:
             try:
@@ -350,8 +434,18 @@ def login(driver) -> bool:
             log.debug("Login submitted via Enter key")
 
         _random_sleep(3, 5)
-        log.info("Login submitted — current URL: %s", driver.current_url)
-        return True
+
+        # Step 5 — verify
+        if _is_logged_in(driver):
+            log.info("Login successful — signed in as %s", username)
+            return True
+        else:
+            log.warning(
+                "Login submitted but 'sign out' not found in banner — "
+                "credentials may be wrong or the site layout changed (URL: %s)",
+                driver.current_url,
+            )
+            return False
 
     except Exception as exc:
         log.warning("Login failed: %s", exc)
