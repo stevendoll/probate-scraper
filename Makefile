@@ -8,7 +8,7 @@ STACK_NAME   := probate-scraper-collin-tx
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-shell \
-        local-api-start test smoke-test
+        local-api-start local-scraper-run test smoke-test
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -16,6 +16,15 @@ LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-e
                     DYNAMO_TABLE_NAME=leads \
                     LOCATIONS_TABLE_NAME=locations \
                     SUBSCRIBERS_TABLE_NAME=subscribers
+
+# Scraper local-run defaults — override on the command line or via env:
+#   SCRAPER_USERNAME=you@example.com SCRAPER_PASSWORD='p@ss' make local-scraper-run
+LOCATION_CODE     ?= CollinTx
+CHROMEDRIVER_PATH ?= /opt/homebrew/bin/chromedriver
+CHROME_BIN        ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+SCRAPER_USERNAME  ?=
+SCRAPER_PASSWORD  ?=
+DOWNLOAD_DIR      ?= $(PWD)/downloads
 
 help:
 	@echo ""
@@ -27,6 +36,8 @@ help:
 	@echo "    local-db-seed    Create tables + load CSV data + seed locations"
 	@echo "    local-db-shell   Scan leads table (quick sanity check)"
 	@echo "    local-api-start  Start API server locally (no Docker)"
+	@echo "    local-scraper-run  Run scraper against DynamoDB Local"
+	@echo "                       SCRAPER_USERNAME=x SCRAPER_PASSWORD='y' make local-scraper-run"
 	@echo "    test             Run unit tests"
 	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
 	@echo ""
@@ -145,6 +156,17 @@ invoke-api:
 
 local-api-start:
 	pipenv run python scripts/local_api_server.py
+
+local-scraper-run:
+	@set -a; [ -f .env ] && source .env; set +a; \
+	$(LOCAL_ENV) \
+	LOCATION_CODE="$(LOCATION_CODE)" \
+	CHROMEDRIVER_PATH="$(CHROMEDRIVER_PATH)" \
+	CHROME_BIN="$(CHROME_BIN)" \
+	DOWNLOAD_DIR="$(DOWNLOAD_DIR)" \
+	SCRAPER_USERNAME="$${SCRAPER_USERNAME:-$(SCRAPER_USERNAME)}" \
+	SCRAPER_PASSWORD="$${SCRAPER_PASSWORD:-$(SCRAPER_PASSWORD)}" \
+	pipenv run python src/scraper/app.py
 
 test:
 	pipenv run python -m unittest discover -s tests -p "test_*.py" -v

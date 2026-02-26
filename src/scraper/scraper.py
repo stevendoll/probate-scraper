@@ -95,8 +95,10 @@ ROW_PDF_SELECTORS = [
     'a[href*="/images/"]',
 ]
 
-# CSS selectors tried in order to locate the detail panel after clicking a row
+# CSS selectors tried in order to locate the detail panel after clicking a row.
+# publicsearch.us uses id="document-details-panel" — a stable, non-hashed ID.
 DETAIL_PANEL_SELECTORS = [
+    "#document-details-panel",          # publicsearch.us: stable panel ID
     ".document-detail",
     ".record-detail",
     ".doc-viewer",
@@ -114,7 +116,8 @@ PANEL_PDF_SELECTORS = [
     ".document-pdf-link",
 ]
 
-# CSS selectors tried in order to find the Download button inside the detail panel
+# CSS selectors tried in order to find the Download button INSIDE the detail panel.
+# Used first; if none match, DOWNLOAD_BUTTON_XPATHS is tried against the full page.
 PANEL_DOWNLOAD_BUTTON_SELECTORS = [
     'button[class*="download"]',
     'a[class*="download"]',
@@ -123,6 +126,15 @@ PANEL_DOWNLOAD_BUTTON_SELECTORS = [
     '[data-action="download"]',
     '.download-btn',
     '.btn-download',
+]
+
+# XPath expressions tried against the full page when the Download button is NOT
+# inside the panel (e.g. publicsearch.us puts it in the nav bar above the panel).
+# Matches on button/link visible text so it works even with CSS-in-JS class names.
+DOWNLOAD_BUTTON_XPATHS = [
+    "//button[contains(normalize-space(.), 'Download')]",
+    "//a[contains(normalize-space(.), 'Download')]",
+    "//*[@aria-label and contains(@aria-label, 'Download')]",
 ]
 
 # CSS selectors tried in order to find the login email/username field
@@ -149,6 +161,36 @@ _LOGIN_SUBMIT_SELECTORS = [
     '.btn-login',
     'button[class*="login"]',
 ]
+
+# CSS selectors / text fragments indicating the user is already logged in.
+# The banner "Sign Out" link is the most reliable indicator.
+_LOGGED_IN_TEXT = ["sign out", "signout", "log out", "logout"]
+_LOGGED_IN_SELECTORS = [
+    'a[href*="logout"]',
+    'a[href*="signout"]',
+    'a[href*="sign-out"]',
+    '[class*="logout"]',
+    '[class*="signout"]',
+]
+
+# CSS selectors tried in order to find the Sign In trigger (button/link that
+# opens the login form or navigates to the sign-in page).
+# publicsearch.us uses  <a href="/signin?..." class="a11y-menu">Sign In</a>
+_SIGN_IN_TRIGGER_SELECTORS = [
+    'a[href*="signin"]',      # publicsearch.us: /signin?returnPath=...
+    'a[href*="/login"]',
+    'button[class*="sign-in"]',
+    'a[class*="sign-in"]',
+    'button[class*="signin"]',
+    'a[class*="signin"]',
+    '[class*="login-button"]',
+    'button[class*="login"]',
+    'a[class*="login"]',
+]
+
+# The signin page URL — used as a direct-navigation fallback when the trigger
+# link cannot be clicked (e.g. JS hasn't rendered it yet).
+_SIGNIN_PATH = "/signin"
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +306,50 @@ def initialize_driver():
 
 
 # ---------------------------------------------------------------------------
+# Login helpers
+# ---------------------------------------------------------------------------
+
+def _is_logged_in(driver) -> bool:
+    """
+    Return True if the current page shows sign-out indicators in the banner.
+    Checks page source text first (fast), then falls back to CSS selectors.
+    """
+    try:
+        src = driver.page_source.lower()
+        if any(t in src for t in _LOGGED_IN_TEXT):
+            return True
+    except Exception:
+        pass
+    for sel in _LOGGED_IN_SELECTORS:
+        try:
+            driver.find_element(By.CSS_SELECTOR, sel)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _click_sign_in_trigger(driver) -> bool:
+    """
+    Find and click the Sign In button/link that opens the login form.
+    Returns True if a trigger was clicked, False if none was found
+    (in which case the form may already be visible on the page).
+    """
+    for sel in _SIGN_IN_TRIGGER_SELECTORS:
+        try:
+            btn = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, sel))
+            )
+            btn.click()
+            log.debug("Sign-in trigger clicked (%s)", sel)
+            return True
+        except Exception:
+            continue
+    log.debug("No sign-in trigger found — form may already be visible")
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
 
@@ -273,8 +359,13 @@ def login(driver) -> bool:
     Skips silently when credentials are not configured.
     Returns True on success (or skip), False if login could not be completed.
 
-    Keystrokes are sent character-by-character with micro-delays to mimic
-    human typing and reduce the chance of bot-detection heuristics triggering.
+    Flow:
+      1. Navigate to BASE_URL and check for "Sign Out" in the banner.
+         If already logged in, return True immediately.
+      2. Click the Sign In trigger (button/link) to open the login form/modal.
+      3. Fill in credentials character-by-character (human-like pacing).
+      4. Submit the form.
+      5. Verify login succeeded by checking for "Sign Out" in the banner.
     """
     username = os.environ.get("SCRAPER_USERNAME", "")
     password = os.environ.get("SCRAPER_PASSWORD", "")
@@ -283,12 +374,31 @@ def login(driver) -> bool:
         log.info("No credentials configured (SCRAPER_USERNAME/SCRAPER_PASSWORD) — skipping login")
         return True
 
-    log.info("Logging in as %s", username)
+    log.info("Checking login state at %s", BASE_URL)
     try:
-        driver.get(f"{BASE_URL}/login")
+        driver.get(BASE_URL)
         _random_sleep(2, 4)
 
-        # Locate email / username field
+        # Step 1 — already logged in?
+        if _is_logged_in(driver):
+            log.info("Already logged in — skipping login")
+            return True
+
+        log.info("Not logged in — attempting login as %s", username)
+
+        # Step 2 — navigate to the sign-in form.
+        # Try clicking the Sign In link first; if no matching element is found
+        # (JS hasn't rendered it, or the selector changed), fall back to
+        # navigating directly to the known signin URL.
+        if _click_sign_in_trigger(driver):
+            _random_sleep(1, 2)
+        else:
+            signin_url = BASE_URL + _SIGNIN_PATH
+            log.info("Sign-in trigger not found — navigating directly to %s", signin_url)
+            driver.get(signin_url)
+            _random_sleep(2, 4)
+
+        # Step 3 — locate email / username field
         email_field = None
         for sel in _LOGIN_EMAIL_SELECTORS:
             try:
@@ -301,7 +411,7 @@ def login(driver) -> bool:
                 continue
 
         if email_field is None:
-            log.warning("Could not find email/username field on login page")
+            log.warning("Could not find email/username field")
             return False
 
         # Locate password field
@@ -315,7 +425,7 @@ def login(driver) -> bool:
                 continue
 
         if password_field is None:
-            log.warning("Could not find password field on login page")
+            log.warning("Could not find password field")
             return False
 
         # Type credentials character-by-character (human-like)
@@ -333,7 +443,7 @@ def login(driver) -> bool:
 
         _random_sleep(0.5, 1.0)
 
-        # Submit — prefer an explicit button; fall back to Enter in the password field
+        # Step 4 — submit: prefer an explicit button; fall back to Enter
         submitted = False
         for sel in _LOGIN_SUBMIT_SELECTORS:
             try:
@@ -350,8 +460,18 @@ def login(driver) -> bool:
             log.debug("Login submitted via Enter key")
 
         _random_sleep(3, 5)
-        log.info("Login submitted — current URL: %s", driver.current_url)
-        return True
+
+        # Step 5 — verify
+        if _is_logged_in(driver):
+            log.info("Login successful — signed in as %s", username)
+            return True
+        else:
+            log.warning(
+                "Login submitted but 'sign out' not found in banner — "
+                "credentials may be wrong or the site layout changed (URL: %s)",
+                driver.current_url,
+            )
+            return False
 
     except Exception as exc:
         log.warning("Login failed: %s", exc)
@@ -489,21 +609,46 @@ def get_pdf_url_by_clicking(
             except Exception:
                 continue
 
-        # 2. Try to click the Download button to trigger a Chrome-managed download
+        # 2. Try to click the Download button to trigger a Chrome-managed download.
+        #    Strategy A: search inside the panel by CSS selector (works when the button
+        #                is rendered within the panel element itself).
+        #    Strategy B: search the whole page by XPath text match (used when the button
+        #                lives outside the panel, e.g. publicsearch.us puts it in the
+        #                nav bar above the panel with a dynamic CSS-in-JS class name).
         local_path = None
         if download_dir:
             existing = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
+            download_clicked = False
+
+            # Strategy A — CSS selectors within the panel
             for sel in PANEL_DOWNLOAD_BUTTON_SELECTORS:
                 try:
                     btn = panel.find_element(By.CSS_SELECTOR, sel)
                     btn.click()
-                    log.debug("Download button clicked (%s) — waiting for file", sel)
-                    local_path = _wait_for_new_download(download_dir, existing)
-                    if local_path:
-                        log.info("Document downloaded locally: %s", local_path)
-                        break
+                    log.debug("Download button clicked in panel (%s)", sel)
+                    download_clicked = True
+                    break
                 except Exception:
                     continue
+
+            # Strategy B — XPath text match anywhere on the page
+            if not download_clicked:
+                for xpath in DOWNLOAD_BUTTON_XPATHS:
+                    try:
+                        btn = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, xpath))
+                        )
+                        btn.click()
+                        log.debug("Download button clicked via XPath (%s)", xpath)
+                        download_clicked = True
+                        break
+                    except Exception:
+                        continue
+
+            if download_clicked:
+                local_path = _wait_for_new_download(download_dir, existing)
+                if local_path:
+                    log.info("Document downloaded locally: %s", local_path)
 
         # Dismiss the panel
         try:
@@ -538,12 +683,21 @@ def get_pdf_url(
     return get_pdf_url_by_clicking(driver, row, download_dir)
 
 
-def extract_page_data(driver, download_dir: str = ""):
+def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
     """
     Extract all record rows from the current page.
     Returns a list of dicts with fields including pdf_url and doc_local_path.
     Skips the first two table rows (header + empty spacer).
     Continues past individual row errors rather than aborting the whole page.
+
+    Args:
+        download_dir:   Directory for Chrome-managed downloads.  Empty string
+                        disables the download button entirely.
+        max_downloads:  Number of rows for which the detail panel is opened and
+                        the Download button is clicked.  Defaults to 1 (first
+                        row only) to avoid triggering bot-detection on the site.
+                        Rows beyond this limit are still scraped for text fields
+                        and any inline document links, but no panel is opened.
     """
     records = []
     get_total_results(driver)  # logged for observability; result unused here
@@ -563,7 +717,16 @@ def extract_page_data(driver, download_dir: str = ""):
                     except Exception:
                         return "N/A"
 
-                pdf_url, local_path = get_pdf_url(driver, row, download_dir)
+                if i <= max_downloads:
+                    # Full extraction: inline link OR panel click + download
+                    pdf_url, local_path = get_pdf_url(driver, row, download_dir)
+                else:
+                    # Minimal: only check for an inline link in the row.
+                    # No panel click — keeps interaction volume low to avoid
+                    # triggering bot-detection when scraping many rows.
+                    pdf_url = get_pdf_url_from_row(row)
+                    local_path = None
+
                 record = {
                     "grantor":           _text('td.col-3[column="[object Object]"] span'),
                     "grantee":           _text('td.col-4[column="[object Object]"] span'),
@@ -630,7 +793,7 @@ def scrape_all(scrape_run_id: str, location_code: str):
             log.error("Failed to load first page — aborting")
             return 0
 
-        page_records = extract_page_data(driver, download_dir)
+        page_records = extract_page_data(driver, download_dir, max_downloads=1)
 
         if not page_records:
             log.warning("No records found on first page")
