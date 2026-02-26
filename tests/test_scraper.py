@@ -117,6 +117,95 @@ def _make_driver_with_rows(*rows: MagicMock, total_text: str = "1-50 of 6,720 re
 
 
 # ---------------------------------------------------------------------------
+# _rename_download
+# ---------------------------------------------------------------------------
+
+class TestRenameDownload(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _touch(self, filename):
+        """Create an empty file in tmpdir and return its full path."""
+        path = os.path.join(self.tmpdir, filename)
+        open(path, "w").close()
+        return path
+
+    def test_renames_to_doc_number(self):
+        """File is renamed to {doc_number}{ext}."""
+        src = self._touch("whatever-chrome-named-this.pdf")
+        used = set()
+        result = scraper._rename_download(src, "20240001234", used)
+        self.assertEqual(result, os.path.join(self.tmpdir, "20240001234.pdf"))
+        self.assertTrue(os.path.isfile(result))
+        self.assertFalse(os.path.isfile(src))
+        self.assertIn("20240001234.pdf", used)
+
+    def test_dedup_first_collision_gets_a_suffix(self):
+        """Second file with the same doc_number gets an 'a' suffix."""
+        src1 = self._touch("file1.pdf")
+        src2 = self._touch("file2.pdf")
+        used = set()
+        scraper._rename_download(src1, "DOC99", used)
+        result2 = scraper._rename_download(src2, "DOC99", used)
+        self.assertEqual(os.path.basename(result2), "DOC99a.pdf")
+        self.assertIn("DOC99a.pdf", used)
+
+    def test_dedup_second_collision_gets_b_suffix(self):
+        """Third file with the same doc_number gets a 'b' suffix."""
+        files = [self._touch(f"file{i}.pdf") for i in range(3)]
+        used = set()
+        for f in files:
+            scraper._rename_download(f, "DOC99", used)
+        self.assertIn("DOC99.pdf",  used)
+        self.assertIn("DOC99a.pdf", used)
+        self.assertIn("DOC99b.pdf", used)
+
+    def test_skips_empty_local_path(self):
+        """Returns empty string immediately when local_path is empty."""
+        used = set()
+        result = scraper._rename_download("", "DOC1", used)
+        self.assertEqual(result, "")
+        self.assertEqual(len(used), 0)
+
+    def test_skips_nonexistent_file(self):
+        """Returns original path when the file does not exist."""
+        path = os.path.join(self.tmpdir, "missing.pdf")
+        used = set()
+        result = scraper._rename_download(path, "DOC1", used)
+        self.assertEqual(result, path)
+        self.assertEqual(len(used), 0)
+
+    def test_returns_original_path_on_os_error(self):
+        """Returns original path (and does not raise) when os.rename fails."""
+        src = self._touch("file.pdf")
+        used = set()
+        with patch("scraper.os.rename", side_effect=OSError("permission denied")):
+            result = scraper._rename_download(src, "DOC1", used)
+        self.assertEqual(result, src)
+        self.assertEqual(len(used), 0)
+
+    def test_sanitises_slashes_in_doc_number(self):
+        """Slashes in doc_number are replaced with dashes in the filename."""
+        src = self._touch("orig.pdf")
+        used = set()
+        result = scraper._rename_download(src, "2024/0001", used)
+        self.assertEqual(os.path.basename(result), "2024-0001.pdf")
+
+    def test_preserves_extension(self):
+        """Non-PDF extensions are preserved."""
+        src = self._touch("orig.tif")
+        used = set()
+        result = scraper._rename_download(src, "DOC1", used)
+        self.assertEqual(os.path.basename(result), "DOC1.tif")
+
+
+# ---------------------------------------------------------------------------
 # build_search_url
 # ---------------------------------------------------------------------------
 
