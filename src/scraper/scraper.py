@@ -95,8 +95,10 @@ ROW_PDF_SELECTORS = [
     'a[href*="/images/"]',
 ]
 
-# CSS selectors tried in order to locate the detail panel after clicking a row
+# CSS selectors tried in order to locate the detail panel after clicking a row.
+# publicsearch.us uses id="document-details-panel" — a stable, non-hashed ID.
 DETAIL_PANEL_SELECTORS = [
+    "#document-details-panel",          # publicsearch.us: stable panel ID
     ".document-detail",
     ".record-detail",
     ".doc-viewer",
@@ -114,7 +116,8 @@ PANEL_PDF_SELECTORS = [
     ".document-pdf-link",
 ]
 
-# CSS selectors tried in order to find the Download button inside the detail panel
+# CSS selectors tried in order to find the Download button INSIDE the detail panel.
+# Used first; if none match, DOWNLOAD_BUTTON_XPATHS is tried against the full page.
 PANEL_DOWNLOAD_BUTTON_SELECTORS = [
     'button[class*="download"]',
     'a[class*="download"]',
@@ -123,6 +126,15 @@ PANEL_DOWNLOAD_BUTTON_SELECTORS = [
     '[data-action="download"]',
     '.download-btn',
     '.btn-download',
+]
+
+# XPath expressions tried against the full page when the Download button is NOT
+# inside the panel (e.g. publicsearch.us puts it in the nav bar above the panel).
+# Matches on button/link visible text so it works even with CSS-in-JS class names.
+DOWNLOAD_BUTTON_XPATHS = [
+    "//button[contains(normalize-space(.), 'Download')]",
+    "//a[contains(normalize-space(.), 'Download')]",
+    "//*[@aria-label and contains(@aria-label, 'Download')]",
 ]
 
 # CSS selectors tried in order to find the login email/username field
@@ -597,21 +609,46 @@ def get_pdf_url_by_clicking(
             except Exception:
                 continue
 
-        # 2. Try to click the Download button to trigger a Chrome-managed download
+        # 2. Try to click the Download button to trigger a Chrome-managed download.
+        #    Strategy A: search inside the panel by CSS selector (works when the button
+        #                is rendered within the panel element itself).
+        #    Strategy B: search the whole page by XPath text match (used when the button
+        #                lives outside the panel, e.g. publicsearch.us puts it in the
+        #                nav bar above the panel with a dynamic CSS-in-JS class name).
         local_path = None
         if download_dir:
             existing = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
+            download_clicked = False
+
+            # Strategy A — CSS selectors within the panel
             for sel in PANEL_DOWNLOAD_BUTTON_SELECTORS:
                 try:
                     btn = panel.find_element(By.CSS_SELECTOR, sel)
                     btn.click()
-                    log.debug("Download button clicked (%s) — waiting for file", sel)
-                    local_path = _wait_for_new_download(download_dir, existing)
-                    if local_path:
-                        log.info("Document downloaded locally: %s", local_path)
-                        break
+                    log.debug("Download button clicked in panel (%s)", sel)
+                    download_clicked = True
+                    break
                 except Exception:
                     continue
+
+            # Strategy B — XPath text match anywhere on the page
+            if not download_clicked:
+                for xpath in DOWNLOAD_BUTTON_XPATHS:
+                    try:
+                        btn = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, xpath))
+                        )
+                        btn.click()
+                        log.debug("Download button clicked via XPath (%s)", xpath)
+                        download_clicked = True
+                        break
+                    except Exception:
+                        continue
+
+            if download_clicked:
+                local_path = _wait_for_new_download(download_dir, existing)
+                if local_path:
+                    log.info("Document downloaded locally: %s", local_path)
 
         # Dismiss the panel
         try:
@@ -646,12 +683,21 @@ def get_pdf_url(
     return get_pdf_url_by_clicking(driver, row, download_dir)
 
 
-def extract_page_data(driver, download_dir: str = ""):
+def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
     """
     Extract all record rows from the current page.
     Returns a list of dicts with fields including pdf_url and doc_local_path.
     Skips the first two table rows (header + empty spacer).
     Continues past individual row errors rather than aborting the whole page.
+
+    Args:
+        download_dir:   Directory for Chrome-managed downloads.  Empty string
+                        disables the download button entirely.
+        max_downloads:  Number of rows for which the detail panel is opened and
+                        the Download button is clicked.  Defaults to 1 (first
+                        row only) to avoid triggering bot-detection on the site.
+                        Rows beyond this limit are still scraped for text fields
+                        and any inline document links, but no panel is opened.
     """
     records = []
     get_total_results(driver)  # logged for observability; result unused here
@@ -671,7 +717,16 @@ def extract_page_data(driver, download_dir: str = ""):
                     except Exception:
                         return "N/A"
 
-                pdf_url, local_path = get_pdf_url(driver, row, download_dir)
+                if i <= max_downloads:
+                    # Full extraction: inline link OR panel click + download
+                    pdf_url, local_path = get_pdf_url(driver, row, download_dir)
+                else:
+                    # Minimal: only check for an inline link in the row.
+                    # No panel click — keeps interaction volume low to avoid
+                    # triggering bot-detection when scraping many rows.
+                    pdf_url = get_pdf_url_from_row(row)
+                    local_path = None
+
                 record = {
                     "grantor":           _text('td.col-3[column="[object Object]"] span'),
                     "grantee":           _text('td.col-4[column="[object Object]"] span'),
@@ -738,7 +793,7 @@ def scrape_all(scrape_run_id: str, location_code: str):
             log.error("Failed to load first page — aborting")
             return 0
 
-        page_records = extract_page_data(driver, download_dir)
+        page_records = extract_page_data(driver, download_dir, max_downloads=1)
 
         if not page_records:
             log.warning("No records found on first page")

@@ -36,6 +36,7 @@ from scraper import (
     scrape_all,
     login,
     SEARCH_PARAMS,
+    DOWNLOAD_BUTTON_XPATHS,
 )
 # helpers tested directly
 import scraper as _scraper_mod
@@ -257,24 +258,58 @@ class TestGetPdfUrlByClicking(unittest.TestCase):
     @patch("scraper.os.path.isdir", return_value=True)
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_clicks_download_button_when_download_dir_given(
+    def test_clicks_download_button_in_panel_when_css_matches(
         self, mock_sleep, mock_wait, mock_isdir, mock_listdir, mock_wait_dl
     ):
-        """When download_dir is provided and a download button exists, it is clicked."""
+        """
+        Strategy A: when the download button is inside the panel and a CSS
+        selector matches it, the button is clicked and the local path is returned.
+        """
         driver = MagicMock()
         row = MagicMock()
 
-        # Panel with a download button
+        # Panel exposes: first call → PDF link, second call → download button
         panel = MagicMock()
         link = _link("https://collin.tx.publicsearch.us/doc/DLTEST")
         download_btn = MagicMock()
-        # find_element: first call returns link (PANEL_PDF_SELECTORS), later download button
         panel.find_element.side_effect = [link, download_btn]
+        # WebDriverWait(...).until(...) returns the panel
         mock_wait.return_value.until.return_value = panel
         mock_wait_dl.return_value = "/tmp/scraper_downloads/20240001234.pdf"
 
         url, local_path = get_pdf_url_by_clicking(driver, row, download_dir="/tmp/scraper_downloads")
         self.assertEqual(local_path, "/tmp/scraper_downloads/20240001234.pdf")
+        download_btn.click.assert_called_once()
+
+    @patch("scraper._wait_for_new_download")
+    @patch("scraper.os.listdir", return_value=[])
+    @patch("scraper.os.path.isdir", return_value=True)
+    @patch("scraper.WebDriverWait")
+    @patch("scraper.time.sleep")
+    def test_clicks_download_button_via_xpath_when_outside_panel(
+        self, mock_sleep, mock_wait, mock_isdir, mock_listdir, mock_wait_dl
+    ):
+        """
+        Strategy B: when no CSS selector finds the button inside the panel,
+        the XPath text-match fallback finds it on the full page.
+        This mirrors publicsearch.us where the Download button lives in the nav
+        bar above the panel with a dynamically generated CSS-in-JS class name.
+        """
+        driver = MagicMock()
+        row = MagicMock()
+
+        # Panel: PDF link raises (no inline link), download CSS also raises
+        panel = MagicMock()
+        panel.find_element.side_effect = NoSuchElementException("not in panel")
+
+        # WebDriverWait: first call finds the panel, second call finds download btn via XPath
+        download_btn = MagicMock()
+        mock_wait.return_value.until.side_effect = [panel, download_btn]
+        mock_wait_dl.return_value = "/tmp/scraper_downloads/20240001234.pdf"
+
+        url, local_path = get_pdf_url_by_clicking(driver, row, download_dir="/tmp/scraper_downloads")
+        self.assertEqual(local_path, "/tmp/scraper_downloads/20240001234.pdf")
+        download_btn.click.assert_called_once()
 
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
@@ -426,20 +461,49 @@ class TestExtractPageData(unittest.TestCase):
 
     @patch("scraper.get_pdf_url")
     def test_row_error_does_not_abort_page(self, mock_get_pdf):
-        """An unexpected error in one row should be skipped; the next row is still processed."""
-        # First call raises (simulates an unexpected error escaping all inner try/excepts)
-        # Second call returns a valid URL
-        mock_get_pdf.side_effect = [
-            Exception("unexpected DOM explosion"),
-            ("https://collin.tx.publicsearch.us/doc/OK", None),
-        ]
-        row1 = _make_row()
-        row2 = _make_row()
+        """
+        An unexpected error in the first row (panel-click row) should be
+        skipped; subsequent rows are still extracted via inline-link lookup.
+        """
+        # Row 1 (i=1, panel-click row) raises inside get_pdf_url
+        mock_get_pdf.side_effect = Exception("unexpected DOM explosion")
+        # Row 2 (i=2, inline-only) has a direct link so it succeeds without get_pdf_url
+        row1 = _make_row(pdf_href=None)
+        row2 = _make_row(pdf_href="https://collin.tx.publicsearch.us/doc/OK")
         driver = _make_driver_with_rows(row1, row2)
 
         records = extract_page_data(driver)
+        # row1 skipped, row2 extracted via its inline link
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["pdf_url"], "https://collin.tx.publicsearch.us/doc/OK")
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_download_only_for_first_row(self, mock_click):
+        """
+        With max_downloads=1 (the default), get_pdf_url_by_clicking is called
+        only for the first row.  Subsequent rows use inline-link lookup only —
+        no panel is opened — to avoid triggering bot-detection.
+        """
+        row1 = _make_row(pdf_href=None)   # no inline link → falls through to panel click
+        row2 = _make_row(pdf_href=None)   # no inline link → but beyond max_downloads
+        row3 = _make_row(pdf_href=None)
+        driver = _make_driver_with_rows(row1, row2, row3)
+
+        extract_page_data(driver, download_dir="/tmp/dl")  # max_downloads=1 by default
+
+        # Panel click should only happen for row 1
+        mock_click.assert_called_once()
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_max_downloads_zero_skips_all_panel_clicks(self, mock_click):
+        """max_downloads=0 disables panel clicks for all rows."""
+        row1 = _make_row(pdf_href=None)
+        row2 = _make_row(pdf_href=None)
+        driver = _make_driver_with_rows(row1, row2)
+
+        extract_page_data(driver, download_dir="/tmp/dl", max_downloads=0)
+
+        mock_click.assert_not_called()
 
     def test_stops_at_first_table_with_data(self):
         """extract_page_data() should not process a second table once the first yields rows."""
@@ -742,6 +806,26 @@ class TestScrapeAll(unittest.TestCase):
             result = scrape_all("run-004", "CollinTx")
         self.assertEqual(result, 0)
         mock_dynamo.write_records.assert_not_called()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_extract_called_with_max_downloads_1(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """scrape_all() must pass max_downloads=1 to extract_page_data."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
+        mock_dynamo.write_records.return_value = 1
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+            scrape_all("run-maxdl", "CollinTx")
+
+        _, kwargs = mock_extract.call_args
+        self.assertEqual(kwargs.get("max_downloads"), 1)
 
     @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
