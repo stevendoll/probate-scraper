@@ -24,6 +24,7 @@ CHROMEDRIVER_PATH ?= /opt/homebrew/bin/chromedriver
 CHROME_BIN        ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 SCRAPER_USERNAME  ?=
 SCRAPER_PASSWORD  ?=
+DOWNLOAD_DIR      ?= $(PWD)/downloads
 
 help:
 	@echo ""
@@ -162,6 +163,7 @@ local-scraper-run:
 	LOCATION_CODE="$(LOCATION_CODE)" \
 	CHROMEDRIVER_PATH="$(CHROMEDRIVER_PATH)" \
 	CHROME_BIN="$(CHROME_BIN)" \
+	DOWNLOAD_DIR="$(DOWNLOAD_DIR)" \
 	SCRAPER_USERNAME="$${SCRAPER_USERNAME:-$(SCRAPER_USERNAME)}" \
 	SCRAPER_PASSWORD="$${SCRAPER_PASSWORD:-$(SCRAPER_PASSWORD)}" \
 	pipenv run python src/scraper/app.py
