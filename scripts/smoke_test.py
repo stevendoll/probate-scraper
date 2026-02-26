@@ -175,9 +175,10 @@ def test_leads() -> None:
     r = get("/no-such-county/leads", params={"from_date": from_date})
     check("GET /no-such-county/leads → 404", r.status_code == 404, _snippet(r))
 
-    # missing from_date → 400
+    # no date params → most recent leads (200)
     r = get("/collin-tx/leads")
-    check("GET /collin-tx/leads (no from_date) → 400", r.status_code == 400, _snippet(r))
+    if check("GET /collin-tx/leads (no dates) → 200", r.status_code == 200, _snippet(r)):
+        check("no-date response has 'leads' array", "leads" in r.json())
 
 
 # ---------------------------------------------------------------------------

@@ -5,13 +5,11 @@ Queries the location-date-index GSI and returns paginated probate leads
 for the requested county.
 """
 
-import json
 import uuid
 from datetime import datetime, timezone
 
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler.api_gateway import Router
-from aws_lambda_powertools.event_handler import Response
 from boto3.dynamodb.conditions import Attr, Key
 
 import db
@@ -52,7 +50,7 @@ def get_leads_by_location(location_path: str):
     qs = router.current_event.query_string_parameters or {}
 
     raw_from = qs.get("from_date", "")
-    raw_to   = qs.get("to_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    raw_to   = qs.get("to_date", "")
     doc_type = qs.get("doc_type", "PROBATE")
 
     try:
@@ -62,12 +60,12 @@ def get_leads_by_location(location_path: str):
         return {"error": "'limit' must be an integer between 1 and 200"}, 400
 
     from_date = parse_date(raw_from) if raw_from else None
-    to_date   = parse_date(raw_to)
+    to_date   = parse_date(raw_to)   if raw_to   else None
 
-    if raw_to and to_date is None:
-        return {"error": f"'to_date' must be YYYY-MM-DD, got: {raw_to!r}"}, 400
     if raw_from and from_date is None:
         return {"error": f"'from_date' must be YYYY-MM-DD, got: {raw_from!r}"}, 400
+    if raw_to and to_date is None:
+        return {"error": f"'to_date' must be YYYY-MM-DD, got: {raw_to!r}"}, 400
 
     last_key = None
     if qs.get("last_key"):
@@ -75,24 +73,24 @@ def get_leads_by_location(location_path: str):
         if last_key is None:
             return {"error": "'last_key' is not a valid pagination cursor"}, 400
 
-    response_headers = {}
-
-    # 2. Build key condition expression for the location-date GSI
+    # 2. Build key condition expression for the location-date GSI.
+    # Both dates optional; no dates → most-recent-first via ScanIndexForward=False.
     if from_date and to_date:
         kce = (
             Key("location_code").eq(location_code)
             & Key("recorded_date").between(from_date, to_date)
         )
-    elif to_date and not from_date:
+    elif from_date:
+        kce = (
+            Key("location_code").eq(location_code)
+            & Key("recorded_date").gte(from_date)
+        )
+    elif to_date:
         kce = (
             Key("location_code").eq(location_code)
             & Key("recorded_date").lte(to_date)
         )
     else:
-        response_headers["X-Warning"] = (
-            "Broad index query in progress. "
-            "Provide from_date and/or to_date for efficient queries."
-        )
         kce = Key("location_code").eq(location_code)
 
     query_kwargs = {
@@ -131,13 +129,5 @@ def get_leads_by_location(location_path: str):
             "limit": limit,
         },
     }
-
-    if response_headers:
-        return Response(
-            status_code=200,
-            content_type="application/json",
-            body=json.dumps(body, default=str),
-            headers=response_headers,
-        )
 
     return body
