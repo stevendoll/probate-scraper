@@ -108,7 +108,7 @@ def write_records(
     put_requests = [
         {"PutRequest": {"Item": _to_dynamo_item(r, scrape_run_id, location_code)}}
         for r in records
-        if r.get("doc_number") and r["doc_number"] != "N/A"
+        if str(r.get("doc_number", "")).strip().isdigit()
     ]
 
     total_written = 0

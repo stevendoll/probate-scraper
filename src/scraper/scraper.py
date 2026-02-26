@@ -752,7 +752,7 @@ def scrape_all(scrape_run_id: str, location_code: str):
         for rec in page_records:
             local_path = rec.get("doc_local_path") or ""
             doc_number = rec.get("doc_number") or ""
-            if local_path and doc_number and doc_number not in ("N/A", "UNKNOWN"):
+            if local_path and doc_number.strip().isdigit():
                 rec["doc_local_path"] = _rename_download(
                     local_path, doc_number, _used_download_names
                 )
