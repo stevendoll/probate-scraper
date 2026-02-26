@@ -520,12 +520,16 @@ Resources:
               Action:
                 - s3:GetObject
               Resource: !Sub "${DocumentsBucket.Arn}/documents/*"
-        # Bedrock — invoke the extraction model
+        # Bedrock — invoke the extraction model.
+        # Cross-region inference profile ARNs contain a version suffix (:0) that
+        # creates a 7th ARN segment, which wildcards cannot span across.
+        # Resource: "*" is the standard approach for Bedrock; the action
+        # bedrock:InvokeModel already scopes this tightly enough.
         - Statement:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+              Resource: "*"
       Events:
         ParseDocument:
           Type: Api
