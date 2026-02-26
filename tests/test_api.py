@@ -218,6 +218,38 @@ class TestHandlerToDateOnly(unittest.TestCase):
         self.assertIsNone(_body(resp)["query"]["fromDate"])
 
 
+class TestHandlerNoDates(unittest.TestCase):
+    """GSI query with no date params — returns most-recent leads."""
+
+    def setUp(self):
+        self.mock_table     = MagicMock()
+        self.mock_loc_table = MagicMock()
+        db.table           = self.mock_table
+        db.locations_table = self.mock_loc_table
+        self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
+        self.mock_table.query.return_value     = {"Items": MOCK_LEADS}
+
+    def test_returns_200(self):
+        resp = _call({})
+        self.assertEqual(resp["statusCode"], 200)
+
+    def test_uses_query_not_scan(self):
+        _call({})
+        self.mock_table.query.assert_called_once()
+        self.mock_table.scan.assert_not_called()
+
+    def test_sorted_descending(self):
+        _call({})
+        kwargs = self.mock_table.query.call_args[1]
+        self.assertFalse(kwargs["ScanIndexForward"])
+
+    def test_both_dates_none_in_response(self):
+        resp = _call({})
+        body = _body(resp)
+        self.assertIsNone(body["query"]["fromDate"])
+        self.assertIsNone(body["query"]["toDate"])
+
+
 class TestHandlerLimit(unittest.TestCase):
     """Limit parameter handling."""
 
@@ -266,7 +298,7 @@ class TestHandlerDateValidation(unittest.TestCase):
         self.assertIn("from_date", _body(resp)["error"])
 
     def test_invalid_to_date_returns_400(self):
-        resp = _call({"to_date": "20/02/2026"})
+        resp = _call({"from_date": "2026-01-01", "to_date": "20/02/2026"})
         self.assertEqual(resp["statusCode"], 400)
         self.assertIn("to_date", _body(resp)["error"])
 
