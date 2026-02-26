@@ -1,0 +1,14 @@
+{
+  "resource": "/real-estate/probate-leads/leads/{lead_id}/parse-document",
+  "path": "/real-estate/probate-leads/leads/20260000023696/parse-document",
+  "httpMethod": "POST",
+  "headers": {
+    "x-api-key": "test-api-key"
+  },
+  "pathParameters": {
+    "lead_id": "20260000023696"
+  },
+  "queryStringParameters": null,
+  "body": null,
+  "isBase64Encoded": false
+}

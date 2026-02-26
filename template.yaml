@@ -61,6 +61,13 @@ Parameters:
       S3 bucket name for storing scraped documents. Leave blank to let
       CloudFormation generate a unique name.
 
+  BedrockModelId:
+    Type: String
+    Default: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+    Description: >
+      Amazon Bedrock model ID used by ParseDocumentFunction.
+      Must be available in the deployment region.
+
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
@@ -480,6 +487,51 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/{location_path}/update
+            Method: POST
+
+  # ── Lambda — POST /leads/{lead_id}/parse-document ─────────────────────────
+  # Separate function with a longer timeout (Bedrock can take 10-30 s per PDF).
+  # Needs: s3:GetObject on DocumentsBucket, bedrock:InvokeModel,
+  #        dynamodb:GetItem + dynamodb:UpdateItem on LeadsTable.
+
+  ParseDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: probate-leads-parse-document
+      CodeUri: src/parse_document/
+      Handler: app.handler
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET: !Ref DocumentsBucket
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+      Policies:
+        # Leads — read + update parsed fields
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt LeadsTable.Arn
+        # S3 — read PDFs from the documents bucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "${DocumentsBucket.Arn}/documents/*"
+        # Bedrock — invoke the extraction model
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+      Events:
+        ParseDocument:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/leads/{lead_id}/parse-document
             Method: POST
 
   # ── EventBridge — daily scheduled scrape ─────────────────────────────────
