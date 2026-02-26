@@ -119,6 +119,8 @@ jobs:
           ECR_URI: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          USERNAME_COLLINTX: ${{ secrets.USERNAME_COLLINTX }}
+          PASSWORD_COLLINTX: ${{ secrets.PASSWORD_COLLINTX }}
         run: |
           # Build overrides array. Stripe params are optional — SAM rejects
           # "Key=" (empty value), so only include them when the secret is set.
@@ -132,6 +134,8 @@ jobs:
           )
           [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
+          [ -n "$USERNAME_COLLINTX" ]    && OVERRIDES+=("ScraperUsername=$USERNAME_COLLINTX")
+          [ -n "$PASSWORD_COLLINTX" ]    && OVERRIDES+=("ScraperPassword=$PASSWORD_COLLINTX")
 
           sam deploy \
             --no-confirm-changeset \
