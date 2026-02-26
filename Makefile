@@ -7,8 +7,8 @@ STACK_NAME   := probate-scraper-collin-tx
 
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
-        vpc-info local-db-start local-db-stop local-db-seed local-db-shell \
-        local-api-start local-scraper-run test smoke-test
+        vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
+        aws-db-reset local-api-start local-scraper-run test smoke-test
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -193,6 +193,19 @@ local-db-stop:
 
 local-db-seed:
 	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
+
+local-db-reset:
+	@echo "Dropping and recreating 'leads' table in DynamoDB Local..."
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name leads \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	@sleep 1
+	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
+	@echo "Reset complete."
+
+aws-db-reset:
+	@echo "Deleting all items from production 'leads' table..."
+	pipenv run python3 scripts/reset_leads.py
+	@echo "Reset complete."
 
 local-db-shell:
 	$(LOCAL_ENV) aws dynamodb scan \

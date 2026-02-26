@@ -934,6 +934,53 @@ class TestScrapeAll(unittest.TestCase):
         driver.quit.assert_called_once()
 
 
+    @patch("scraper._rename_download")
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_rename_called_when_doc_number_is_integer(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login, mock_rename
+    ):
+        """_rename_download is called when doc_number is a valid integer string."""
+        mock_init.return_value = MagicMock()
+        mock_extract.return_value = [
+            {"doc_number": "20240001234", "pdf_url": None, "doc_local_path": "/tmp/file.pdf"},
+        ]
+        mock_dynamo.write_records.return_value = 1
+        mock_rename.return_value = "/tmp/20240001234.pdf"
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+            scrape_all("run-rename-01", "CollinTx")
+
+        mock_rename.assert_called_once()
+        call_args = mock_rename.call_args[0]
+        self.assertEqual(call_args[0], "/tmp/file.pdf")
+        self.assertEqual(call_args[1], "20240001234")
+
+    @patch("scraper._rename_download")
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
+    def test_rename_skipped_when_doc_number_not_integer(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login, mock_rename
+    ):
+        """_rename_download is NOT called when doc_number is non-numeric (e.g. 'N/A')."""
+        mock_init.return_value = MagicMock()
+        mock_extract.return_value = [
+            {"doc_number": "N/A", "pdf_url": None, "doc_local_path": "/tmp/N-A.pdf"},
+        ]
+        mock_dynamo.write_records.return_value = 0
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+            scrape_all("run-rename-02", "CollinTx")
+
+        mock_rename.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # scrape_all — S3 upload integration
 # ---------------------------------------------------------------------------
