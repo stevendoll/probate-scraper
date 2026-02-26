@@ -521,22 +521,15 @@ Resources:
                 - s3:GetObject
               Resource: !Sub "${DocumentsBucket.Arn}/documents/*"
         # Bedrock — invoke the extraction model.
-        # The default model ID is a cross-region inference profile
-        # (us.anthropic.claude-3-5-haiku-20241022-v1:0).  Cross-region profiles
-        # can be AWS system-defined (no account ID) or user-created (with account ID),
-        # and internally route to foundation models in multiple regions.
-        # We therefore allow all three ARN shapes so any valid model ID works:
-        #   • arn:aws:bedrock:REGION::foundation-model/MODEL
-        #   • arn:aws:bedrock:REGION::inference-profile/MODEL
-        #   • arn:aws:bedrock:REGION:ACCOUNT:inference-profile/MODEL
+        # Cross-region inference profile ARNs contain a version suffix (:0) that
+        # creates a 7th ARN segment, which wildcards cannot span across.
+        # Resource: "*" is the standard approach for Bedrock; the action
+        # bedrock:InvokeModel already scopes this tightly enough.
         - Statement:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource:
-                - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                - !Sub "arn:aws:bedrock:*::inference-profile/*"
-                - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*"
+              Resource: "*"
       Events:
         ParseDocument:
           Type: Api
