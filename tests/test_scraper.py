@@ -548,23 +548,24 @@ class TestExtractPageData(unittest.TestCase):
         self.assertEqual(records[0]["record_number"], 1)
         self.assertEqual(records[1]["record_number"], 2)
 
-    @patch("scraper.get_pdf_url")
-    def test_row_error_does_not_abort_page(self, mock_get_pdf):
+    @patch("scraper.get_pdf_url_by_clicking")
+    def test_row_error_does_not_abort_page(self, mock_click):
         """
-        An unexpected error in the first row (panel-click row) should be
-        skipped; subsequent rows are still extracted via inline-link lookup.
+        An error during the panel-click (Phase 2) must not prevent other rows
+        from being written.  Text extraction (Phase 1) runs before any click,
+        so all rows' text is captured regardless of click failures.
         """
-        # Row 1 (i=1, panel-click row) raises inside get_pdf_url
-        mock_get_pdf.side_effect = Exception("unexpected DOM explosion")
-        # Row 2 (i=2, inline-only) has a direct link so it succeeds without get_pdf_url
+        # Row 1 click raises — click error is caught; row still gets a record with pdf_url=None
+        mock_click.side_effect = Exception("unexpected DOM explosion")
         row1 = _make_row(pdf_href=None)
         row2 = _make_row(pdf_href="https://collin.tx.publicsearch.us/doc/OK")
         driver = _make_driver_with_rows(row1, row2)
 
         records = extract_page_data(driver)
-        # row1 skipped, row2 extracted via its inline link
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["pdf_url"], "https://collin.tx.publicsearch.us/doc/OK")
+        # Both rows produce records; row1 has pdf_url=None, row2 has its inline link
+        self.assertEqual(len(records), 2)
+        self.assertIsNone(records[0]["pdf_url"])
+        self.assertEqual(records[1]["pdf_url"], "https://collin.tx.publicsearch.us/doc/OK")
 
     @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
     def test_download_only_for_first_row(self, mock_click):
