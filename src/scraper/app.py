@@ -4,17 +4,13 @@ ECS Fargate entrypoint for the Collin County probate scraper.
 Runs as a plain Python script (not a Lambda handler).
 ECS marks the task as SUCCEEDED on exit code 0, FAILED on non-zero.
 
-Environment variables required:
-  DYNAMO_TABLE_NAME     — DynamoDB leads table to write results into
-  CHROME_BIN            — path to the Chromium binary (set in Dockerfile)
-  CHROMEDRIVER_PATH     — path to the ChromeDriver binary (set in Dockerfile)
-
-Optional:
+Environment variables:
+  DYNAMO_TABLE_NAME     — DynamoDB leads table (required)
+  CHROME_BIN            — Chromium binary path (set in Dockerfile)
+  CHROMEDRIVER_PATH     — ChromeDriver binary path (set in Dockerfile)
   LOCATIONS_TABLE_NAME  — DynamoDB locations table (default: locations)
   LOCATION_CODE         — location key (default: CollinTx)
-  SCRAPE_RUN_ID         — unique ID for this run (injected by ECS task override);
-                          defaults to a UTC ISO timestamp
-  DELAY_BETWEEN_PAGES   — seconds to wait between page loads (default: 3)
+  SCRAPE_RUN_ID         — unique run ID injected by ECS; defaults to UTC timestamp
 """
 
 import logging

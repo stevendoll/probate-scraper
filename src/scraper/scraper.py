@@ -1,17 +1,10 @@
 """
 Collin County probate records scraper.
-Ported from probate-scraper.ipynb — functions kept at same names for traceability.
-Key changes from notebook:
-  - initialize_driver() uses CHROMEDRIVER_PATH env var (not webdriver-manager)
-  - initialize_driver() applies anti-detection: rotating UAs, random viewport,
-    excludeSwitches, useAutomationExtension=False, CDP navigator.webdriver mask.
-  - login() logs in with SCRAPER_USERNAME / SCRAPER_PASSWORD env vars before
-    the first search page is loaded, so authenticated documents are accessible.
-  - scrape_all() scrapes only the first page (most-recent records, sorted desc).
-  - extract_page_data() adds pdf_url + doc_local_path to every record:
-      first checks for an inline document link in the row;
-      if absent, clicks the row to open the detail panel, extracts the link href
-      and attempts to click the panel's Download button to save a local copy.
+
+Logs in with SCRAPER_USERNAME / SCRAPER_PASSWORD, scrapes the first page of
+results (most-recent, sorted descending), and for the first record opens the
+detail panel to capture a local copy via the Download button.  All records are
+written to DynamoDB; optionally uploaded to S3.
 """
 
 import os
@@ -162,8 +155,7 @@ _LOGIN_SUBMIT_SELECTORS = [
     'button[class*="login"]',
 ]
 
-# CSS selectors / text fragments indicating the user is already logged in.
-# The banner "Sign Out" link is the most reliable indicator.
+# Text fragments / CSS selectors indicating the user is already logged in
 _LOGGED_IN_TEXT = ["sign out", "signout", "log out", "logout"]
 _LOGGED_IN_SELECTORS = [
     'a[href*="logout"]',
@@ -173,8 +165,7 @@ _LOGGED_IN_SELECTORS = [
     '[class*="signout"]',
 ]
 
-# CSS selectors tried in order to find the Sign In trigger (button/link that
-# opens the login form or navigates to the sign-in page).
+# CSS selectors tried in order to find the Sign In trigger.
 # publicsearch.us uses  <a href="/signin?..." class="a11y-menu">Sign In</a>
 _SIGN_IN_TRIGGER_SELECTORS = [
     'a[href*="signin"]',      # publicsearch.us: /signin?returnPath=...
@@ -188,8 +179,7 @@ _SIGN_IN_TRIGGER_SELECTORS = [
     'a[class*="login"]',
 ]
 
-# The signin page URL — used as a direct-navigation fallback when the trigger
-# link cannot be clicked (e.g. JS hasn't rendered it yet).
+# Direct-navigation fallback used when the Sign In trigger link cannot be clicked
 _SIGNIN_PATH = "/signin"
 
 
@@ -232,23 +222,15 @@ def _wait_for_new_download(
 
 
 # ---------------------------------------------------------------------------
-# Cell 3: WebDriver initialisation
+# WebDriver initialisation
 # ---------------------------------------------------------------------------
 
 def initialize_driver():
     """
-    Spin up a headless Chrome session with anti-detection measures applied.
-
-    Anti-detection techniques:
-      - Rotating randomised User-Agent string.
-      - Random viewport dimensions (1366–1920 × 768–1080).
-      - excludeSwitches: ["enable-automation"] + useAutomationExtension: False.
-      - CDP Page.addScriptToEvaluateOnNewDocument masks navigator.webdriver.
-      - Chrome download directory pre-configured so Download-button clicks
-        save to DOWNLOAD_DIR without a file-picker dialog.
-
-    Uses CHROMEDRIVER_PATH / CHROME_BIN env vars (baked into the Docker image)
-    instead of webdriver-manager, which tries to download at runtime.
+    Spin up a headless Chrome session with anti-detection measures applied:
+    rotating User-Agent, random viewport, automation-flag removal, and CDP
+    navigator.webdriver masking.  Downloads are pre-configured to save to
+    DOWNLOAD_DIR without a file-picker dialog.
     """
     chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
     chrome_bin = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
@@ -268,11 +250,9 @@ def initialize_driver():
     options.add_argument(f"--window-size={width},{height}")
     options.add_argument(f"--user-agent={ua}")
 
-    # Anti-detection: remove Chrome automation flags
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    # Configure Chrome to save downloads to download_dir without a dialog
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
@@ -286,7 +266,6 @@ def initialize_driver():
     driver = webdriver.Chrome(service=service, options=options)
     driver.set_page_load_timeout(30)
 
-    # Anti-detection: mask navigator.webdriver via CDP
     driver.execute_cdp_cmd(
         "Page.addScriptToEvaluateOnNewDocument",
         {
@@ -310,10 +289,7 @@ def initialize_driver():
 # ---------------------------------------------------------------------------
 
 def _is_logged_in(driver) -> bool:
-    """
-    Return True if the current page shows sign-out indicators in the banner.
-    Checks page source text first (fast), then falls back to CSS selectors.
-    """
+    """Return True if the current page shows sign-out indicators in the banner."""
     try:
         src = driver.page_source.lower()
         if any(t in src for t in _LOGGED_IN_TEXT):
@@ -331,9 +307,7 @@ def _is_logged_in(driver) -> bool:
 
 def _click_sign_in_trigger(driver) -> bool:
     """
-    Find and click the Sign In button/link that opens the login form.
-    Returns True if a trigger was clicked, False if none was found
-    (in which case the form may already be visible on the page).
+    Click the Sign In button/link.  Returns True if clicked, False if not found.
     """
     for sel in _SIGN_IN_TRIGGER_SELECTORS:
         try:
@@ -345,7 +319,7 @@ def _click_sign_in_trigger(driver) -> bool:
             return True
         except Exception:
             continue
-    log.debug("No sign-in trigger found — form may already be visible")
+    log.debug("No sign-in trigger found")
     return False
 
 
@@ -356,22 +330,13 @@ def _click_sign_in_trigger(driver) -> bool:
 def login(driver) -> bool:
     """
     Log in to BASE_URL using SCRAPER_USERNAME / SCRAPER_PASSWORD env vars.
-    Skips silently when credentials are not configured.
-    Returns True on success (or skip), False if login could not be completed.
-
-    Flow:
-      1. Navigate to BASE_URL and check for "Sign Out" in the banner.
-         If already logged in, return True immediately.
-      2. Click the Sign In trigger (button/link) to open the login form/modal.
-      3. Fill in credentials character-by-character (human-like pacing).
-      4. Submit the form.
-      5. Verify login succeeded by checking for "Sign Out" in the banner.
+    Returns True on success or when credentials are not configured, False on failure.
     """
     username = os.environ.get("SCRAPER_USERNAME", "")
     password = os.environ.get("SCRAPER_PASSWORD", "")
 
     if not username or not password:
-        log.info("No credentials configured (SCRAPER_USERNAME/SCRAPER_PASSWORD) — skipping login")
+        log.info("No credentials configured — skipping login")
         return True
 
     log.info("Checking login state at %s", BASE_URL)
@@ -379,17 +344,14 @@ def login(driver) -> bool:
         driver.get(BASE_URL)
         _random_sleep(2, 4)
 
-        # Step 1 — already logged in?
         if _is_logged_in(driver):
             log.info("Already logged in — skipping login")
             return True
 
         log.info("Not logged in — attempting login as %s", username)
 
-        # Step 2 — navigate to the sign-in form.
-        # Try clicking the Sign In link first; if no matching element is found
-        # (JS hasn't rendered it, or the selector changed), fall back to
-        # navigating directly to the known signin URL.
+        # Navigate to the sign-in form.  Try clicking the link first; if the
+        # selector misses (JS not rendered, layout change), fall back to direct URL.
         if _click_sign_in_trigger(driver):
             _random_sleep(1, 2)
         else:
@@ -398,14 +360,14 @@ def login(driver) -> bool:
             driver.get(signin_url)
             _random_sleep(2, 4)
 
-        # Step 3 — locate email / username field
+        # Locate email field
         email_field = None
         for sel in _LOGIN_EMAIL_SELECTORS:
             try:
                 email_field = WebDriverWait(driver, 5).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, sel))
                 )
-                log.debug("Login email field found (%s)", sel)
+                log.debug("Email field found (%s)", sel)
                 break
             except Exception:
                 continue
@@ -419,7 +381,6 @@ def login(driver) -> bool:
         for sel in _LOGIN_PASSWORD_SELECTORS:
             try:
                 password_field = driver.find_element(By.CSS_SELECTOR, sel)
-                log.debug("Login password field found (%s)", sel)
                 break
             except Exception:
                 continue
@@ -428,7 +389,7 @@ def login(driver) -> bool:
             log.warning("Could not find password field")
             return False
 
-        # Type credentials character-by-character (human-like)
+        # Type credentials character-by-character (human-like pacing)
         email_field.clear()
         for ch in username:
             email_field.send_keys(ch)
@@ -443,35 +404,31 @@ def login(driver) -> bool:
 
         _random_sleep(0.5, 1.0)
 
-        # Step 4 — submit: prefer an explicit button; fall back to Enter
+        # Submit: prefer explicit button, fall back to Enter key
         submitted = False
         for sel in _LOGIN_SUBMIT_SELECTORS:
             try:
-                submit_btn = driver.find_element(By.CSS_SELECTOR, sel)
-                submit_btn.click()
+                driver.find_element(By.CSS_SELECTOR, sel).click()
                 submitted = True
-                log.debug("Login submit button clicked (%s)", sel)
                 break
             except Exception:
                 continue
 
         if not submitted:
             password_field.send_keys(Keys.RETURN)
-            log.debug("Login submitted via Enter key")
 
         _random_sleep(3, 5)
 
-        # Step 5 — verify
         if _is_logged_in(driver):
             log.info("Login successful — signed in as %s", username)
             return True
-        else:
-            log.warning(
-                "Login submitted but 'sign out' not found in banner — "
-                "credentials may be wrong or the site layout changed (URL: %s)",
-                driver.current_url,
-            )
-            return False
+
+        log.warning(
+            "Login submitted but sign-out not found in banner — "
+            "credentials may be wrong or the site layout changed (URL: %s)",
+            driver.current_url,
+        )
+        return False
 
     except Exception as exc:
         log.warning("Login failed: %s", exc)
@@ -479,7 +436,7 @@ def login(driver) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Cell 4: URL builder + page loader
+# URL builder + page loader
 # ---------------------------------------------------------------------------
 
 def build_search_url(params, offset=0):
@@ -507,7 +464,7 @@ def load_page(driver, url, wait_time=PAGE_LOAD_WAIT):
 
 
 # ---------------------------------------------------------------------------
-# Cell 5: Data extraction helpers
+# Data extraction helpers
 # ---------------------------------------------------------------------------
 
 def get_total_results(driver):
@@ -516,11 +473,9 @@ def get_total_results(driver):
     Returns an integer (e.g. 6720) or None if the element is not found.
     """
     try:
-        elem = driver.find_element(
+        text = driver.find_element(
             By.CSS_SELECTOR, 'span[aria-label="Search Result Totals"]'
-        )
-        text = elem.text.strip()
-        log.info("Search Result Totals: '%s'", text)
+        ).text.strip()
 
         match = re.search(r"of\s+([\d,]+)\s+results", text, re.IGNORECASE)
         if match:
@@ -528,11 +483,9 @@ def get_total_results(driver):
             log.info("Total results: %d", total)
             return total
 
-        # Fallback split
         if "of" in text and "results" in text:
-            part = text.split("of")[1].split("results")[0].strip()
-            total = int(part.replace(",", ""))
-            log.info("Total results (fallback): %d", total)
+            total = int(text.split("of")[1].split("results")[0].strip().replace(",", ""))
+            log.info("Total results: %d", total)
             return total
 
         log.warning("Could not parse total results from: %s", text)
@@ -543,14 +496,10 @@ def get_total_results(driver):
 
 
 def get_pdf_url_from_row(row) -> str | None:
-    """
-    Return the document URL if a link is directly present in the row, else None.
-    Tries ROW_PDF_SELECTORS in order.
-    """
+    """Return the document URL if an inline link is present in the row, else None."""
     for sel in ROW_PDF_SELECTORS:
         try:
-            link = row.find_element(By.CSS_SELECTOR, sel)
-            href = link.get_attribute("href")
+            href = row.find_element(By.CSS_SELECTOR, sel).get_attribute("href")
             if href:
                 log.debug("Inline PDF link found (%s): %s", sel, href)
                 return href
@@ -565,16 +514,10 @@ def get_pdf_url_by_clicking(
     download_dir: str = "",
 ) -> tuple[str | None, str | None]:
     """
-    Click the row to open its detail panel then:
-      1. Extract the document URL from a panel link href.
-      2. Attempt to click the panel's Download button so Chrome saves a local copy.
+    Click the row to open its detail panel, extract the document URL, and
+    optionally trigger the Download button to save a local copy.
 
-    Returns ``(pdf_url, local_path)``:
-      pdf_url    — href extracted from the first matching panel link, or None.
-      local_path — path of the file saved by Chrome's download, or None
-                   (requires *download_dir* to be set and the button to exist).
-
-    The panel is dismissed with Escape after extraction.
+    Returns ``(pdf_url, local_path)``.  The panel is dismissed with Escape.
     """
     try:
         row.click()
@@ -596,12 +539,11 @@ def get_pdf_url_by_clicking(
             log.warning("No detail panel found after clicking row")
             return None, None
 
-        # 1. Extract href from the first matching panel link
+        # Extract document URL from panel link
         pdf_url = None
         for sel in PANEL_PDF_SELECTORS:
             try:
-                link = panel.find_element(By.CSS_SELECTOR, sel)
-                href = link.get_attribute("href")
+                href = panel.find_element(By.CSS_SELECTOR, sel).get_attribute("href")
                 if href:
                     log.debug("PDF link found in panel (%s): %s", sel, href)
                     pdf_url = href
@@ -609,29 +551,21 @@ def get_pdf_url_by_clicking(
             except Exception:
                 continue
 
-        # 2. Try to click the Download button to trigger a Chrome-managed download.
-        #    Strategy A: search inside the panel by CSS selector (works when the button
-        #                is rendered within the panel element itself).
-        #    Strategy B: search the whole page by XPath text match (used when the button
-        #                lives outside the panel, e.g. publicsearch.us puts it in the
-        #                nav bar above the panel with a dynamic CSS-in-JS class name).
+        # Click the Download button (Strategy A: CSS in panel; Strategy B: XPath on page)
         local_path = None
         if download_dir:
             existing = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
             download_clicked = False
 
-            # Strategy A — CSS selectors within the panel
             for sel in PANEL_DOWNLOAD_BUTTON_SELECTORS:
                 try:
-                    btn = panel.find_element(By.CSS_SELECTOR, sel)
-                    btn.click()
+                    panel.find_element(By.CSS_SELECTOR, sel).click()
                     log.debug("Download button clicked in panel (%s)", sel)
                     download_clicked = True
                     break
                 except Exception:
                     continue
 
-            # Strategy B — XPath text match anywhere on the page
             if not download_clicked:
                 for xpath in DOWNLOAD_BUTTON_XPATHS:
                     try:
@@ -670,16 +604,13 @@ def get_pdf_url(
     download_dir: str = "",
 ) -> tuple[str | None, str | None]:
     """
-    Get the PDF/document URL (and optional local download path) for a result row.
-    First checks for an inline link in the row; falls back to clicking the row
-    to open the detail panel.
-
-    Returns ``(pdf_url, local_path)``.
+    Return ``(pdf_url, local_path)`` for a result row.
+    Checks for an inline link first; falls back to clicking the row to open
+    the detail panel.
     """
     url = get_pdf_url_from_row(row)
     if url:
         return url, None
-    log.debug("No inline PDF link — clicking row to open detail panel")
     return get_pdf_url_by_clicking(driver, row, download_dir)
 
 
@@ -693,11 +624,11 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
     Args:
         download_dir:   Directory for Chrome-managed downloads.  Empty string
                         disables the download button entirely.
-        max_downloads:  Number of rows for which the detail panel is opened and
-                        the Download button is clicked.  Defaults to 1 (first
-                        row only) to avoid triggering bot-detection on the site.
-                        Rows beyond this limit are still scraped for text fields
-                        and any inline document links, but no panel is opened.
+        max_downloads:  Rows for which the detail panel is opened and the
+                        Download button is clicked.  Defaults to 1 (first row
+                        only) to minimise interaction volume.  Rows beyond this
+                        limit are still scraped for text fields and any inline
+                        document links, but no panel is opened.
     """
     records = []
     get_total_results(driver)  # logged for observability; result unused here
@@ -718,12 +649,9 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
                         return "N/A"
 
                 if i <= max_downloads:
-                    # Full extraction: inline link OR panel click + download
                     pdf_url, local_path = get_pdf_url(driver, row, download_dir)
                 else:
-                    # Minimal: only check for an inline link in the row.
-                    # No panel click — keeps interaction volume low to avoid
-                    # triggering bot-detection when scraping many rows.
+                    # Inline link only — no panel click
                     pdf_url = get_pdf_url_from_row(row)
                     local_path = None
 
@@ -758,25 +686,11 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
 
 def scrape_all(scrape_run_id: str, location_code: str):
     """
-    Log in, scrape the first page of results (most recent, sorted descending),
-    optionally upload each document to S3, then write records to DynamoDB.
+    Log in, scrape the first page of results, upload documents to S3 (when
+    DOCUMENTS_BUCKET is set), and write records to DynamoDB.
 
-    Each record includes:
-      - pdf_url        — remote URL sourced from the row or detail panel
-      - doc_local_path — local filesystem path if the Download button was clicked,
-                         otherwise an empty string
-      - doc_s3_uri     — ``s3://bucket/key`` if DOCUMENTS_BUCKET is configured:
-                           * preferred source is the locally-downloaded file;
-                           * falls back to downloading via requests if no local file.
-                         Empty string when S3 is not configured.
-
-    S3 upload is skipped when DOCUMENTS_BUCKET env var is not set.
-    Session cookies from the Selenium driver are forwarded to the requests-based
-    download fallback so that authenticated documents can be fetched.
-
-    Args:
-        scrape_run_id:  Unique identifier for this run (injected by ECS or caller).
-        location_code:  FK into the locations table (e.g. "CollinTx").
+    S3 upload prefers a locally-downloaded file (doc_local_path); falls back to
+    fetching the pdf_url with Selenium session cookies forwarded.
     """
     table_name = os.environ["DYNAMO_TABLE_NAME"]
     bucket = os.environ.get("DOCUMENTS_BUCKET", "")
@@ -787,20 +701,15 @@ def scrape_all(scrape_run_id: str, location_code: str):
         login(driver)
 
         url = build_search_url(SEARCH_PARAMS, offset=0)
-        log.info("=== Scraping first page ===")
-
         if not load_page(driver, url):
             log.error("Failed to load first page — aborting")
             return 0
 
         page_records = extract_page_data(driver, download_dir, max_downloads=1)
-
         if not page_records:
             log.warning("No records found on first page")
             return 0
 
-        # Capture session cookies once; forwarded to requests-based download fallback
-        # so that documents behind auth are accessible even without a local copy.
         session_cookies = driver.get_cookies() if bucket else []
 
         for rec in page_records:
@@ -809,9 +718,7 @@ def scrape_all(scrape_run_id: str, location_code: str):
 
             if bucket and rec.get("doc_number"):
                 local_path = rec.get("doc_local_path") or ""
-
                 if local_path and os.path.isfile(local_path):
-                    # Preferred: upload from the file Chrome already downloaded
                     rec["doc_s3_uri"] = s3_helper.upload_local_file(
                         local_path=local_path,
                         bucket=bucket,
@@ -819,7 +726,6 @@ def scrape_all(scrape_run_id: str, location_code: str):
                         doc_number=rec["doc_number"],
                     )
                 elif rec.get("pdf_url"):
-                    # Fallback: download via requests (forwards session cookies)
                     rec["doc_s3_uri"] = s3_helper.fetch_and_upload(
                         pdf_url=rec["pdf_url"],
                         bucket=bucket,
@@ -835,12 +741,8 @@ def scrape_all(scrape_run_id: str, location_code: str):
         written = dynamo.write_records(
             page_records, table_name, scrape_run_id, location_code
         )
-        log.info(
-            "Scrape finished: %d records written (location=%s)",
-            written, location_code,
-        )
+        log.info("Scrape finished: %d records written (location=%s)", written, location_code)
         return written
 
     finally:
         driver.quit()
-        log.info("WebDriver closed")

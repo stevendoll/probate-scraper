@@ -136,7 +136,7 @@ def write_records(
             log.error("batch_write_item error for chunk %d: %s", i // chunk_size, exc)
 
     log.info(
-        "write_records: %d/%d items written to %s (location=%s)",
+        "Wrote %d/%d records to %s (location=%s)",
         total_written, len(put_requests), table_name, location_code,
     )
     return total_written
