@@ -63,10 +63,12 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+    Default: "anthropic.claude-3-5-haiku-20241022-v1:0"
     Description: >
       Amazon Bedrock model ID used by ParseDocumentFunction.
-      Must be available in the deployment region.
+      Use the direct regional ID (e.g. anthropic.claude-3-5-haiku-20241022-v1:0)
+      rather than a cross-region inference profile (us.*) — document blocks are
+      not supported with cross-region inference profiles.
 
 # ---------------------------------------------------------------------------
 # Conditions

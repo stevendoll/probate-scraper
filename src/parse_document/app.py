@@ -28,7 +28,6 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import boto3
-import fitz  # PyMuPDF
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -81,52 +80,36 @@ def _fetch_pdf_bytes(s3_uri: str) -> bytes:
     return response["Body"].read()
 
 
-_MAX_PDF_PAGES = 20
-
-
-def _pdf_to_page_images(pdf_bytes: bytes) -> list[bytes]:
-    """
-    Render each page of a PDF to a JPEG image.
-
-    AWS Bedrock document blocks are NOT supported with cross-region inference
-    profiles (``us.*`` model IDs).  Sending the pages as image blocks is the
-    workaround — image blocks work fine with cross-region inference.
-    """
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    images = []
-    for page_num in range(min(doc.page_count, _MAX_PDF_PAGES)):
-        page = doc.load_page(page_num)
-        pix  = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-        images.append(pix.tobytes("jpeg"))
-    doc.close()
-    return images
-
-
 def _call_bedrock(pdf_bytes: bytes) -> dict:
     """
-    Send PDF pages as JPEG images to Bedrock and return the parsed JSON dict.
+    Send the PDF to Bedrock via the Converse API and return the parsed JSON dict.
 
-    Image blocks are used instead of a document block because AWS Bedrock
-    document blocks are not supported with cross-region inference profiles
-    (``us.*`` model IDs).  Image blocks work with cross-region inference.
+    Uses a document block — requires a direct regional model ID
+    (e.g. anthropic.claude-3-5-haiku-20241022-v1:0).  Cross-region inference
+    profiles (us.*) do not support document blocks and silently return empty
+    responses; use the direct ID to avoid this.
 
     The model is expected to return a single JSON object — no markdown fences.
     If the response contains a fenced code block we strip the fences first.
     """
-    page_images = _pdf_to_page_images(pdf_bytes)
-    if not page_images:
-        raise ValueError("PDF produced no pages")
-
-    content = [
-        {"image": {"format": "jpeg", "source": {"bytes": img}}}
-        for img in page_images
-    ]
-    content.append({"text": USER_PROMPT})
-
     response = _bedrock.converse(
         modelId=_model_id,
         system=[{"text": SYSTEM_PROMPT}],
-        messages=[{"role": "user", "content": content}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "document": {
+                            "format": "pdf",
+                            "name":   "probate-filing",
+                            "source": {"bytes": pdf_bytes},
+                        },
+                    },
+                    {"text": USER_PROMPT},
+                ],
+            }
+        ],
         inferenceConfig={
             "maxTokens": 1024,
             "temperature": 0,
