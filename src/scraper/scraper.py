@@ -675,51 +675,85 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
         if len(rows) <= 2:
             continue
 
+        data_rows = rows[2:]
         log.info("Processing table with %d rows", len(rows))
-        for i, row in enumerate(rows[2:], start=1):
+
+        # Log first row HTML to confirm selectors (remove once stable)
+        if data_rows:
             try:
-                def _text(*selectors):
-                    """Try each selector in order; return the first non-empty match."""
+                log.info("First row HTML: %s", data_rows[0].get_attribute("outerHTML")[:3000])
+            except Exception:
+                pass
+
+        # ── Phase 1: extract text + inline links from ALL rows before any click.
+        # Clicking a row to open the detail panel causes React to re-render the
+        # table, staling every captured WebElement reference.  Reading text first
+        # means all 50 rows are scraped while their DOM nodes are still live.
+        extracted = []
+        for i, row in enumerate(data_rows, start=1):
+            try:
+                def _text(*selectors, _row=row):
+                    """Try each selector in order; return first non-empty match."""
                     for sel in selectors:
                         try:
-                            text = row.find_element(By.CSS_SELECTOR, sel).text.strip()
+                            text = _row.find_element(By.CSS_SELECTOR, sel).text.strip()
                             if text:
                                 return text
                         except Exception:
                             continue
                     return "N/A"
 
-                # Dump the first data row's HTML so we can diagnose selector mismatches
-                if i == 1:
-                    try:
-                        log.info("First row HTML: %s", row.get_attribute("outerHTML")[:3000])
-                    except Exception:
-                        pass
-
-                if i <= max_downloads:
-                    pdf_url, local_path = get_pdf_url(driver, row, download_dir)
-                else:
-                    # Inline link only — no panel click
-                    pdf_url = get_pdf_url_from_row(row)
-                    local_path = None
-
-                record = {
+                extracted.append({
+                    "index":             i,
+                    "row":               row,
                     "grantor":           _text('td.col-3[column="[object Object]"] span', 'td.col-3 span'),
                     "grantee":           _text('td.col-4[column="[object Object]"] span', 'td.col-4 span'),
                     "doc_type":          _text('td.col-5[column="[object Object]"] span em', 'td.col-5 span em', 'td.col-5 span'),
                     "recorded_date":     _text('td.col-6[column="[object Object]"] span', 'td.col-6 span'),
                     "doc_number":        _text('td.col-7[column="[object Object]"] span', 'td.col-7 span'),
                     "book_volume_page":  _text('td.col-8[column="[object Object]"] span', 'td.col-8 span'),
-                    "legal_description": _text("td.col-9"),
-                    "pdf_url":           pdf_url,
-                    "doc_local_path":    local_path or "",
-                    "record_number":     i,
-                    "extracted_at":      datetime.utcnow().isoformat(),
-                }
-                records.append(record)
+                    "legal_description": _text('td.col-9 span', 'td.col-9'),
+                    "inline_url":        get_pdf_url_from_row(row),
+                })
             except Exception as exc:
-                log.warning("Row %d extraction error: %s", i, exc)
-                continue
+                log.warning("Row %d text extraction error: %s", i, exc)
+
+        # ── Phase 2: click for download on eligible rows (after all text captured).
+        # The click may re-render the table; that's fine because we're done reading.
+        for entry in extracted:
+            i   = entry["index"]
+            row = entry["row"]
+            if i <= max_downloads:
+                if entry["inline_url"]:
+                    entry["pdf_url"]    = entry["inline_url"]
+                    entry["local_path"] = None
+                else:
+                    try:
+                        pdf_url, local_path = get_pdf_url_by_clicking(driver, row, download_dir)
+                    except Exception as exc:
+                        log.warning("Row %d click error: %s", entry["index"], exc)
+                        pdf_url, local_path = None, None
+                    entry["pdf_url"]    = pdf_url
+                    entry["local_path"] = local_path
+            else:
+                entry["pdf_url"]    = entry["inline_url"]
+                entry["local_path"] = None
+
+        # ── Phase 3: assemble final record dicts
+        for entry in extracted:
+            records.append({
+                "grantor":           entry["grantor"],
+                "grantee":           entry["grantee"],
+                "doc_type":          entry["doc_type"],
+                "recorded_date":     entry["recorded_date"],
+                "doc_number":        entry["doc_number"],
+                "book_volume_page":  entry["book_volume_page"],
+                "legal_description": entry["legal_description"],
+                "pdf_url":           entry.get("pdf_url"),
+                "doc_local_path":    entry.get("local_path") or "",
+                "record_number":     entry["index"],
+                "extracted_at":      datetime.utcnow().isoformat(),
+            })
 
         if records:
             break  # stop at the first table that yielded data
