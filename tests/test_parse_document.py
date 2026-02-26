@@ -161,6 +161,17 @@ class TestParseDocument(unittest.TestCase):
         parse_app._bedrock = self.mock_bedrock
         parse_app._model_id = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
 
+        # Stub _pdf_to_page_images so tests don't need a real PDF / PyMuPDF.
+        self._page_images_patcher = patch.object(
+            parse_app,
+            "_pdf_to_page_images",
+            return_value=[b"fake-jpeg-page-1"],
+        )
+        self._page_images_patcher.start()
+
+    def tearDown(self):
+        self._page_images_patcher.stop()
+
     # ── 404 — lead not found ────────────────────────────────────────────────
 
     def test_lead_not_found_returns_404(self):
@@ -346,9 +357,15 @@ class TestParseDocument(unittest.TestCase):
             Key="documents/CollinTx/20240001.pdf",
         )
 
-    # ── Bedrock PDF bytes forwarded ──────────────────────────────────────────
+    # ── Bedrock receives image blocks (not a document block) ────────────────
 
-    def test_pdf_bytes_forwarded_to_bedrock(self):
+    def test_page_images_forwarded_to_bedrock_as_image_blocks(self):
+        """_pdf_to_page_images output must be sent as image blocks.
+
+        AWS Bedrock document blocks are not supported with cross-region
+        inference profiles.  The fix converts the PDF to per-page JPEG images
+        and sends them as image content blocks instead.
+        """
         pdf_content = b"%PDF-1.4 fake content"
         lead = _make_lead()
         self.mock_table.get_item.side_effect = [
@@ -366,9 +383,20 @@ class TestParseDocument(unittest.TestCase):
         parse_app.parse_document("20240001")
 
         converse_call = self.mock_bedrock.converse.call_args.kwargs
-        doc_block = converse_call["messages"][0]["content"][0]["document"]
-        self.assertEqual(doc_block["source"]["bytes"], pdf_content)
-        self.assertEqual(doc_block["format"], "pdf")
+        content_blocks = converse_call["messages"][0]["content"]
+
+        # First block must be an image block (not a document block)
+        first_block = content_blocks[0]
+        self.assertIn("image", first_block, "Expected image block, got: " + str(first_block))
+        self.assertEqual(first_block["image"]["format"], "jpeg")
+        self.assertEqual(first_block["image"]["source"]["bytes"], b"fake-jpeg-page-1")
+
+        # Last block must be the text prompt
+        self.assertIn("text", content_blocks[-1])
+
+        # No document blocks anywhere
+        for block in content_blocks:
+            self.assertNotIn("document", block, "document block found — use image blocks instead")
 
     # ── Null fields from Bedrock are handled gracefully ──────────────────────
 
