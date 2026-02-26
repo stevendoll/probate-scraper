@@ -678,11 +678,23 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
         log.info("Processing table with %d rows", len(rows))
         for i, row in enumerate(rows[2:], start=1):
             try:
-                def _text(sel):
+                def _text(*selectors):
+                    """Try each selector in order; return the first non-empty match."""
+                    for sel in selectors:
+                        try:
+                            text = row.find_element(By.CSS_SELECTOR, sel).text.strip()
+                            if text:
+                                return text
+                        except Exception:
+                            continue
+                    return "N/A"
+
+                # Dump the first data row's HTML so we can diagnose selector mismatches
+                if i == 1:
                     try:
-                        return row.find_element(By.CSS_SELECTOR, sel).text.strip()
+                        log.info("First row HTML: %s", row.get_attribute("outerHTML")[:3000])
                     except Exception:
-                        return "N/A"
+                        pass
 
                 if i <= max_downloads:
                     pdf_url, local_path = get_pdf_url(driver, row, download_dir)
@@ -692,12 +704,12 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
                     local_path = None
 
                 record = {
-                    "grantor":           _text('td.col-3[column="[object Object]"] span'),
-                    "grantee":           _text('td.col-4[column="[object Object]"] span'),
-                    "doc_type":          _text('td.col-5[column="[object Object]"] span em'),
-                    "recorded_date":     _text('td.col-6[column="[object Object]"] span'),
-                    "doc_number":        _text('td.col-7[column="[object Object]"] span'),
-                    "book_volume_page":  _text('td.col-8[column="[object Object]"] span'),
+                    "grantor":           _text('td.col-3[column="[object Object]"] span', 'td.col-3 span'),
+                    "grantee":           _text('td.col-4[column="[object Object]"] span', 'td.col-4 span'),
+                    "doc_type":          _text('td.col-5[column="[object Object]"] span em', 'td.col-5 span em', 'td.col-5 span'),
+                    "recorded_date":     _text('td.col-6[column="[object Object]"] span', 'td.col-6 span'),
+                    "doc_number":        _text('td.col-7[column="[object Object]"] span', 'td.col-7 span'),
+                    "book_volume_page":  _text('td.col-8[column="[object Object]"] span', 'td.col-8 span'),
                     "legal_description": _text("td.col-9"),
                     "pdf_url":           pdf_url,
                     "doc_local_path":    local_path or "",
@@ -763,7 +775,7 @@ def scrape_all(scrape_run_id: str, location_code: str):
             rec["page_number"] = 1
             rec["offset"] = 0
 
-            if bucket and rec.get("doc_number"):
+            if bucket and str(rec.get("doc_number", "")).strip().isdigit():
                 local_path = rec.get("doc_local_path") or ""
                 if local_path and os.path.isfile(local_path):
                     rec["doc_s3_uri"] = s3_helper.upload_local_file(

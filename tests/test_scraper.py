@@ -1008,11 +1008,11 @@ class TestScrapeAllWithS3(unittest.TestCase):
         driver = MagicMock()
         mock_init.return_value = driver
         mock_extract.return_value = [
-            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
-            {"doc_number": "DOC2", "pdf_url": "https://site.com/doc/DOC2", "doc_local_path": ""},
+            {"doc_number": "20240001", "pdf_url": "https://site.com/doc/20240001", "doc_local_path": ""},
+            {"doc_number": "20240002", "pdf_url": "https://site.com/doc/20240002", "doc_local_path": ""},
         ]
         mock_dynamo.write_records.return_value = 2
-        scraper.s3_helper.fetch_and_upload.return_value = "s3://bucket/documents/CollinTx/DOC1.pdf"
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://bucket/documents/CollinTx/20240001.pdf"
 
         with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
@@ -1035,13 +1035,13 @@ class TestScrapeAllWithS3(unittest.TestCase):
         mock_init.return_value = driver
         mock_extract.return_value = [
             {
-                "doc_number": "DOC1",
-                "pdf_url": "https://site.com/doc/DOC1",
+                "doc_number": "20240001",
+                "pdf_url": "https://site.com/doc/20240001",
                 "doc_local_path": "/tmp/20240001.pdf",
             },
         ]
         mock_dynamo.write_records.return_value = 1
-        scraper.s3_helper.upload_local_file.return_value = "s3://bucket/documents/CollinTx/DOC1.pdf"
+        scraper.s3_helper.upload_local_file.return_value = "s3://bucket/documents/CollinTx/20240001.pdf"
 
         with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
@@ -1086,7 +1086,7 @@ class TestScrapeAllWithS3(unittest.TestCase):
         driver = MagicMock()
         mock_init.return_value = driver
         mock_extract.return_value = [
-            {"doc_number": "DOC1", "pdf_url": None, "doc_local_path": ""},
+            {"doc_number": "20240001", "pdf_url": None, "doc_local_path": ""},
         ]
         mock_dynamo.write_records.return_value = 1
 
@@ -1108,10 +1108,10 @@ class TestScrapeAllWithS3(unittest.TestCase):
         """The S3 URI returned by fetch_and_upload must appear on the written record."""
         driver = MagicMock()
         mock_init.return_value = driver
-        record = {"doc_number": "DOC99", "pdf_url": "https://site.com/doc/DOC99", "doc_local_path": ""}
+        record = {"doc_number": "20240099", "pdf_url": "https://site.com/doc/20240099", "doc_local_path": ""}
         mock_extract.return_value = [record]
         mock_dynamo.write_records.return_value = 1
-        scraper.s3_helper.fetch_and_upload.return_value = "s3://my-bucket/documents/CollinTx/DOC99.pdf"
+        scraper.s3_helper.fetch_and_upload.return_value = "s3://my-bucket/documents/CollinTx/20240099.pdf"
 
         with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
@@ -1119,7 +1119,7 @@ class TestScrapeAllWithS3(unittest.TestCase):
 
         written = mock_dynamo.write_records.call_args[0][0]
         self.assertEqual(written[0]["doc_s3_uri"],
-                         "s3://my-bucket/documents/CollinTx/DOC99.pdf")
+                         "s3://my-bucket/documents/CollinTx/20240099.pdf")
 
     @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
@@ -1134,7 +1134,7 @@ class TestScrapeAllWithS3(unittest.TestCase):
         driver.get_cookies.return_value = [{"name": "sess", "value": "tok123"}]
         mock_init.return_value = driver
         mock_extract.return_value = [
-            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
+            {"doc_number": "20240001", "pdf_url": "https://site.com/doc/20240001", "doc_local_path": ""},
         ]
         mock_dynamo.write_records.return_value = 1
         scraper.s3_helper.fetch_and_upload.return_value = "s3://b/k.pdf"
@@ -1151,6 +1151,29 @@ class TestScrapeAllWithS3(unittest.TestCase):
     @patch("scraper.extract_page_data")
     @patch("scraper.load_page", return_value=True)
     @patch("scraper.initialize_driver")
+    def test_s3_upload_skipped_when_doc_number_not_integer(
+        self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
+    ):
+        """S3 upload must be skipped when doc_number is non-numeric (e.g. 'N/A')."""
+        driver = MagicMock()
+        mock_init.return_value = driver
+        mock_extract.return_value = [
+            {"doc_number": "N/A", "pdf_url": "https://site.com/doc/1", "doc_local_path": "/tmp/N-A.pdf"},
+        ]
+        mock_dynamo.write_records.return_value = 0
+
+        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+                                     "DOCUMENTS_BUCKET": "my-bucket"}):
+            scrape_all("run-s3-noint", "CollinTx")
+
+        scraper.s3_helper.upload_local_file.assert_not_called()
+        scraper.s3_helper.fetch_and_upload.assert_not_called()
+
+    @patch("scraper.login", return_value=True)
+    @patch("scraper.dynamo")
+    @patch("scraper.extract_page_data")
+    @patch("scraper.load_page", return_value=True)
+    @patch("scraper.initialize_driver")
     def test_upload_failure_does_not_abort_scrape(
         self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
     ):
@@ -1158,8 +1181,8 @@ class TestScrapeAllWithS3(unittest.TestCase):
         driver = MagicMock()
         mock_init.return_value = driver
         mock_extract.return_value = [
-            {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
-            {"doc_number": "DOC2", "pdf_url": "https://site.com/doc/DOC2", "doc_local_path": ""},
+            {"doc_number": "20240001", "pdf_url": "https://site.com/doc/20240001", "doc_local_path": ""},
+            {"doc_number": "20240002", "pdf_url": "https://site.com/doc/20240002", "doc_local_path": ""},
         ]
         mock_dynamo.write_records.return_value = 2
         scraper.s3_helper.fetch_and_upload.return_value = None  # all uploads fail
