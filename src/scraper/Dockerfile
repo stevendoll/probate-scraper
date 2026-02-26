@@ -18,6 +18,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py scraper.py dynamo.py ./
+COPY app.py scraper.py dynamo.py s3.py ./
 
 CMD ["python", "app.py"]
