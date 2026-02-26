@@ -1,6 +1,6 @@
 """
-local_api_server.py — run the ApiFunction and TriggerFunction Lambda handlers
-as a single local HTTP server.
+local_api_server.py — run the ApiFunction, TriggerFunction, and
+ParseDocumentFunction Lambda handlers as a single local HTTP server.
 
 Usage:
     pipenv run python scripts/local_api_server.py [port]
@@ -18,6 +18,9 @@ Supported routes:
   DELETE /real-estate/probate-leads/subscribers/{subscriber_id}
   POST   /real-estate/probate-leads/stripe/webhook
   POST   /real-estate/probate-leads/{location_path}/update   (ECS stubbed locally)
+  POST   /real-estate/probate-leads/leads/{lead_id}/parse-document
+           (calls real Bedrock + S3; requires DOCUMENTS_BUCKET env var and
+            AWS credentials with bedrock:InvokeModel + s3:GetObject access)
 """
 
 import importlib.util
@@ -42,6 +45,8 @@ os.environ.setdefault("STRIPE_SECRET_KEY",       "")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET",   "")
 os.environ.setdefault("POWERTOOLS_TRACE_DISABLED", "true")
 os.environ.setdefault("LOG_LEVEL",               "INFO")
+os.environ.setdefault("DOCUMENTS_BUCKET",         "")
+os.environ.setdefault("BEDROCK_MODEL_ID",         "us.anthropic.claude-3-5-haiku-20241022-v1:0")
 
 # Dummy ECS env vars so the TriggerFunction handler can be imported
 os.environ.setdefault("ECS_CLUSTER_ARN",     "arn:aws:ecs:us-east-1:000000000000:cluster/local")
@@ -81,6 +86,23 @@ with patch("boto3.client", return_value=_mock_ecs):
     _tspec.loader.exec_module(_trigger_mod)
 
 trigger_handler = _trigger_mod.handler
+
+# ── load the ParseDocumentFunction handler ────────────────────────────────────
+# Uses real AWS credentials for Bedrock + S3 (set DOCUMENTS_BUCKET to your
+# bucket name and ensure your shell credentials have the required permissions).
+# DynamoDB calls still hit DynamoDB Local.
+_parse_doc_src = os.path.join(os.path.dirname(__file__), "..", "src", "parse_document")
+sys.path.insert(0, os.path.abspath(_parse_doc_src))
+
+_parse_doc_file = os.path.join(_parse_doc_src, "app.py")
+_pdspec = importlib.util.spec_from_file_location("_parse_document_app", _parse_doc_file)
+_parse_doc_mod = importlib.util.module_from_spec(_pdspec)
+_pdspec.loader.exec_module(_parse_doc_mod)
+
+# Point parse-document's DynamoDB table at DynamoDB Local
+_parse_doc_mod._table = _parse_doc_mod._dynamodb.Table(os.environ["DYNAMO_TABLE_NAME"])
+
+parse_document_handler = _parse_doc_mod.handler
 
 
 # ── mock Lambda context ────────────────────────────────────────────────────────
@@ -133,6 +155,10 @@ class LambdaHandler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "subscribers":
             return {"subscriber_id": parts[1]}
 
+        # /leads/{lead_id}/parse-document
+        if len(parts) == 3 and parts[0] == "leads" and parts[2] == "parse-document":
+            return {"lead_id": parts[1]}
+
         return None
 
     def _read_body(self) -> bytes:
@@ -150,6 +176,20 @@ class LambdaHandler(BaseHTTPRequestHandler):
         qs_raw = parse_qs(parsed.query, keep_blank_values=True)
         qs     = {k: v[0] for k, v in qs_raw.items()}
         body   = self._read_body() if method in ("POST", "PATCH", "PUT") else None
+
+        # POST /leads/{lead_id}/parse-document → ParseDocumentFunction
+        if (method == "POST" and len(parts) == 3
+                and parts[0] == "leads" and parts[2] == "parse-document"):
+            event  = self._build_event(method, parsed.path, qs, body, dict(self.headers))
+            result = parse_document_handler(event, _LocalContext())
+            all_headers = {**result.get("headers", {}), **result.get("multiValueHeaders", {})}
+            body_str = result.get("body", "{}")
+            try:
+                body_obj = json.loads(body_str)
+            except Exception:
+                body_obj = {"raw": body_str}
+            self._send(result["statusCode"], body_obj, all_headers)
+            return
 
         # POST /{location_path}/update → TriggerFunction (ECS stubbed locally)
         if method == "POST" and len(parts) == 2 and parts[1] == "update":
@@ -211,5 +251,6 @@ if __name__ == "__main__":
     print(f"    GET  http://localhost:{port}{BASE_PATH}/collin-tx/leads?from_date=2026-01-01")
     print(f"    POST http://localhost:{port}{BASE_PATH}/subscribers")
     print(f"    POST http://localhost:{port}{BASE_PATH}/collin-tx/update   (ECS stubbed)")
+    print(f"    POST http://localhost:{port}{BASE_PATH}/leads/{{lead_id}}/parse-document")
     print("  Ctrl+C to stop\n")
     HTTPServer(("", port), LambdaHandler).serve_forever()
