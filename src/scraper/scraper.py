@@ -192,6 +192,42 @@ def _random_sleep(min_s: float = 0.5, max_s: float = 1.5) -> None:
     time.sleep(random.uniform(min_s, max_s))
 
 
+def _rename_download(local_path: str, doc_number: str, used_names: set) -> str:
+    """
+    Rename a locally-downloaded file to ``{doc_number}{ext}``.
+
+    If ``{doc_number}{ext}`` is already in *used_names* (i.e. a duplicate
+    doc_number in the same run), appends a letter suffix (a, b, c, …) until
+    a unique name is found.  *used_names* is updated in-place.
+
+    Returns the new path on success, or *local_path* unchanged if the file
+    does not exist or the OS rename fails.
+    """
+    if not local_path or not os.path.isfile(local_path):
+        return local_path
+
+    ext = os.path.splitext(local_path)[1].lower() or ".bin"
+    directory = os.path.dirname(local_path)
+    safe_doc = doc_number.replace("/", "-").replace(" ", "_")
+
+    candidate = f"{safe_doc}{ext}"
+    if candidate in used_names:
+        for suffix in "abcdefghijklmnopqrstuvwxyz":
+            candidate = f"{safe_doc}{suffix}{ext}"
+            if candidate not in used_names:
+                break
+
+    new_path = os.path.join(directory, candidate)
+    try:
+        os.rename(local_path, new_path)
+        used_names.add(candidate)
+        log.info("Renamed download: %s → %s", os.path.basename(local_path), candidate)
+        return new_path
+    except OSError as exc:
+        log.warning("Could not rename %s → %s: %s", local_path, new_path, exc)
+        return local_path
+
+
 def _wait_for_new_download(
     download_dir: str,
     existing_files: set,
@@ -709,6 +745,17 @@ def scrape_all(scrape_run_id: str, location_code: str):
         if not page_records:
             log.warning("No records found on first page")
             return 0
+
+        # Rename locally-downloaded files to use doc_number as the filename.
+        # Deduplicates with a/b/c/… suffixes if the same doc_number appears twice.
+        _used_download_names: set = set()
+        for rec in page_records:
+            local_path = rec.get("doc_local_path") or ""
+            doc_number = rec.get("doc_number") or ""
+            if local_path and doc_number and doc_number not in ("N/A", "UNKNOWN"):
+                rec["doc_local_path"] = _rename_download(
+                    local_path, doc_number, _used_download_names
+                )
 
         session_cookies = driver.get_cookies() if bucket else []
 
