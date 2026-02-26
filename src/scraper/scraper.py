@@ -162,8 +162,10 @@ _LOGGED_IN_SELECTORS = [
 ]
 
 # CSS selectors tried in order to find the Sign In trigger (button/link that
-# opens the login modal or navigates to the login form).
+# opens the login form or navigates to the sign-in page).
+# publicsearch.us uses  <a href="/signin?..." class="a11y-menu">Sign In</a>
 _SIGN_IN_TRIGGER_SELECTORS = [
+    'a[href*="signin"]',      # publicsearch.us: /signin?returnPath=...
     'a[href*="/login"]',
     'button[class*="sign-in"]',
     'a[class*="sign-in"]',
@@ -173,6 +175,10 @@ _SIGN_IN_TRIGGER_SELECTORS = [
     'button[class*="login"]',
     'a[class*="login"]',
 ]
+
+# The signin page URL — used as a direct-navigation fallback when the trigger
+# link cannot be clicked (e.g. JS hasn't rendered it yet).
+_SIGNIN_PATH = "/signin"
 
 
 # ---------------------------------------------------------------------------
@@ -368,9 +374,17 @@ def login(driver) -> bool:
 
         log.info("Not logged in — attempting login as %s", username)
 
-        # Step 2 — open the login form (may be a modal or a nav link)
-        _click_sign_in_trigger(driver)
-        _random_sleep(1, 2)
+        # Step 2 — navigate to the sign-in form.
+        # Try clicking the Sign In link first; if no matching element is found
+        # (JS hasn't rendered it, or the selector changed), fall back to
+        # navigating directly to the known signin URL.
+        if _click_sign_in_trigger(driver):
+            _random_sleep(1, 2)
+        else:
+            signin_url = BASE_URL + _SIGNIN_PATH
+            log.info("Sign-in trigger not found — navigating directly to %s", signin_url)
+            driver.get(signin_url)
+            _random_sleep(2, 4)
 
         # Step 3 — locate email / username field
         email_field = None
