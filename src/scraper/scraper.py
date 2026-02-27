@@ -604,6 +604,10 @@ def get_pdf_url_by_clicking(
     Returns ``(pdf_url, local_path)``.  The panel is dismissed with Escape.
     """
     try:
+        # Brief pause before clicking — simulates a human reading the row
+        # before selecting it, and provides a natural gap between successive
+        # detail-panel openings.
+        _random_sleep(0.6, 1.4)
         row.click()
         _random_sleep(DETAIL_WAIT - 0.5, DETAIL_WAIT + 1.0)
 
@@ -641,6 +645,9 @@ def get_pdf_url_by_clicking(
             existing = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
             download_clicked = False
 
+            # Pause before clicking Download — simulates reading the panel
+            _random_sleep(0.8, 1.8)
+
             for sel in PANEL_DOWNLOAD_BUTTON_SELECTORS:
                 try:
                     panel.find_element(By.CSS_SELECTOR, sel).click()
@@ -668,10 +675,11 @@ def get_pdf_url_by_clicking(
                 if local_path:
                     log.info("Document downloaded locally: %s", local_path)
 
-        # Dismiss the panel
+        # Dismiss the panel, then pause before moving on to the next row —
+        # simulates the time a human takes to review what they just downloaded.
         try:
             driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            _random_sleep(0.3, 0.7)
+            _random_sleep(1.5, 3.5)
         except Exception:
             pass
 
