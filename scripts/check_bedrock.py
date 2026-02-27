@@ -9,12 +9,12 @@ Usage:
     pipenv run python scripts/check_bedrock.py
 
     # Override model or region:
-    BEDROCK_MODEL_ID=us.anthropic.claude-3-5-haiku-20241022-v1:0 \\
+    BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0 \\
     AWS_DEFAULT_REGION=us-east-1 \\
     pipenv run python scripts/check_bedrock.py
 
 Environment variables:
-    BEDROCK_MODEL_ID   Model to test (default: us.anthropic.claude-3-5-haiku-20241022-v1:0)
+    BEDROCK_MODEL_ID   Model to test (default: anthropic.claude-3-haiku-20240307-v1:0)
     AWS_DEFAULT_REGION AWS region    (default: us-east-1)
 """
 
@@ -26,7 +26,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 
 MODEL_ID = os.environ.get(
     "BEDROCK_MODEL_ID",
-    "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+    "anthropic.claude-3-haiku-20240307-v1:0",
 )
 REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
@@ -75,7 +75,7 @@ def main() -> int:
             print("  Steps:")
             print(f"    1. Open the Bedrock model catalog:")
             print(f"       https://{REGION}.console.aws.amazon.com/bedrock/home?region={REGION}#/model-catalog")
-            print(f"    2. Search for 'Claude 3.5 Haiku'")
+            print(f"    2. Search for 'Claude 3 Haiku'")
             print(f"    3. Click the model → complete the use case details form")
             print(f"    4. Wait for approval (usually instant) then re-run: make check-bedrock\n")
 
@@ -85,11 +85,9 @@ def main() -> int:
             print(f'    {{"Effect": "Allow", "Action": "bedrock:InvokeModel", "Resource": "*"}}\n')
 
         elif code == "ValidationException" and "on-demand throughput" in msg.lower():
-            print(f"  {YELLOW}Fix{RESET}: Newer Claude models require a cross-region inference profile.")
-            print(f"  Direct model IDs (e.g. us.anthropic.claude-3-5-haiku-20241022-v1:0) cannot be")
-            print(f"  invoked on-demand — use the us.* inference profile instead:")
-            print(f"  Correct:   us.anthropic.claude-3-5-haiku-20241022-v1:0")
-            print(f"  Incorrect: anthropic.claude-3-5-haiku-20241022-v1:0\n")
+            print(f"  {YELLOW}Fix{RESET}: This model requires a cross-region inference profile (us.* prefix).")
+            print(f"  Claude 3 Haiku supports on-demand; if you see this the model ID is wrong.")
+            print(f"  Expected: anthropic.claude-3-haiku-20240307-v1:0\n")
 
         elif code in ("ResourceNotFoundException", "ValidationException"):
             print(f"  {YELLOW}Fix{RESET}: Model '{MODEL_ID}' not found in {REGION}.")

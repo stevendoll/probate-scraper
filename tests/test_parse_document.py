@@ -159,18 +159,7 @@ class TestParseDocument(unittest.TestCase):
         parse_app._table    = self.mock_table
         parse_app._s3       = self.mock_s3
         parse_app._bedrock  = self.mock_bedrock
-        parse_app._model_id = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
-
-        # Stub _pdf_to_page_images so tests don't need a real PDF / PyMuPDF.
-        self._page_images_patcher = patch.object(
-            parse_app,
-            "_pdf_to_page_images",
-            return_value=[b"fake-jpeg-page-1"],
-        )
-        self._page_images_patcher.start()
-
-    def tearDown(self):
-        self._page_images_patcher.stop()
+        parse_app._model_id = "anthropic.claude-3-haiku-20240307-v1:0"
 
     # ── 404 — lead not found ────────────────────────────────────────────────
 
@@ -357,11 +346,10 @@ class TestParseDocument(unittest.TestCase):
             Key="documents/CollinTx/20240001.pdf",
         )
 
-    # ── Bedrock receives image blocks (cross-region inference workaround) ───────
-    # Document blocks are NOT supported with cross-region inference profiles
-    # (us.*).  The fix renders each PDF page to a JPEG and sends image blocks.
+    # ── Bedrock PDF bytes forwarded via document block ───────────────────────
 
-    def test_page_images_forwarded_to_bedrock_as_image_blocks(self):
+    def test_pdf_bytes_forwarded_to_bedrock(self):
+        pdf_content = b"%PDF-1.4 fake content"
         lead = _make_lead()
         self.mock_table.get_item.side_effect = [
             {"Item": lead},
@@ -371,27 +359,16 @@ class TestParseDocument(unittest.TestCase):
                       "parse_error": ""}},
         ]
         self.mock_s3.get_object.return_value = {
-            "Body": MagicMock(read=MagicMock(return_value=b"%PDF-1.4 fake"))
+            "Body": MagicMock(read=MagicMock(return_value=pdf_content))
         }
         self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
 
         parse_app.parse_document("20240001")
 
-        converse_call  = self.mock_bedrock.converse.call_args.kwargs
-        content_blocks = converse_call["messages"][0]["content"]
-
-        # First block must be an image block (not a document block)
-        first = content_blocks[0]
-        self.assertIn("image", first, f"Expected image block, got: {first}")
-        self.assertEqual(first["image"]["format"], "jpeg")
-        self.assertEqual(first["image"]["source"]["bytes"], b"fake-jpeg-page-1")
-
-        # Last block must be the text prompt
-        self.assertIn("text", content_blocks[-1])
-
-        # No document blocks anywhere
-        for block in content_blocks:
-            self.assertNotIn("document", block, "document block found — use image blocks")
+        converse_call = self.mock_bedrock.converse.call_args.kwargs
+        doc_block = converse_call["messages"][0]["content"][0]["document"]
+        self.assertEqual(doc_block["source"]["bytes"], pdf_content)
+        self.assertEqual(doc_block["format"], "pdf")
 
     # ── Null fields from Bedrock are handled gracefully ──────────────────────
 

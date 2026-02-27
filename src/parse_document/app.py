@@ -8,7 +8,7 @@ Flow:
   1. Look up the lead by doc_number (lead_id) in DynamoDB.
   2. Verify it has a doc_s3_uri pointing to the stored PDF.
   3. Fetch the PDF bytes from S3.
-  4. Send the PDF to Amazon Bedrock (Claude 3.5 Haiku) via the Converse API
+  4. Send the PDF to Amazon Bedrock (Claude 3 Haiku) via the Converse API
      together with a structured-extraction prompt.
   5. Parse the JSON response from Bedrock.
   6. Persist the extracted fields back to the leads table via UpdateItem.
@@ -17,7 +17,7 @@ Flow:
 Environment variables:
   DYNAMO_TABLE_NAME   — leads table (default: leads)
   DOCUMENTS_BUCKET    — S3 bucket where PDFs are stored
-  BEDROCK_MODEL_ID    — Bedrock model ID (default: us.anthropic.claude-3-5-haiku-20241022-v1:0)
+  BEDROCK_MODEL_ID    — Bedrock model ID (default: anthropic.claude-3-haiku-20240307-v1:0)
   AWS_DEFAULT_REGION  — AWS region (injected by Lambda runtime)
 """
 
@@ -28,7 +28,6 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import boto3
-import fitz  # PyMuPDF
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -47,7 +46,7 @@ _table_name   = os.environ.get("DYNAMO_TABLE_NAME", "leads")
 _bucket_name  = os.environ.get("DOCUMENTS_BUCKET", "")
 _model_id     = os.environ.get(
     "BEDROCK_MODEL_ID",
-    "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+    "anthropic.claude-3-haiku-20240307-v1:0",
 )
 
 _dynamodb = boto3.resource("dynamodb", region_name=_region)
@@ -81,54 +80,36 @@ def _fetch_pdf_bytes(s3_uri: str) -> bytes:
     return response["Body"].read()
 
 
-_MAX_PDF_PAGES = 20
-
-
-def _pdf_to_page_images(pdf_bytes: bytes) -> list[bytes]:
-    """
-    Render each page of a PDF to a JPEG image.
-
-    Newer Claude models (3.5+) require cross-region inference profiles (us.*),
-    which do not support document blocks — they silently return empty responses.
-    Sending pages as image blocks is the workaround; image blocks work fine
-    with cross-region inference profiles.
-    """
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    images = []
-    for page_num in range(min(doc.page_count, _MAX_PDF_PAGES)):
-        page = doc.load_page(page_num)
-        pix  = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-        images.append(pix.tobytes("jpeg"))
-    doc.close()
-    return images
-
-
 def _call_bedrock(pdf_bytes: bytes) -> dict:
     """
-    Send PDF pages as JPEG images to Bedrock and return the parsed JSON dict.
+    Send the PDF to Bedrock via the Converse API and return the parsed JSON dict.
 
-    Image blocks are used instead of a document block because:
-    - Newer Claude models (3.5+) require cross-region inference profiles (us.*)
-    - Cross-region inference profiles do not support document blocks
-    - Image blocks work correctly with cross-region inference profiles
+    Uses a document block with Claude 3 Haiku, which is available on-demand
+    (no cross-region inference profile required) and supports document blocks
+    natively.  Newer Claude models (3.5+) require us.* inference profiles that
+    support neither document blocks nor image blocks via Converse.
 
     The model is expected to return a single JSON object — no markdown fences.
     If the response contains a fenced code block we strip the fences first.
     """
-    page_images = _pdf_to_page_images(pdf_bytes)
-    if not page_images:
-        raise ValueError("PDF produced no pages")
-
-    content = [
-        {"image": {"format": "jpeg", "source": {"bytes": img}}}
-        for img in page_images
-    ]
-    content.append({"text": USER_PROMPT})
-
     response = _bedrock.converse(
         modelId=_model_id,
         system=[{"text": SYSTEM_PROMPT}],
-        messages=[{"role": "user", "content": content}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "document": {
+                            "format": "pdf",
+                            "name":   "probate-filing",
+                            "source": {"bytes": pdf_bytes},
+                        },
+                    },
+                    {"text": USER_PROMPT},
+                ],
+            }
+        ],
         inferenceConfig={
             "maxTokens": 1024,
             "temperature": 0,
