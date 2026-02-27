@@ -6,20 +6,26 @@ Responsibilities:
     is lexicographically equivalent to chronological order.
   - write_records(): batch-write a list of record dicts to DynamoDB using
     batch_write_item in chunks of 25 (the DDB hard limit per batch).
-    Uses PutRequest, so duplicate doc_number values are silently overwritten
-    (natural upsert semantics).
+    Uses PutRequest with a deterministic uuid5 lead_id derived from doc_number,
+    so duplicate doc_number values are silently overwritten (natural upsert semantics).
   - update_location_retrieved_at(): stamp the locations table with the time
     the last successful scrape completed for a given location.
 """
 
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import boto3
 from boto3.dynamodb.types import TypeSerializer
 
 log = logging.getLogger(__name__)
+
+# Fixed namespace for deterministic UUID5 generation.
+# Using the same namespace everywhere ensures that re-scraping the same
+# doc_number always produces the same lead_id, preserving upsert semantics.
+_LEAD_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 _serializer = TypeSerializer()
 _dynamodb = boto3.client("dynamodb", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
@@ -59,9 +65,13 @@ def _to_dynamo_item(record: dict, scrape_run_id: str, location_code: str) -> dic
     Convert a scraper record dict into a DynamoDB-typed attribute map.
     Applies date normalisation and appends scrape metadata.
     """
+    doc_number = record.get("doc_number", "UNKNOWN")
     item = {
+        # Primary key — deterministic UUID derived from doc_number so that
+        # re-scraping the same document always overwrites the existing record.
+        "lead_id":           str(uuid.uuid5(_LEAD_NS, str(doc_number))),
         # Core fields
-        "doc_number":        record.get("doc_number", "UNKNOWN"),
+        "doc_number":        doc_number,
         "grantor":           record.get("grantor", "N/A"),
         "grantee":           record.get("grantee", "N/A"),
         "doc_type":          record.get("doc_type", "PROBATE") or "PROBATE",
@@ -172,7 +182,7 @@ def get_recently_downloaded_doc_numbers(
                 ":cutoff": {"S": cutoff},
                 ":empty":  {"S": ""},
             },
-            ProjectionExpression="doc_number",
+            ProjectionExpression="doc_number, doc_s3_uri",
         )
         while True:
             response = _dynamodb.query(**kwargs)

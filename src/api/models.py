@@ -33,6 +33,7 @@ def _normalize_timestamp(ts: str) -> str:
 
 @dataclass
 class Lead:
+    lead_id:               str  = ""
     doc_number:            str  = ""
     grantor:               str  = ""
     grantee:               str  = ""
@@ -64,6 +65,7 @@ class Lead:
     @classmethod
     def from_dynamo(cls, item: dict) -> "Lead":
         return cls(
+            lead_id=               item.get("lead_id", ""),
             doc_number=            item.get("doc_number", ""),
             grantor=               item.get("grantor", ""),
             grantee=               item.get("grantee", ""),
@@ -94,6 +96,7 @@ class Lead:
 
     def to_dict(self) -> dict:
         return {
+            "leadId":              self.lead_id,
             "docNumber":           self.doc_number,
             "grantor":             self.grantor,
             "grantee":             self.grantee,
