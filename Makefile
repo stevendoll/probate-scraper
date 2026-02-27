@@ -8,7 +8,7 @@ STACK_NAME   := probate-scraper-collin-tx
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
-        aws-db-reset local-api-start local-scraper-run test smoke-test
+        aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -40,6 +40,7 @@ help:
 	@echo "                       SCRAPER_USERNAME=x SCRAPER_PASSWORD='y' make local-scraper-run"
 	@echo "    test             Run unit tests"
 	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
+	@echo "    check-bedrock    Verify Bedrock model access before deploying ParseDocumentFunction"
 	@echo ""
 	@echo "  Setup (one-time):"
 	@echo "    ecr-create       Create the ECR repository"
@@ -181,6 +182,11 @@ test:
 #   make smoke-test
 smoke-test:
 	pipenv run python scripts/smoke_test.py
+
+# Verify the Bedrock model is accessible before deploying ParseDocumentFunction.
+# Run once per account/region after initial AWS setup, or after changing BedrockModelId.
+check-bedrock:
+	pipenv run python scripts/check_bedrock.py
 
 # ── Local DynamoDB ───────────────────────────────────────────────────────────
 

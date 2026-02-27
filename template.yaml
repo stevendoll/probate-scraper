@@ -63,12 +63,14 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: "anthropic.claude-3-5-haiku-20241022-v1:0"
+    Default: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
     Description: >
       Amazon Bedrock model ID used by ParseDocumentFunction.
-      Use the direct regional ID (e.g. anthropic.claude-3-5-haiku-20241022-v1:0)
-      rather than a cross-region inference profile (us.*) — document blocks are
-      not supported with cross-region inference profiles.
+      Newer Claude models (3.5+) require a cross-region inference profile (us.*)
+      because on-demand throughput is not supported for them.  Document blocks
+      are not supported with cross-region inference, so PDFs are sent as per-page
+      JPEG images instead (see _pdf_to_page_images in src/parse_document/app.py).
+      Run "make check-bedrock" to verify access before deploying.
 
 # ---------------------------------------------------------------------------
 # Conditions
