@@ -118,12 +118,30 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
 
     raw_text = response["output"]["message"]["content"][0]["text"].strip()
 
-    # Strip optional ```json ... ``` fences
+    # 1. Try parsing as-is (ideal: model returned pure JSON)
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Strip optional ```json ... ``` fences then retry
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", raw_text, re.DOTALL)
     if fenced:
-        raw_text = fenced.group(1).strip()
+        try:
+            return json.loads(fenced.group(1).strip())
+        except json.JSONDecodeError:
+            pass
 
-    return json.loads(raw_text)
+    # 3. Slice from the first '{' to the last '}' — handles preamble/postamble prose
+    start = raw_text.find("{")
+    end   = raw_text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(raw_text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"No valid JSON in model response: {raw_text[:300]!r}")
 
 
 def _persist_parsed_fields(lead_id: str, parsed: dict, model_id: str, error: str = "") -> None:

@@ -304,6 +304,26 @@ class TestParseDocument(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["deceasedName"], "Jane A. Smith")
 
+    def test_preamble_prose_before_json_is_handled(self):
+        """Model sometimes adds prose before the JSON — slice from first { to last }."""
+        preamble = f"Here is the extracted information:\n{json.dumps(_GOOD_BEDROCK_PAYLOAD)}"
+        lead     = _make_lead()
+        self.mock_table.get_item.side_effect = [
+            {"Item": lead},
+            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
+                      "parsed_at": "2026-02-26T00:00:00+00:00",
+                      "parsed_model": parse_app._model_id,
+                      "parse_error": ""}},
+        ]
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(preamble)
+
+        body, status = parse_app.parse_document("20240001")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["deceasedName"], "Jane A. Smith")
+
     def test_plain_fenced_block_no_language_tag(self):
         fenced = f"```\n{json.dumps(_GOOD_BEDROCK_PAYLOAD)}\n```"
         lead   = _make_lead()
