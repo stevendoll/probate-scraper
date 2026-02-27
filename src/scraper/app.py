@@ -55,7 +55,7 @@ def main():
             total, run_id, location_code,
         )
     except Exception as exc:
-        log.exception("Unhandled exception during scrape run: %s", exc)
+        log.error("Unhandled exception during scrape run: %s", exc)
         sys.exit(1)
 
     # Stamp the location with the completion time (best-effort)

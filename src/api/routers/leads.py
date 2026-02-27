@@ -34,7 +34,7 @@ def _get_location_by_path(location_path: str) -> dict | None:
         items = result.get("Items", [])
         return items[0] if items else None
     except Exception as exc:
-        logger.exception("locations GSI query failed", exc_info=exc)
+        logger.error("locations GSI query failed"": %s", exc)
         return None
 
 
@@ -107,7 +107,7 @@ def get_leads_by_location(location_path: str):
     try:
         result = db.table.query(**query_kwargs)
     except Exception as exc:
-        logger.exception("DynamoDB query error", exc_info=exc)
+        logger.error("DynamoDB query error"": %s", exc)
         return {"error": "Database query failed"}, 500
 
     leads = [Lead.from_dynamo(item).to_dict() for item in result.get("Items", [])]
