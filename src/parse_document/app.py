@@ -88,9 +88,10 @@ def _pdf_to_page_images(pdf_bytes: bytes) -> list[bytes]:
     """
     Render each page of a PDF to a JPEG image.
 
-    AWS Bedrock document blocks are NOT supported with cross-region inference
-    profiles (``us.*`` model IDs).  Sending the pages as image blocks is the
-    workaround — image blocks work fine with cross-region inference.
+    Newer Claude models (3.5+) require cross-region inference profiles (us.*),
+    which do not support document blocks — they silently return empty responses.
+    Sending pages as image blocks is the workaround; image blocks work fine
+    with cross-region inference profiles.
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     images = []
@@ -106,9 +107,10 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
     """
     Send PDF pages as JPEG images to Bedrock and return the parsed JSON dict.
 
-    Image blocks are used instead of a document block because AWS Bedrock
-    document blocks are not supported with cross-region inference profiles
-    (``us.*`` model IDs).  Image blocks work with cross-region inference.
+    Image blocks are used instead of a document block because:
+    - Newer Claude models (3.5+) require cross-region inference profiles (us.*)
+    - Cross-region inference profiles do not support document blocks
+    - Image blocks work correctly with cross-region inference profiles
 
     The model is expected to return a single JSON object — no markdown fences.
     If the response contains a fenced code block we strip the fences first.
