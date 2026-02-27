@@ -151,7 +151,7 @@ def _persist_parsed_fields(lead_id: str, parsed: dict, model_id: str, error: str
     """
     now = _now_iso()
     _table.update_item(
-        Key={"doc_number": lead_id},
+        Key={"lead_id": lead_id},
         UpdateExpression=(
             "SET parsed_at = :pa, parsed_model = :pm, parse_error = :pe,"
             " deceased_name = :dn, deceased_dob = :db, deceased_dod = :dd,"
@@ -180,7 +180,7 @@ def _persist_parsed_fields(lead_id: str, parsed: dict, model_id: str, error: str
 @api.post("/real-estate/probate-leads/leads/<lead_id>/parse-document")
 def parse_document(lead_id: str):
     # 1. Fetch the lead
-    result = _table.get_item(Key={"doc_number": lead_id})
+    result = _table.get_item(Key={"lead_id": lead_id})
     item   = result.get("Item")
     if not item:
         return {"error": f"Lead not found: {lead_id!r}"}, 404
@@ -220,9 +220,10 @@ def parse_document(lead_id: str):
         return {"error": f"DynamoDB update failed: {exc}"}, 500
 
     # 5. Return the updated lead
-    updated = _table.get_item(Key={"doc_number": lead_id}).get("Item", item)
+    updated = _table.get_item(Key={"lead_id": lead_id}).get("Item", item)
 
     return {
+        "leadId":              updated.get("lead_id", ""),
         "docNumber":           updated.get("doc_number", ""),
         "docS3Uri":            updated.get("doc_s3_uri", ""),
         "parsedAt":            updated.get("parsed_at", ""),

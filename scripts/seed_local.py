@@ -16,8 +16,12 @@ Tables created:
 import csv
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Must match _LEAD_NS in src/scraper/dynamo.py
+_LEAD_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 import boto3
 from boto3.dynamodb.types import TypeSerializer
@@ -66,13 +70,13 @@ def create_leads_table():
         TableName=LEADS_TABLE_NAME,
         BillingMode="PAY_PER_REQUEST",
         AttributeDefinitions=[
-            {"AttributeName": "doc_number",    "AttributeType": "S"},
+            {"AttributeName": "lead_id",       "AttributeType": "S"},
             {"AttributeName": "doc_type",      "AttributeType": "S"},
             {"AttributeName": "recorded_date", "AttributeType": "S"},
             {"AttributeName": "location_code", "AttributeType": "S"},
         ],
         KeySchema=[
-            {"AttributeName": "doc_number", "KeyType": "HASH"},
+            {"AttributeName": "lead_id", "KeyType": "HASH"},
         ],
         GlobalSecondaryIndexes=[
             {
@@ -200,8 +204,10 @@ def seed_leads_csv(csv_path: Path):
     put_requests = []
 
     for row in rows:
+        doc_number = row.get("doc_number", "UNKNOWN")
         item = {
-            "doc_number":        row.get("doc_number", "UNKNOWN"),
+            "lead_id":           str(uuid.uuid5(_LEAD_NS, str(doc_number))),
+            "doc_number":        doc_number,
             "grantor":           row.get("grantor", "N/A"),
             "grantee":           row.get("grantee", "N/A"),
             "doc_type":          row.get("doc_type", "PROBATE") or "PROBATE",
@@ -217,7 +223,7 @@ def seed_leads_csv(csv_path: Path):
             "processed_at":      now,
             "scrape_run_id":     "seed-local",
         }
-        if not item["doc_number"] or item["doc_number"] == "N/A":
+        if not doc_number or doc_number == "N/A":
             continue
 
         dynamo_item = {k: serializer.serialize(v) for k, v in item.items() if v}

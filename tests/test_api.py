@@ -127,6 +127,7 @@ class TestHandlerDateRangeQuery(unittest.TestCase):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
         leads = _body(resp)["leads"]
         self.assertEqual(len(leads), 3)
+        self.assertEqual(leads[0]["leadId"],    MOCK_LEADS[0]["lead_id"])
         self.assertEqual(leads[0]["docNumber"], MOCK_LEADS[0]["doc_number"])
 
     def test_response_includes_location(self):
@@ -334,7 +335,7 @@ class TestHandlerPagination(unittest.TestCase):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
         next_key = _body(resp)["nextKey"]
         decoded = json.loads(base64.b64decode(next_key.encode()).decode())
-        self.assertEqual(decoded["doc_number"], PAGINATION_KEY["doc_number"])
+        self.assertEqual(decoded["lead_id"], PAGINATION_KEY["lead_id"])
 
     def test_last_key_passed_to_dynamo(self):
         self.mock_table.query.return_value = {"Items": MOCK_LEADS[2:]}
@@ -342,7 +343,7 @@ class TestHandlerPagination(unittest.TestCase):
         _call({"from_date": "2026-01-01", "to_date": "2026-02-20", "last_key": encoded})
         kwargs = self.mock_table.query.call_args[1]
         self.assertIn("ExclusiveStartKey", kwargs)
-        self.assertEqual(kwargs["ExclusiveStartKey"]["doc_number"], PAGINATION_KEY["doc_number"])
+        self.assertEqual(kwargs["ExclusiveStartKey"]["lead_id"], PAGINATION_KEY["lead_id"])
 
     def test_invalid_last_key_returns_400(self):
         resp = _call(
