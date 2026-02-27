@@ -214,6 +214,32 @@ def _is_within_days(date_str: str, days: int = MAX_DOC_AGE_DAYS) -> bool:
     return True
 
 
+def _refetch_row(driver, row_1based_index: int):
+    """
+    Re-locate a data row in the live DOM by its 1-based index.
+
+    Clicking a row to open the detail panel causes React to re-render the
+    results table, staling all previously-captured WebElement references.
+    This helper finds the same logical row position in the freshly-rendered
+    table so Phase 2 can safely click rows 2–N.
+
+    Returns the fresh WebElement, or None if the row cannot be found.
+    """
+    try:
+        tables = driver.find_elements(By.TAG_NAME, "table")
+        for table in tables:
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            if len(rows) <= 2:
+                continue
+            data_rows = rows[2:]
+            idx = row_1based_index - 1
+            if 0 <= idx < len(data_rows):
+                return data_rows[idx]
+    except Exception as exc:
+        log.debug("_refetch_row(%d) error: %s", row_1based_index, exc)
+    return None
+
+
 def _rename_download(local_path: str, doc_number: str, used_names: set) -> str:
     """
     Rename a locally-downloaded file to ``{doc_number}{ext}``.
@@ -781,8 +807,12 @@ def extract_page_data(
                 entry["pdf_url"] = entry["inline_url"]
                 downloads_done += 1
             else:
+                # Re-fetch the row element from the live DOM.  Any previous click
+                # that opened the detail panel will have caused React to re-render
+                # the table, staling all WebElement references captured in Phase 1.
+                fresh_row = _refetch_row(driver, entry["index"]) or row
                 try:
-                    pdf_url, local_path = get_pdf_url_by_clicking(driver, row, download_dir)
+                    pdf_url, local_path = get_pdf_url_by_clicking(driver, fresh_row, download_dir)
                 except Exception as exc:
                     log.warning("Row %d click error: %s", entry["index"], exc)
                     pdf_url, local_path = None, None
