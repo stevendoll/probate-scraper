@@ -12,7 +12,7 @@ import re
 import random
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -52,6 +52,11 @@ SEARCH_PARAMS = {
 
 PAGE_LOAD_WAIT = 10   # seconds to sleep after driver.get()
 DETAIL_WAIT    = 3    # seconds to wait for the detail panel to open
+
+# Maximum number of documents to download per scrape run
+MAX_DOC_DOWNLOADS = 5
+# Skip documents whose recorded_date is older than this many days
+MAX_DOC_AGE_DAYS  = 30
 
 # Default local directory for Chrome-triggered document downloads
 DOWNLOAD_DIR = "/tmp/scraper_downloads"
@@ -190,6 +195,23 @@ _SIGNIN_PATH = "/signin"
 def _random_sleep(min_s: float = 0.5, max_s: float = 1.5) -> None:
     """Sleep a random duration in [min_s, max_s] to mimic human pacing."""
     time.sleep(random.uniform(min_s, max_s))
+
+
+def _is_within_days(date_str: str, days: int = MAX_DOC_AGE_DAYS) -> bool:
+    """
+    Return True if *date_str* (M/D/YYYY or YYYY-MM-DD) falls within the last
+    *days* days.  Unparseable dates are treated as recent (safe default).
+    """
+    if not date_str or date_str in ("N/A", "--/--/--", ""):
+        return True  # unknown date → don't skip
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_str.strip(), fmt) >= cutoff
+        except ValueError:
+            continue
+    log.debug("_is_within_days: could not parse %r — treating as recent", date_str)
+    return True
 
 
 def _rename_download(local_path: str, doc_number: str, used_names: set) -> str:
@@ -650,7 +672,12 @@ def get_pdf_url(
     return get_pdf_url_by_clicking(driver, row, download_dir)
 
 
-def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
+def extract_page_data(
+    driver,
+    download_dir: str = "",
+    already_downloaded: "frozenset | set" = frozenset(),
+    max_downloads: int = MAX_DOC_DOWNLOADS,
+):
     """
     Extract all record rows from the current page.
     Returns a list of dicts with fields including pdf_url and doc_local_path.
@@ -658,13 +685,15 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
     Continues past individual row errors rather than aborting the whole page.
 
     Args:
-        download_dir:   Directory for Chrome-managed downloads.  Empty string
-                        disables the download button entirely.
-        max_downloads:  Rows for which the detail panel is opened and the
-                        Download button is clicked.  Defaults to 1 (first row
-                        only) to minimise interaction volume.  Rows beyond this
-                        limit are still scraped for text fields and any inline
-                        document links, but no panel is opened.
+        download_dir:       Directory for Chrome-managed downloads.  Empty
+                            string disables the download button entirely.
+        already_downloaded: Set of doc_number strings that already have a
+                            doc_s3_uri in S3 — their detail pages are NOT
+                            opened, avoiding redundant Selenium interaction.
+        max_downloads:      Maximum number of documents to download per run.
+                            Rows beyond this limit, or rows whose recorded_date
+                            is older than MAX_DOC_AGE_DAYS, are still scraped
+                            for text fields but no detail panel is opened.
     """
     records = []
     get_total_results(driver)  # logged for observability; result unused here
@@ -720,24 +749,46 @@ def extract_page_data(driver, download_dir: str = "", max_downloads: int = 1):
 
         # ── Phase 2: click for download on eligible rows (after all text captured).
         # The click may re-render the table; that's fine because we're done reading.
+        # Eligibility: doc not already in S3, recorded within MAX_DOC_AGE_DAYS,
+        # and downloads_done < max_downloads.
+        downloads_done = 0
         for entry in extracted:
-            i   = entry["index"]
-            row = entry["row"]
-            if i <= max_downloads:
-                if entry["inline_url"]:
-                    entry["pdf_url"]    = entry["inline_url"]
-                    entry["local_path"] = None
-                else:
-                    try:
-                        pdf_url, local_path = get_pdf_url_by_clicking(driver, row, download_dir)
-                    except Exception as exc:
-                        log.warning("Row %d click error: %s", entry["index"], exc)
-                        pdf_url, local_path = None, None
-                    entry["pdf_url"]    = pdf_url
-                    entry["local_path"] = local_path
+            row        = entry["row"]
+            doc_number = entry.get("doc_number", "")
+            rec_date   = entry.get("recorded_date", "")
+
+            # Always carry the inline URL through regardless of eligibility
+            entry["pdf_url"]    = entry["inline_url"]
+            entry["local_path"] = None
+
+            if doc_number in already_downloaded:
+                log.info("Row %d: %s already in S3 — skipping detail page", entry["index"], doc_number)
+                continue
+
+            if not _is_within_days(rec_date):
+                log.info(
+                    "Row %d: recorded_date %r is older than %d days — skipping",
+                    entry["index"], rec_date, MAX_DOC_AGE_DAYS,
+                )
+                continue
+
+            if downloads_done >= max_downloads:
+                log.debug("Row %d: download limit (%d) reached — skipping", entry["index"], max_downloads)
+                continue
+
+            if entry["inline_url"]:
+                # No detail page needed — URL already captured in Phase 1
+                entry["pdf_url"] = entry["inline_url"]
+                downloads_done += 1
             else:
-                entry["pdf_url"]    = entry["inline_url"]
-                entry["local_path"] = None
+                try:
+                    pdf_url, local_path = get_pdf_url_by_clicking(driver, row, download_dir)
+                except Exception as exc:
+                    log.warning("Row %d click error: %s", entry["index"], exc)
+                    pdf_url, local_path = None, None
+                entry["pdf_url"]    = pdf_url
+                entry["local_path"] = local_path
+                downloads_done += 1
 
         # ── Phase 3: assemble final record dicts
         for entry in extracted:
@@ -774,9 +825,16 @@ def scrape_all(scrape_run_id: str, location_code: str):
     S3 upload prefers a locally-downloaded file (doc_local_path); falls back to
     fetching the pdf_url with Selenium session cookies forwarded.
     """
-    table_name = os.environ["DYNAMO_TABLE_NAME"]
-    bucket = os.environ.get("DOCUMENTS_BUCKET", "")
-    download_dir = os.environ.get("DOWNLOAD_DIR", DOWNLOAD_DIR)
+    table_name        = os.environ["DYNAMO_TABLE_NAME"]
+    bucket            = os.environ.get("DOCUMENTS_BUCKET", "")
+    download_dir      = os.environ.get("DOWNLOAD_DIR", DOWNLOAD_DIR)
+    location_date_gsi = os.environ.get("LOCATION_DATE_GSI", "location-date-index")
+
+    # Pre-fetch which doc_numbers already have a document in S3 so we can
+    # skip their detail pages entirely (avoids redundant Selenium interaction).
+    already_downloaded = dynamo.get_recently_downloaded_doc_numbers(
+        table_name, location_code, location_date_gsi, days=MAX_DOC_AGE_DAYS
+    )
 
     driver = initialize_driver()
     try:
@@ -787,7 +845,9 @@ def scrape_all(scrape_run_id: str, location_code: str):
             log.error("Failed to load first page — aborting")
             return 0
 
-        page_records = extract_page_data(driver, download_dir, max_downloads=1)
+        page_records = extract_page_data(
+            driver, download_dir, already_downloaded=already_downloaded,
+        )
         if not page_records:
             log.warning("No records found on first page")
             return 0

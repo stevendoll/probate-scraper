@@ -6,6 +6,7 @@ Covers:
   - write_records() integer doc_number filter
   - write_records() DynamoDB batch chunking and retry
   - update_location_retrieved_at()
+  - get_recently_downloaded_doc_numbers()
 """
 
 import sys
@@ -154,6 +155,97 @@ class TestWriteRecordsBatching(unittest.TestCase):
             dynamo.write_records(records, "leads", "run-retry", "CollinTx")
 
         self.assertEqual(call_count[0], 2)
+
+
+# ---------------------------------------------------------------------------
+# get_recently_downloaded_doc_numbers
+# ---------------------------------------------------------------------------
+
+class TestGetRecentlyDownloadedDocNumbers(unittest.TestCase):
+
+    def _make_ddb_item(self, doc_number: str, s3_uri: str = "") -> dict:
+        item = {"doc_number": {"S": doc_number}}
+        if s3_uri:
+            item["doc_s3_uri"] = {"S": s3_uri}
+        return item
+
+    def test_returns_doc_numbers_with_nonempty_s3_uri(self):
+        items = [
+            self._make_ddb_item("20260001", "s3://bucket/a.pdf"),
+            self._make_ddb_item("20260002", "s3://bucket/b.pdf"),
+        ]
+        mock_resp = {"Items": items, "Count": 2}
+
+        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp):
+            result = dynamo.get_recently_downloaded_doc_numbers(
+                "leads", "CollinTx", "location-date-index"
+            )
+
+        self.assertEqual(result, {"20260001", "20260002"})
+
+    def test_excludes_items_without_s3_uri(self):
+        items = [
+            self._make_ddb_item("20260001", "s3://bucket/a.pdf"),
+            self._make_ddb_item("20260002", ""),  # empty s3_uri
+            self._make_ddb_item("20260003"),       # missing s3_uri key
+        ]
+        mock_resp = {"Items": items, "Count": 3}
+
+        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp):
+            result = dynamo.get_recently_downloaded_doc_numbers(
+                "leads", "CollinTx", "location-date-index"
+            )
+
+        self.assertEqual(result, {"20260001"})
+
+    def test_returns_empty_set_when_no_items(self):
+        mock_resp = {"Items": [], "Count": 0}
+
+        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp):
+            result = dynamo.get_recently_downloaded_doc_numbers(
+                "leads", "CollinTx", "location-date-index"
+            )
+
+        self.assertEqual(result, set())
+
+    def test_paginates_until_no_last_evaluated_key(self):
+        page1 = {
+            "Items": [self._make_ddb_item("20260001", "s3://b/a.pdf")],
+            "LastEvaluatedKey": {"doc_number": {"S": "20260001"}},
+        }
+        page2 = {
+            "Items": [self._make_ddb_item("20260002", "s3://b/b.pdf")],
+        }
+        with patch.object(dynamo._dynamodb, "query", side_effect=[page1, page2]):
+            result = dynamo.get_recently_downloaded_doc_numbers(
+                "leads", "CollinTx", "location-date-index"
+            )
+
+        self.assertEqual(result, {"20260001", "20260002"})
+
+    def test_query_exception_returns_empty_set(self):
+        with patch.object(dynamo._dynamodb, "query", side_effect=Exception("DDB down")):
+            result = dynamo.get_recently_downloaded_doc_numbers(
+                "leads", "CollinTx", "location-date-index"
+            )
+
+        self.assertEqual(result, set())
+
+    def test_uses_correct_gsi_and_key_conditions(self):
+        mock_resp = {"Items": []}
+        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp) as mock_q:
+            dynamo.get_recently_downloaded_doc_numbers(
+                "leads", "CollinTx", "location-date-index", days=30
+            )
+
+        call_kwargs = mock_q.call_args[1]
+        self.assertEqual(call_kwargs["TableName"], "leads")
+        self.assertEqual(call_kwargs["IndexName"], "location-date-index")
+        self.assertIn(":loc", call_kwargs["ExpressionAttributeValues"])
+        self.assertEqual(
+            call_kwargs["ExpressionAttributeValues"][":loc"], {"S": "CollinTx"}
+        )
+        self.assertIn("location_code = :loc", call_kwargs["KeyConditionExpression"])
 
 
 if __name__ == "__main__":

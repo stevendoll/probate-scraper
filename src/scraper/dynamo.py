@@ -14,7 +14,7 @@ Responsibilities:
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from boto3.dynamodb.types import TypeSerializer
@@ -140,6 +140,59 @@ def write_records(
         total_written, len(put_requests), table_name, location_code,
     )
     return total_written
+
+
+# ---------------------------------------------------------------------------
+# Recently-downloaded doc lookup
+# ---------------------------------------------------------------------------
+
+def get_recently_downloaded_doc_numbers(
+    table_name: str,
+    location_code: str,
+    location_date_gsi: str,
+    days: int = 30,
+) -> set:
+    """
+    Query the location-date-index GSI for leads recorded within *days* days
+    that already have a non-empty doc_s3_uri stored in S3.
+
+    Returns a set of doc_number strings.  Used by the scraper to skip
+    re-downloading documents that are already archived.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    result = set()
+    try:
+        kwargs = dict(
+            TableName=table_name,
+            IndexName=location_date_gsi,
+            KeyConditionExpression="location_code = :loc AND recorded_date >= :cutoff",
+            FilterExpression="doc_s3_uri <> :empty",
+            ExpressionAttributeValues={
+                ":loc":    {"S": location_code},
+                ":cutoff": {"S": cutoff},
+                ":empty":  {"S": ""},
+            },
+            ProjectionExpression="doc_number",
+        )
+        while True:
+            response = _dynamodb.query(**kwargs)
+            for item in response.get("Items", []):
+                doc_num = item.get("doc_number", {}).get("S", "")
+                s3_uri  = item.get("doc_s3_uri",  {}).get("S", "")
+                if doc_num and s3_uri:
+                    result.add(doc_num)
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+    except Exception as exc:
+        log.warning("get_recently_downloaded_doc_numbers error: %s", exc)
+
+    log.info(
+        "Found %d already-downloaded docs for %s (cutoff=%s)",
+        len(result), location_code, cutoff,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
