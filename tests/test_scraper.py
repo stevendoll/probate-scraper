@@ -8,6 +8,7 @@ The mock structure mirrors the CSS selectors used in the live scraper.
 import sys
 import os
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch, call
 
 # ---------------------------------------------------------------------------
@@ -37,6 +38,9 @@ from scraper import (
     login,
     SEARCH_PARAMS,
     DOWNLOAD_BUTTON_XPATHS,
+    MAX_DOC_DOWNLOADS,
+    MAX_DOC_AGE_DAYS,
+    _is_within_days,
 )
 # helpers tested directly
 import scraper as _scraper_mod
@@ -47,6 +51,12 @@ from tests.fixtures.scraper_html import ROW_WITH_PDF, ROW_WITHOUT_PDF_INLINE  # 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# A date that is always within MAX_DOC_AGE_DAYS (7 days ago)
+_RECENT_DATE = (datetime.utcnow() - timedelta(days=7)).strftime("%m/%d/%Y")
+# A date that is always outside MAX_DOC_AGE_DAYS (60 days ago)
+_OLD_DATE    = (datetime.utcnow() - timedelta(days=60)).strftime("%m/%d/%Y")
+
 
 def _elem(text: str) -> MagicMock:
     """Return a mock Selenium element whose .text equals *text*."""
@@ -62,7 +72,10 @@ def _link(href: str) -> MagicMock:
     return e
 
 
-# CSS selector → text value for a standard data row
+# CSS selector → text value for a standard data row.
+# recorded_date keeps the original fixture value ("01/15/2024") so that
+# value-checking tests match ROW_WITH_PDF.  Eligibility tests override via
+# _make_row(recorded_date=_RECENT_DATE/_OLD_DATE) as needed.
 _TEXT_MAP = {
     'td.col-3[column="[object Object]"] span': "SMITH JOHN A",
     'td.col-4[column="[object Object]"] span': "JONES MARY B",
@@ -74,17 +87,31 @@ _TEXT_MAP = {
 }
 
 
-def _make_row(pdf_href: str | None = None) -> MagicMock:
+def _make_row(
+    pdf_href: "str | None" = None,
+    recorded_date: "str | None" = None,
+    doc_number: "str | None" = None,
+) -> MagicMock:
     """
     Build a mock TR element.
 
     If *pdf_href* is given the row contains an inline document link;
     otherwise find_element raises NoSuchElementException for link selectors.
+    *recorded_date* overrides the default value from _TEXT_MAP (useful for
+    testing the 30-day cutoff).  *doc_number* overrides the doc_number column.
     """
     row = MagicMock()
     pdf_selectors = scraper.ROW_PDF_SELECTORS
+    date_sel   = 'td.col-6[column="[object Object]"] span'
+    doc_sel    = 'td.col-7[column="[object Object]"] span'
+    date_val   = recorded_date if recorded_date is not None else _TEXT_MAP[date_sel]
+    doc_val    = doc_number    if doc_number    is not None else _TEXT_MAP[doc_sel]
 
     def find_element(by, sel):
+        if sel == date_sel:
+            return _elem(date_val)
+        if sel == doc_sel:
+            return _elem(doc_val)
         if sel in _TEXT_MAP:
             return _elem(_TEXT_MAP[sel])
         if pdf_href and sel in pdf_selectors:
@@ -480,7 +507,7 @@ class TestExtractPageData(unittest.TestCase):
     @patch("scraper.get_pdf_url_by_clicking",
            return_value=("https://collin.tx.publicsearch.us/doc/20240005678", None))
     def test_extracts_pdf_via_click_when_not_inline(self, mock_click):
-        row = _make_row(pdf_href=None)
+        row = _make_row(pdf_href=None, recorded_date=_RECENT_DATE)
         driver = _make_driver_with_rows(row)
 
         records = extract_page_data(driver)
@@ -513,7 +540,7 @@ class TestExtractPageData(unittest.TestCase):
            return_value=("https://collin.tx.publicsearch.us/doc/DL", "/tmp/20240001.pdf"))
     def test_stores_local_path_when_download_button_used(self, mock_click):
         """doc_local_path is populated when the Download button produced a local file."""
-        row = _make_row(pdf_href=None)
+        row = _make_row(pdf_href=None, recorded_date=_RECENT_DATE)
         driver = _make_driver_with_rows(row)
 
         records = extract_page_data(driver, download_dir="/tmp/dl")
@@ -568,21 +595,28 @@ class TestExtractPageData(unittest.TestCase):
         self.assertEqual(records[1]["pdf_url"], "https://collin.tx.publicsearch.us/doc/OK")
 
     @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
-    def test_download_only_for_first_row(self, mock_click):
+    def test_download_clicks_all_eligible_rows_up_to_max(self, mock_click):
         """
-        With max_downloads=1 (the default), get_pdf_url_by_clicking is called
-        only for the first row.  Subsequent rows use inline-link lookup only —
-        no panel is opened — to avoid triggering bot-detection.
+        With the default max_downloads (MAX_DOC_DOWNLOADS=5), all recent
+        eligible rows get their detail pages opened.
         """
-        row1 = _make_row(pdf_href=None)   # no inline link → falls through to panel click
-        row2 = _make_row(pdf_href=None)   # no inline link → but beyond max_downloads
-        row3 = _make_row(pdf_href=None)
-        driver = _make_driver_with_rows(row1, row2, row3)
+        rows = [_make_row(pdf_href=None, recorded_date=_RECENT_DATE) for _ in range(3)]
+        driver = _make_driver_with_rows(*rows)
 
-        extract_page_data(driver, download_dir="/tmp/dl")  # max_downloads=1 by default
+        extract_page_data(driver, download_dir="/tmp/dl")
 
-        # Panel click should only happen for row 1
-        mock_click.assert_called_once()
+        # All 3 recent rows should be clicked (3 < MAX_DOC_DOWNLOADS)
+        self.assertEqual(mock_click.call_count, 3)
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_download_stops_at_max_downloads(self, mock_click):
+        """Downloads stop after max_downloads rows even if more are eligible."""
+        rows = [_make_row(pdf_href=None, recorded_date=_RECENT_DATE) for _ in range(7)]
+        driver = _make_driver_with_rows(*rows)
+
+        extract_page_data(driver, download_dir="/tmp/dl", max_downloads=3)
+
+        self.assertEqual(mock_click.call_count, 3)
 
     @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
     def test_max_downloads_zero_skips_all_panel_clicks(self, mock_click):
@@ -614,6 +648,122 @@ class TestExtractPageData(unittest.TestCase):
         records = extract_page_data(driver)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["pdf_url"], "https://collin.tx.publicsearch.us/doc/T1")
+
+
+# ---------------------------------------------------------------------------
+# _is_within_days
+# ---------------------------------------------------------------------------
+
+class TestIsWithinDays(unittest.TestCase):
+
+    def test_recent_date_returns_true(self):
+        self.assertTrue(_is_within_days(_RECENT_DATE))
+
+    def test_old_date_returns_false(self):
+        self.assertFalse(_is_within_days(_OLD_DATE))
+
+    def test_today_returns_true(self):
+        self.assertTrue(_is_within_days(datetime.utcnow().strftime("%m/%d/%Y")))
+
+    def test_iso_format_within_days(self):
+        iso = (datetime.utcnow() - timedelta(days=5)).strftime("%Y-%m-%d")
+        self.assertTrue(_is_within_days(iso))
+
+    def test_iso_format_old(self):
+        iso = (datetime.utcnow() - timedelta(days=60)).strftime("%Y-%m-%d")
+        self.assertFalse(_is_within_days(iso))
+
+    def test_na_returns_true(self):
+        """Unknown dates should not cause skips."""
+        self.assertTrue(_is_within_days("N/A"))
+
+    def test_empty_returns_true(self):
+        self.assertTrue(_is_within_days(""))
+
+    def test_unparseable_returns_true(self):
+        self.assertTrue(_is_within_days("bad-date"))
+
+    def test_custom_days_boundary(self):
+        exactly_10_days_ago = (datetime.utcnow() - timedelta(days=10)).strftime("%m/%d/%Y")
+        self.assertTrue(_is_within_days(exactly_10_days_ago, days=11))
+        self.assertFalse(_is_within_days(exactly_10_days_ago, days=9))
+
+
+# ---------------------------------------------------------------------------
+# extract_page_data — download eligibility (already_downloaded / date cutoff)
+# ---------------------------------------------------------------------------
+
+class TestExtractPageDataEligibility(unittest.TestCase):
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_already_downloaded_skips_detail_page(self, mock_click):
+        """Rows whose doc_number is in already_downloaded must not trigger a panel click."""
+        row = _make_row(pdf_href=None, recorded_date=_RECENT_DATE, doc_number="20260001")
+        driver = _make_driver_with_rows(row)
+
+        extract_page_data(driver, download_dir="/tmp/dl",
+                          already_downloaded={"20260001"})
+
+        mock_click.assert_not_called()
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_already_downloaded_does_not_remove_record(self, mock_click):
+        """Skipping the detail page must not remove the row from the returned records."""
+        row = _make_row(pdf_href=None, recorded_date=_RECENT_DATE, doc_number="20260001")
+        driver = _make_driver_with_rows(row)
+
+        records = extract_page_data(driver, already_downloaded={"20260001"})
+
+        self.assertEqual(len(records), 1)
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_old_date_skips_detail_page(self, mock_click):
+        """Rows with recorded_date older than MAX_DOC_AGE_DAYS skip the panel click."""
+        row = _make_row(pdf_href=None, recorded_date=_OLD_DATE)
+        driver = _make_driver_with_rows(row)
+
+        extract_page_data(driver, download_dir="/tmp/dl")
+
+        mock_click.assert_not_called()
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_old_date_still_included_in_records(self, mock_click):
+        """Old records are scraped for text but not clicked — they still appear in results."""
+        row = _make_row(pdf_href=None, recorded_date=_OLD_DATE)
+        driver = _make_driver_with_rows(row)
+
+        records = extract_page_data(driver)
+
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0]["pdf_url"])  # no click → no URL
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
+    def test_inline_pdf_url_preserved_regardless_of_date(self, mock_click):
+        """An inline PDF URL is always copied to pdf_url even for old records."""
+        row = _make_row(
+            pdf_href="https://collin.tx.publicsearch.us/doc/OLD",
+            recorded_date=_OLD_DATE,
+        )
+        driver = _make_driver_with_rows(row)
+
+        records = extract_page_data(driver)
+
+        self.assertEqual(records[0]["pdf_url"], "https://collin.tx.publicsearch.us/doc/OLD")
+        mock_click.assert_not_called()
+
+    @patch("scraper.get_pdf_url_by_clicking", return_value=("https://url", None))
+    def test_only_recent_not_already_downloaded_rows_are_clicked(self, mock_click):
+        """Only rows that are recent AND not already downloaded get detail page clicks."""
+        recent_new    = _make_row(pdf_href=None, recorded_date=_RECENT_DATE, doc_number="NEW01")
+        recent_done   = _make_row(pdf_href=None, recorded_date=_RECENT_DATE, doc_number="DONE1")
+        old_new       = _make_row(pdf_href=None, recorded_date=_OLD_DATE,    doc_number="OLD01")
+        driver = _make_driver_with_rows(recent_new, recent_done, old_new)
+
+        extract_page_data(driver, download_dir="/tmp/dl",
+                          already_downloaded={"DONE1"})
+
+        # Only recent_new is eligible → exactly 1 click
+        mock_click.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -902,12 +1052,15 @@ class TestScrapeAll(unittest.TestCase):
     @patch("scraper.extract_page_data")
     @patch("scraper.load_page", return_value=True)
     @patch("scraper.initialize_driver")
-    def test_extract_called_with_max_downloads_1(
+    def test_extract_called_with_already_downloaded(
         self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
     ):
-        """scrape_all() must pass max_downloads=1 to extract_page_data."""
+        """scrape_all() fetches already-downloaded doc_numbers from DynamoDB
+        and passes them to extract_page_data as already_downloaded."""
         driver = MagicMock()
         mock_init.return_value = driver
+        already = {"20260001", "20260002"}
+        mock_dynamo.get_recently_downloaded_doc_numbers.return_value = already
         mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
         mock_dynamo.write_records.return_value = 1
 
@@ -915,7 +1068,9 @@ class TestScrapeAll(unittest.TestCase):
             scrape_all("run-maxdl", "CollinTx")
 
         _, kwargs = mock_extract.call_args
-        self.assertEqual(kwargs.get("max_downloads"), 1)
+        self.assertEqual(kwargs.get("already_downloaded"), already)
+        # max_downloads is not passed explicitly — the default (MAX_DOC_DOWNLOADS) is used
+        self.assertIsNone(kwargs.get("max_downloads"))
 
     @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
