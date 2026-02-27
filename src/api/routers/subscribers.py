@@ -28,7 +28,7 @@ def list_subscribers():
     try:
         result = db.subscribers_table.scan()
     except Exception as exc:
-        logger.exception("subscribers scan failed", exc_info=exc)
+        logger.error("subscribers scan failed"": %s", exc)
         return {"error": "Database scan failed"}, 500
 
     items = [Subscriber.from_dynamo(item).to_dict() for item in result.get("Items", [])]
@@ -69,7 +69,7 @@ def create_subscriber():
         try:
             res = db.locations_table.get_item(Key={"location_code": code})
         except Exception as exc:
-            logger.exception("locations validation failed", exc_info=exc)
+            logger.error("locations validation failed"": %s", exc)
             return {"error": "Database error during location validation"}, 500
         if not res.get("Item"):
             return {"error": f"Location not found: {code!r}"}, 422
@@ -91,7 +91,7 @@ def create_subscriber():
     try:
         db.subscribers_table.put_item(Item=item)
     except Exception as exc:
-        logger.exception("subscribers put_item failed", exc_info=exc)
+        logger.error("subscribers put_item failed"": %s", exc)
         return {"error": "Failed to create subscriber"}, 500
 
     return {
@@ -106,7 +106,7 @@ def get_subscriber(subscriber_id: str):
     try:
         result = db.subscribers_table.get_item(Key={"subscriber_id": subscriber_id})
     except Exception as exc:
-        logger.exception("subscribers get_item failed", exc_info=exc)
+        logger.error("subscribers get_item failed"": %s", exc)
         return {"error": "Database query failed"}, 500
 
     item = result.get("Item")
@@ -139,7 +139,7 @@ def update_subscriber(subscriber_id: str):
             Key={"subscriber_id": subscriber_id}
         ).get("Item")
     except Exception as exc:
-        logger.exception("subscribers get_item failed", exc_info=exc)
+        logger.error("subscribers get_item failed"": %s", exc)
         return {"error": "Database query failed"}, 500
     if existing is None:
         return {"error": f"Subscriber not found: {subscriber_id!r}"}, 404
@@ -156,7 +156,7 @@ def update_subscriber(subscriber_id: str):
             try:
                 res = db.locations_table.get_item(Key={"location_code": code})
             except Exception as exc:
-                logger.exception("locations validation failed", exc_info=exc)
+                logger.error("locations validation failed"": %s", exc)
                 return {"error": "Database error during location validation"}, 500
             if not res.get("Item"):
                 return {"error": f"Location not found: {code!r}"}, 422
@@ -180,7 +180,7 @@ def update_subscriber(subscriber_id: str):
             ReturnValues="ALL_NEW",
         )
     except Exception as exc:
-        logger.exception("subscribers update_item failed", exc_info=exc)
+        logger.error("subscribers update_item failed"": %s", exc)
         return {"error": "Failed to update subscriber"}, 500
 
     return {
@@ -197,7 +197,7 @@ def delete_subscriber(subscriber_id: str):
             Key={"subscriber_id": subscriber_id}
         ).get("Item")
     except Exception as exc:
-        logger.exception("subscribers get_item failed", exc_info=exc)
+        logger.error("subscribers get_item failed"": %s", exc)
         return {"error": "Database query failed"}, 500
     if existing is None:
         return {"error": f"Subscriber not found: {subscriber_id!r}"}, 404
@@ -214,7 +214,7 @@ def delete_subscriber(subscriber_id: str):
             ReturnValues="ALL_NEW",
         )
     except Exception as exc:
-        logger.exception("subscribers soft-delete failed", exc_info=exc)
+        logger.error("subscribers soft-delete failed"": %s", exc)
         return {"error": "Failed to delete subscriber"}, 500
 
     return {

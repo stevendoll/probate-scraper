@@ -198,7 +198,7 @@ def parse_document(lead_id: str):
     try:
         pdf_bytes = _fetch_pdf_bytes(doc_s3_uri)
     except Exception as exc:
-        logger.exception("S3 fetch failed", exc_info=exc)
+        logger.error("S3 fetch failed: %s", exc)
         err_msg = f"S3 fetch failed: {exc}"
         _persist_parsed_fields(lead_id, {}, _model_id, error=err_msg)
         return {"error": err_msg}, 500
@@ -207,7 +207,7 @@ def parse_document(lead_id: str):
     try:
         parsed = _call_bedrock(pdf_bytes)
     except Exception as exc:
-        logger.exception("Bedrock call failed", exc_info=exc)
+        logger.error("Bedrock call failed: %s", exc)
         err_msg = f"Bedrock call failed: {exc}"
         _persist_parsed_fields(lead_id, {}, _model_id, error=err_msg)
         return {"error": err_msg}, 500
@@ -216,7 +216,7 @@ def parse_document(lead_id: str):
     try:
         _persist_parsed_fields(lead_id, parsed, _model_id)
     except Exception as exc:
-        logger.exception("DynamoDB update failed", exc_info=exc)
+        logger.error("DynamoDB update failed: %s", exc)
         return {"error": f"DynamoDB update failed: {exc}"}, 500
 
     # 5. Return the updated lead
