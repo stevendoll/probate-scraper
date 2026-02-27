@@ -32,6 +32,7 @@ parameter_overrides = """
   ScrapeSchedule=cron(0 6 * * ? *)
   ScraperUsername=REPLACE_ME
   ScraperPassword=REPLACE_ME
+  BedrockModelId=anthropic.claude-3-haiku-20240307-v1:0
 """
 # ── Sensitive values (keep out of version control) ────────────────────────
 # ScraperPassword has NoEcho=true in template.yaml so it won't appear in the
