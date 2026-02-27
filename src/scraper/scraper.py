@@ -739,14 +739,7 @@ def extract_page_data(
             continue
 
         data_rows = rows[2:]
-        log.info("Processing table with %d rows", len(rows))
-
-        # Log first row HTML to confirm selectors (remove once stable)
-        if data_rows:
-            try:
-                log.info("First row HTML: %s", data_rows[0].get_attribute("outerHTML")[:3000])
-            except Exception:
-                pass
+        log.info("Processing table with %d data rows", len(data_rows))
 
         # ── Phase 1: extract text + inline links from ALL rows before any click.
         # Clicking a row to open the detail panel causes React to re-render the
