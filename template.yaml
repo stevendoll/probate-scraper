@@ -63,13 +63,13 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "us.amazon.nova-pro-v1:0"
     Description: >
       Amazon Bedrock model ID used by ParseDocumentFunction.
-      Claude 3 Haiku is available on-demand (no inference profile required) and
-      supports document blocks natively, making it the simplest integration path.
-      Newer Claude models (3.5+) require cross-region inference profiles (us.*)
-      which support neither document blocks nor image blocks via Converse.
+      Amazon Nova Pro (us.amazon.nova-pro-v1:0) and Nova Lite support document
+      blocks natively via cross-region inference profiles.  Anthropic Claude
+      models (Haiku, Sonnet, etc.) silently ignore the document bytes even when
+      the Converse API call succeeds — do not use Claude models here.
       Run "make check-bedrock" to verify access before deploying.
 
 # ---------------------------------------------------------------------------

@@ -84,10 +84,10 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
     """
     Send the PDF to Bedrock via the Converse API and return the parsed JSON dict.
 
-    Uses a document block with Claude 3 Haiku, which is available on-demand
-    (no cross-region inference profile required) and supports document blocks
-    natively.  Newer Claude models (3.5+) require us.* inference profiles that
-    support neither document blocks nor image blocks via Converse.
+    Uses a document block with Amazon Nova Pro, which supports document blocks
+    natively via its cross-region inference profile.  Anthropic Claude models
+    (Haiku, Sonnet, etc.) silently ignore the document bytes even when the API
+    call succeeds, returning "no document attached" responses.
 
     The model is expected to return a single JSON object — no markdown fences.
     If the response contains a fenced code block we strip the fences first.
@@ -111,7 +111,7 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
             }
         ],
         inferenceConfig={
-            "maxTokens": 1024,
+            "maxTokens": 2048,
             "temperature": 0,
         },
     )
