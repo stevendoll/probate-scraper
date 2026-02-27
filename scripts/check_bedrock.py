@@ -9,12 +9,12 @@ Usage:
     pipenv run python scripts/check_bedrock.py
 
     # Override model or region:
-    BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0 \\
+    BEDROCK_MODEL_ID=us.amazon.nova-pro-v1:0 \\
     AWS_DEFAULT_REGION=us-east-1 \\
     pipenv run python scripts/check_bedrock.py
 
 Environment variables:
-    BEDROCK_MODEL_ID   Model to test (default: anthropic.claude-3-haiku-20240307-v1:0)
+    BEDROCK_MODEL_ID   Model to test (default: us.amazon.nova-pro-v1:0)
     AWS_DEFAULT_REGION AWS region    (default: us-east-1)
 """
 
@@ -26,7 +26,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 
 MODEL_ID = os.environ.get(
     "BEDROCK_MODEL_ID",
-    "anthropic.claude-3-haiku-20240307-v1:0",
+    "us.amazon.nova-pro-v1:0",
 )
 REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
@@ -70,14 +70,13 @@ def main() -> int:
         print(f"  {RED}✗{RESET}  {code}: {msg}\n")
 
         if "use case details" in msg.lower():
-            print(f"  {YELLOW}ACTION REQUIRED{RESET}: Submit Anthropic use case details.\n")
-            print("  AWS requires a one-time use case form for Anthropic models.")
+            print(f"  {YELLOW}ACTION REQUIRED{RESET}: Submit use case details for this model.\n")
+            print("  AWS requires a one-time use case form for some models.")
             print("  Steps:")
             print(f"    1. Open the Bedrock model catalog:")
             print(f"       https://{REGION}.console.aws.amazon.com/bedrock/home?region={REGION}#/model-catalog")
-            print(f"    2. Search for 'Claude 3 Haiku'")
-            print(f"    3. Click the model → complete the use case details form")
-            print(f"    4. Wait for approval (usually instant) then re-run: make check-bedrock\n")
+            print(f"    2. Search for the model and complete the use case details form")
+            print(f"    3. Wait for approval (usually instant) then re-run: make check-bedrock\n")
 
         elif code == "AccessDeniedException":
             print(f"  {YELLOW}Fix{RESET}: IAM role/user is missing bedrock:InvokeModel permission.")
@@ -86,8 +85,7 @@ def main() -> int:
 
         elif code == "ValidationException" and "on-demand throughput" in msg.lower():
             print(f"  {YELLOW}Fix{RESET}: This model requires a cross-region inference profile (us.* prefix).")
-            print(f"  Claude 3 Haiku supports on-demand; if you see this the model ID is wrong.")
-            print(f"  Expected: anthropic.claude-3-haiku-20240307-v1:0\n")
+            print(f"  Amazon Nova models use us.* prefixed IDs, e.g. us.amazon.nova-pro-v1:0\n")
 
         elif code in ("ResourceNotFoundException", "ValidationException"):
             print(f"  {YELLOW}Fix{RESET}: Model '{MODEL_ID}' not found in {REGION}.")

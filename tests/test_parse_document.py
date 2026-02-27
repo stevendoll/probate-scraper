@@ -159,7 +159,7 @@ class TestParseDocument(unittest.TestCase):
         parse_app._table    = self.mock_table
         parse_app._s3       = self.mock_s3
         parse_app._bedrock  = self.mock_bedrock
-        parse_app._model_id = "anthropic.claude-3-haiku-20240307-v1:0"
+        parse_app._model_id = "us.amazon.nova-pro-v1:0"
 
     # ── 404 — lead not found ────────────────────────────────────────────────
 
