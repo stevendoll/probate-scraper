@@ -11,11 +11,11 @@ Supported routes:
   GET    /real-estate/probate-leads/{location_path}/leads
   GET    /real-estate/probate-leads/locations
   GET    /real-estate/probate-leads/locations/{location_code}
-  GET    /real-estate/probate-leads/subscribers
-  POST   /real-estate/probate-leads/subscribers
-  GET    /real-estate/probate-leads/subscribers/{subscriber_id}
-  PATCH  /real-estate/probate-leads/subscribers/{subscriber_id}
-  DELETE /real-estate/probate-leads/subscribers/{subscriber_id}
+  GET    /real-estate/probate-leads/users
+  POST   /real-estate/probate-leads/users
+  GET    /real-estate/probate-leads/users/{user_id}
+  PATCH  /real-estate/probate-leads/users/{user_id}
+  DELETE /real-estate/probate-leads/users/{user_id}
   POST   /real-estate/probate-leads/stripe/webhook
   POST   /real-estate/probate-leads/{location_path}/update   (ECS stubbed locally)
   POST   /real-estate/probate-leads/leads/{lead_id}/parse-document
@@ -38,11 +38,14 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY",   "local")
 os.environ.setdefault("AWS_DEFAULT_REGION",      "us-east-1")
 os.environ.setdefault("DYNAMO_TABLE_NAME",       "leads")
 os.environ.setdefault("LOCATIONS_TABLE_NAME",    "locations")
-os.environ.setdefault("SUBSCRIBERS_TABLE_NAME",  "subscribers")
+os.environ.setdefault("USERS_TABLE_NAME",        "users")
 os.environ.setdefault("GSI_NAME",                "recorded-date-index")
 os.environ.setdefault("LOCATION_DATE_GSI",       "location-date-index")
 os.environ.setdefault("STRIPE_SECRET_KEY",       "")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET",   "")
+os.environ.setdefault("JWT_SECRET",          "dev-secret-change-in-prod")
+os.environ.setdefault("FROM_EMAIL",          "")
+os.environ.setdefault("MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify")
 os.environ.setdefault("POWERTOOLS_TRACE_DISABLED", "true")
 os.environ.setdefault("LOG_LEVEL",               "INFO")
 os.environ.setdefault("DOCUMENTS_BUCKET",         "")
@@ -151,9 +154,13 @@ class LambdaHandler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "locations":
             return {"location_code": parts[1]}
 
-        # /subscribers/{subscriber_id}
-        if len(parts) == 2 and parts[0] == "subscribers":
-            return {"subscriber_id": parts[1]}
+        # /users/{user_id}
+        if len(parts) == 2 and parts[0] == "users":
+            return {"user_id": parts[1]}
+
+        # /admin/users/{user_id}
+        if len(parts) == 3 and parts[0] == "admin" and parts[1] == "users":
+            return {"user_id": parts[2]}
 
         # /leads/{lead_id}/parse-document
         if len(parts) == 3 and parts[0] == "leads" and parts[2] == "parse-document":
@@ -245,11 +252,11 @@ if __name__ == "__main__":
     print(f"  DynamoDB → {os.environ['AWS_ENDPOINT_URL']}")
     print(f"  Tables   → leads={os.environ['DYNAMO_TABLE_NAME']}")
     print(f"             locations={os.environ['LOCATIONS_TABLE_NAME']}")
-    print(f"             subscribers={os.environ['SUBSCRIBERS_TABLE_NAME']}")
+    print(f"             users={os.environ['USERS_TABLE_NAME']}")
     print(f"\n  Sample routes:")
     print(f"    GET  http://localhost:{port}{BASE_PATH}/locations")
     print(f"    GET  http://localhost:{port}{BASE_PATH}/collin-tx/leads?from_date=2026-01-01")
-    print(f"    POST http://localhost:{port}{BASE_PATH}/subscribers")
+    print(f"    POST http://localhost:{port}{BASE_PATH}/users")
     print(f"    POST http://localhost:{port}{BASE_PATH}/collin-tx/update   (ECS stubbed)")
     print(f"    POST http://localhost:{port}{BASE_PATH}/leads/{{lead_id}}/parse-document")
     print("  Ctrl+C to stop\n")

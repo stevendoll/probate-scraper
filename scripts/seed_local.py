@@ -10,7 +10,7 @@ Reads AWS_ENDPOINT_URL from environment (default: http://localhost:8000).
 Tables created:
   leads        — scraped probate records (formerly probate-leads-collin-tx)
   locations    — supported counties/jurisdictions
-  subscribers  — Stripe-backed subscriber accounts
+  users  — authenticated user accounts
 """
 
 import csv
@@ -29,9 +29,9 @@ from boto3.dynamodb.types import TypeSerializer
 ENDPOINT   = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:8000")
 GSI_NAME   = "recorded-date-index"
 
-LEADS_TABLE_NAME       = os.environ.get("DYNAMO_TABLE_NAME",       "leads")
-LOCATIONS_TABLE_NAME   = os.environ.get("LOCATIONS_TABLE_NAME",    "locations")
-SUBSCRIBERS_TABLE_NAME = os.environ.get("SUBSCRIBERS_TABLE_NAME",  "subscribers")
+LEADS_TABLE_NAME     = os.environ.get("DYNAMO_TABLE_NAME",    "leads")
+LOCATIONS_TABLE_NAME = os.environ.get("LOCATIONS_TABLE_NAME", "locations")
+USERS_TABLE_NAME     = os.environ.get("USERS_TABLE_NAME",     "users")
 
 # Dummy credentials required by DynamoDB Local (values don't matter)
 session = boto3.Session(
@@ -127,17 +127,17 @@ def create_locations_table():
     print(f"  '{LOCATIONS_TABLE_NAME}' ready.")
 
 
-def create_subscribers_table():
-    print(f"Creating table '{SUBSCRIBERS_TABLE_NAME}' at {ENDPOINT} ...")
+def create_users_table():
+    print(f"Creating table '{USERS_TABLE_NAME}' at {ENDPOINT} ...")
     ddb.create_table(
-        TableName=SUBSCRIBERS_TABLE_NAME,
+        TableName=USERS_TABLE_NAME,
         BillingMode="PAY_PER_REQUEST",
         AttributeDefinitions=[
-            {"AttributeName": "subscriber_id", "AttributeType": "S"},
-            {"AttributeName": "email",         "AttributeType": "S"},
+            {"AttributeName": "user_id", "AttributeType": "S"},
+            {"AttributeName": "email",   "AttributeType": "S"},
         ],
         KeySchema=[
-            {"AttributeName": "subscriber_id", "KeyType": "HASH"},
+            {"AttributeName": "user_id", "KeyType": "HASH"},
         ],
         GlobalSecondaryIndexes=[
             {
@@ -149,8 +149,8 @@ def create_subscribers_table():
             },
         ],
     )
-    _wait_active(SUBSCRIBERS_TABLE_NAME)
-    print(f"  '{SUBSCRIBERS_TABLE_NAME}' ready.")
+    _wait_active(USERS_TABLE_NAME)
+    print(f"  '{USERS_TABLE_NAME}' ready.")
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +187,28 @@ def seed_locations():
         item = {k: serializer.serialize(v) for k, v in loc.items() if v is not None}
         ddb.put_item(TableName=LOCATIONS_TABLE_NAME, Item=item)
     print(f"  {len(SEED_LOCATIONS)} location(s) written.")
+
+
+# ---------------------------------------------------------------------------
+# Seed — users
+# ---------------------------------------------------------------------------
+
+def seed_users():
+    print(f"Seeding '{USERS_TABLE_NAME}' ...")
+    now = datetime.now(timezone.utc).isoformat()
+    ddb.put_item(
+        TableName=USERS_TABLE_NAME,
+        Item={k: serializer.serialize(v) for k, v in {
+            "user_id":        "00000000-0000-0000-0000-000000000001",
+            "email":          "admin@example.com",
+            "role":           "admin",
+            "status":         "active",
+            "location_codes": ["CollinTx"],
+            "created_at":     now,
+            "updated_at":     now,
+        }.items()},
+    )
+    print("  1 admin user written.")
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +266,7 @@ def seed_leads_csv(csv_path: Path):
 # ---------------------------------------------------------------------------
 
 def verify():
-    for name in (LEADS_TABLE_NAME, LOCATIONS_TABLE_NAME, SUBSCRIBERS_TABLE_NAME):
+    for name in (LEADS_TABLE_NAME, LOCATIONS_TABLE_NAME, USERS_TABLE_NAME):
         resp = ddb.scan(TableName=name, Select="COUNT")
         print(f"  {name}: {resp['Count']} item(s)")
 
@@ -275,11 +297,12 @@ if __name__ == "__main__":
         create_locations_table()
     seed_locations()  # idempotent (PutItem overwrites)
 
-    # ── Subscribers table (starts empty)
-    if table_exists(SUBSCRIBERS_TABLE_NAME):
-        print(f"Table '{SUBSCRIBERS_TABLE_NAME}' already exists — skipping creation")
+    # ── Users table
+    if table_exists(USERS_TABLE_NAME):
+        print(f"Table '{USERS_TABLE_NAME}' already exists — skipping creation")
     else:
-        create_subscribers_table()
+        create_users_table()
+    seed_users()  # idempotent (PutItem overwrites)
 
     print("\nVerification:")
     verify()
@@ -287,3 +310,4 @@ if __name__ == "__main__":
     print("\nDone. Connect with:")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {LEADS_TABLE_NAME} --endpoint-url {ENDPOINT}")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {LOCATIONS_TABLE_NAME} --endpoint-url {ENDPOINT}")
+    print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {USERS_TABLE_NAME} --endpoint-url {ENDPOINT}")

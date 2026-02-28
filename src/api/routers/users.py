@@ -1,10 +1,10 @@
 """
 Routes:
-  GET    /real-estate/probate-leads/subscribers
-  POST   /real-estate/probate-leads/subscribers
-  GET    /real-estate/probate-leads/subscribers/{subscriber_id}
-  PATCH  /real-estate/probate-leads/subscribers/{subscriber_id}
-  DELETE /real-estate/probate-leads/subscribers/{subscriber_id}
+  GET    /real-estate/probate-leads/users
+  POST   /real-estate/probate-leads/users
+  GET    /real-estate/probate-leads/users/{user_id}
+  PATCH  /real-estate/probate-leads/users/{user_id}
+  DELETE /real-estate/probate-leads/users/{user_id}
 """
 
 import uuid
@@ -13,7 +13,7 @@ from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler.api_gateway import Router
 
 import db
-from models import Subscriber
+from models import User
 from utils import now_iso
 
 logger = Logger(service="probate-api")
@@ -22,27 +22,27 @@ router = Router()
 _VALID_STATUSES = {"active", "inactive", "canceled", "past_due", "trialing"}
 
 
-@router.get("/real-estate/probate-leads/subscribers")
-def list_subscribers():
-    """Return all subscribers."""
+@router.get("/real-estate/probate-leads/users")
+def list_users():
+    """Return all users."""
     try:
-        result = db.subscribers_table.scan()
+        result = db.users_table.scan()
     except Exception as exc:
-        logger.error("subscribers scan failed"": %s", exc)
+        logger.error("users scan failed: %s", exc)
         return {"error": "Database scan failed"}, 500
 
-    items = [Subscriber.from_dynamo(item).to_dict() for item in result.get("Items", [])]
+    items = [User.from_dynamo(item).to_dict() for item in result.get("Items", [])]
     return {
         "requestId": str(uuid.uuid4()),
-        "subscribers": items,
+        "users": items,
         "count": len(items),
     }
 
 
-@router.post("/real-estate/probate-leads/subscribers")
-def create_subscriber():
+@router.post("/real-estate/probate-leads/users")
+def create_user():
     """
-    Create a new subscriber.
+    Create a new user.
 
     Request body (JSON):
       email                   (str, required)
@@ -69,17 +69,18 @@ def create_subscriber():
         try:
             res = db.locations_table.get_item(Key={"location_code": code})
         except Exception as exc:
-            logger.error("locations validation failed"": %s", exc)
+            logger.error("locations validation failed: %s", exc)
             return {"error": "Database error during location validation"}, 500
         if not res.get("Item"):
             return {"error": f"Location not found: {code!r}"}, 422
 
-    subscriber_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
     now = now_iso()
 
     item = {
-        "subscriber_id":          subscriber_id,
+        "user_id":                user_id,
         "email":                  email,
+        "role":                   "user",
         "stripe_customer_id":     body.get("stripe_customer_id") or "",
         "stripe_subscription_id": body.get("stripe_subscription_id") or "",
         "status":                 body.get("status") or "active",
@@ -89,40 +90,40 @@ def create_subscriber():
     }
 
     try:
-        db.subscribers_table.put_item(Item=item)
+        db.users_table.put_item(Item=item)
     except Exception as exc:
-        logger.error("subscribers put_item failed"": %s", exc)
-        return {"error": "Failed to create subscriber"}, 500
+        logger.error("users put_item failed: %s", exc)
+        return {"error": "Failed to create user"}, 500
 
     return {
         "requestId": str(uuid.uuid4()),
-        "subscriber": Subscriber.from_dynamo(item).to_dict(),
+        "user": User.from_dynamo(item).to_dict(),
     }, 201
 
 
-@router.get("/real-estate/probate-leads/subscribers/<subscriber_id>")
-def get_subscriber(subscriber_id: str):
-    """Return a single subscriber."""
+@router.get("/real-estate/probate-leads/users/<user_id>")
+def get_user(user_id: str):
+    """Return a single user."""
     try:
-        result = db.subscribers_table.get_item(Key={"subscriber_id": subscriber_id})
+        result = db.users_table.get_item(Key={"user_id": user_id})
     except Exception as exc:
-        logger.error("subscribers get_item failed"": %s", exc)
+        logger.error("users get_item failed: %s", exc)
         return {"error": "Database query failed"}, 500
 
     item = result.get("Item")
     if item is None:
-        return {"error": f"Subscriber not found: {subscriber_id!r}"}, 404
+        return {"error": f"User not found: {user_id!r}"}, 404
 
     return {
         "requestId": str(uuid.uuid4()),
-        "subscriber": Subscriber.from_dynamo(item).to_dict(),
+        "user": User.from_dynamo(item).to_dict(),
     }
 
 
-@router.patch("/real-estate/probate-leads/subscribers/<subscriber_id>")
-def update_subscriber(subscriber_id: str):
+@router.patch("/real-estate/probate-leads/users/<user_id>")
+def update_user(user_id: str):
     """
-    Update a subscriber's location_codes and/or status.
+    Update a user's location_codes and/or status.
 
     Request body (JSON) — all fields optional:
       location_codes  (list[str]) — replaces the existing set
@@ -133,16 +134,16 @@ def update_subscriber(subscriber_id: str):
     except Exception:
         return {"error": "Invalid JSON body"}, 400
 
-    # Verify subscriber exists
+    # Verify user exists
     try:
-        existing = db.subscribers_table.get_item(
-            Key={"subscriber_id": subscriber_id}
+        existing = db.users_table.get_item(
+            Key={"user_id": user_id}
         ).get("Item")
     except Exception as exc:
-        logger.error("subscribers get_item failed"": %s", exc)
+        logger.error("users get_item failed: %s", exc)
         return {"error": "Database query failed"}, 500
     if existing is None:
-        return {"error": f"Subscriber not found: {subscriber_id!r}"}, 404
+        return {"error": f"User not found: {user_id!r}"}, 404
 
     update_expr_parts = ["#updated_at = :updated_at"]
     expr_attr_names   = {"#updated_at": "updated_at"}
@@ -156,7 +157,7 @@ def update_subscriber(subscriber_id: str):
             try:
                 res = db.locations_table.get_item(Key={"location_code": code})
             except Exception as exc:
-                logger.error("locations validation failed"": %s", exc)
+                logger.error("locations validation failed: %s", exc)
                 return {"error": "Database error during location validation"}, 500
             if not res.get("Item"):
                 return {"error": f"Location not found: {code!r}"}, 422
@@ -172,39 +173,39 @@ def update_subscriber(subscriber_id: str):
         expr_attr_values[":status"] = status
 
     try:
-        result = db.subscribers_table.update_item(
-            Key={"subscriber_id": subscriber_id},
+        result = db.users_table.update_item(
+            Key={"user_id": user_id},
             UpdateExpression="SET " + ", ".join(update_expr_parts),
             ExpressionAttributeNames=expr_attr_names,
             ExpressionAttributeValues=expr_attr_values,
             ReturnValues="ALL_NEW",
         )
     except Exception as exc:
-        logger.error("subscribers update_item failed"": %s", exc)
-        return {"error": "Failed to update subscriber"}, 500
+        logger.error("users update_item failed: %s", exc)
+        return {"error": "Failed to update user"}, 500
 
     return {
         "requestId": str(uuid.uuid4()),
-        "subscriber": Subscriber.from_dynamo(result["Attributes"]).to_dict(),
+        "user": User.from_dynamo(result["Attributes"]).to_dict(),
     }
 
 
-@router.delete("/real-estate/probate-leads/subscribers/<subscriber_id>")
-def delete_subscriber(subscriber_id: str):
-    """Soft-delete a subscriber by setting status → 'inactive'."""
+@router.delete("/real-estate/probate-leads/users/<user_id>")
+def delete_user(user_id: str):
+    """Soft-delete a user by setting status → 'inactive'."""
     try:
-        existing = db.subscribers_table.get_item(
-            Key={"subscriber_id": subscriber_id}
+        existing = db.users_table.get_item(
+            Key={"user_id": user_id}
         ).get("Item")
     except Exception as exc:
-        logger.error("subscribers get_item failed"": %s", exc)
+        logger.error("users get_item failed: %s", exc)
         return {"error": "Database query failed"}, 500
     if existing is None:
-        return {"error": f"Subscriber not found: {subscriber_id!r}"}, 404
+        return {"error": f"User not found: {user_id!r}"}, 404
 
     try:
-        result = db.subscribers_table.update_item(
-            Key={"subscriber_id": subscriber_id},
+        result = db.users_table.update_item(
+            Key={"user_id": user_id},
             UpdateExpression="SET #status = :status, updated_at = :updated_at",
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues={
@@ -214,10 +215,10 @@ def delete_subscriber(subscriber_id: str):
             ReturnValues="ALL_NEW",
         )
     except Exception as exc:
-        logger.error("subscribers soft-delete failed"": %s", exc)
-        return {"error": "Failed to delete subscriber"}, 500
+        logger.error("users soft-delete failed: %s", exc)
+        return {"error": "Failed to delete user"}, 500
 
     return {
         "requestId": str(uuid.uuid4()),
-        "subscriber": Subscriber.from_dynamo(result["Attributes"]).to_dict(),
+        "user": User.from_dynamo(result["Attributes"]).to_dict(),
     }

@@ -1,15 +1,15 @@
 """
-Unit tests for src/api/app.py — subscribers endpoints.
+Unit tests for src/api/app.py — users endpoints.
 
-  GET    /real-estate/probate-leads/subscribers
-  POST   /real-estate/probate-leads/subscribers
-  GET    /real-estate/probate-leads/subscribers/{subscriber_id}
-  PATCH  /real-estate/probate-leads/subscribers/{subscriber_id}
-  DELETE /real-estate/probate-leads/subscribers/{subscriber_id}
+  GET    /real-estate/probate-leads/users
+  POST   /real-estate/probate-leads/users
+  GET    /real-estate/probate-leads/users/{user_id}
+  PATCH  /real-estate/probate-leads/users/{user_id}
+  DELETE /real-estate/probate-leads/users/{user_id}
   POST   /real-estate/probate-leads/stripe/webhook
 
 Run with:
-    pipenv run python -m unittest tests.test_subscribers -v
+    pipenv run python -m unittest tests.test_users -v
 """
 
 import copy
@@ -30,11 +30,14 @@ os.environ.update(
         "AWS_DEFAULT_REGION":        "us-east-1",
         "DYNAMO_TABLE_NAME":         "leads",
         "LOCATIONS_TABLE_NAME":      "locations",
-        "SUBSCRIBERS_TABLE_NAME":    "subscribers",
+        "USERS_TABLE_NAME":          "users",
         "GSI_NAME":                  "recorded-date-index",
         "LOCATION_DATE_GSI":         "location-date-index",
         "STRIPE_SECRET_KEY":         "",
         "STRIPE_WEBHOOK_SECRET":     "",
+        "JWT_SECRET":                "test-secret",
+        "FROM_EMAIL":                "",
+        "MAGIC_LINK_BASE_URL":       "http://localhost:3000/auth/verify",
         "POWERTOOLS_TRACE_DISABLED": "true",
         "POWERTOOLS_SERVICE_NAME":   "probate-api-test",
         "LOG_LEVEL":                 "WARNING",
@@ -62,8 +65,8 @@ class MockContext:
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from tests.fixtures.locations  import COLLIN_TX
-from tests.fixtures.subscribers import MOCK_SUBSCRIBERS, ALICE, BOB
+from tests.fixtures.locations import COLLIN_TX
+from tests.fixtures.users import MOCK_USERS, ALICE, BOB
 
 
 def _body(resp):
@@ -83,55 +86,54 @@ def _call(method: str, path: str, path_params=None, body=None):
     return app.handler(event, MockContext())
 
 
-BASE = "/real-estate/probate-leads/subscribers"
+BASE = "/real-estate/probate-leads/users"
 
 
 # ---------------------------------------------------------------------------
-# Tests — GET /subscribers
+# Tests — GET /users
 # ---------------------------------------------------------------------------
 
-class TestListSubscribers(unittest.TestCase):
+class TestListUsers(unittest.TestCase):
 
     def setUp(self):
-        self.mock_sub_table = MagicMock()
-        db.subscribers_table = self.mock_sub_table
-        # Return copies to avoid set mutation issues across tests
-        self.mock_sub_table.scan.return_value = {"Items": [copy.deepcopy(s) for s in MOCK_SUBSCRIBERS]}
+        self.mock_user_table = MagicMock()
+        db.users_table = self.mock_user_table
+        self.mock_user_table.scan.return_value = {"Items": [copy.deepcopy(u) for u in MOCK_USERS]}
 
     def test_returns_200(self):
         resp = _call("GET", BASE)
         self.assertEqual(resp["statusCode"], 200)
 
-    def test_returns_subscribers_array(self):
+    def test_returns_users_array(self):
         resp = _call("GET", BASE)
         body = _body(resp)
         self.assertEqual(body["count"], 2)
-        self.assertIn("subscribers", body)
+        self.assertIn("users", body)
 
     def test_location_codes_are_lists_not_sets(self):
         resp = _call("GET", BASE)
-        for sub in _body(resp)["subscribers"]:
-            self.assertIsInstance(sub["locationCodes"], list)
+        for user in _body(resp)["users"]:
+            self.assertIsInstance(user["locationCodes"], list)
 
     def test_dynamo_error_returns_500(self):
-        self.mock_sub_table.scan.side_effect = Exception("DynamoDB unavailable")
+        self.mock_user_table.scan.side_effect = Exception("DynamoDB unavailable")
         resp = _call("GET", BASE)
         self.assertEqual(resp["statusCode"], 500)
 
 
 # ---------------------------------------------------------------------------
-# Tests — POST /subscribers
+# Tests — POST /users
 # ---------------------------------------------------------------------------
 
-class TestCreateSubscriber(unittest.TestCase):
+class TestCreateUser(unittest.TestCase):
 
     def setUp(self):
-        self.mock_sub_table = MagicMock()
-        self.mock_loc_table = MagicMock()
-        db.subscribers_table = self.mock_sub_table
-        db.locations_table   = self.mock_loc_table
-        self.mock_loc_table.get_item.return_value = {"Item": COLLIN_TX}
-        self.mock_sub_table.put_item.return_value = {}
+        self.mock_user_table = MagicMock()
+        self.mock_loc_table  = MagicMock()
+        db.users_table     = self.mock_user_table
+        db.locations_table = self.mock_loc_table
+        self.mock_loc_table.get_item.return_value  = {"Item": COLLIN_TX}
+        self.mock_user_table.put_item.return_value = {}
 
     def _create(self, body):
         return _call("POST", BASE, body=body)
@@ -140,15 +142,16 @@ class TestCreateSubscriber(unittest.TestCase):
         resp = self._create({"email": "test@example.com", "location_codes": ["CollinTx"]})
         self.assertEqual(resp["statusCode"], 201)
 
-    def test_response_contains_subscriber(self):
+    def test_response_contains_user(self):
         resp = self._create({"email": "test@example.com", "location_codes": ["CollinTx"]})
-        sub = _body(resp)["subscriber"]
-        self.assertEqual(sub["email"], "test@example.com")
-        self.assertIn("subscriberId", sub)
-        self.assertEqual(sub["status"], "active")
+        user = _body(resp)["user"]
+        self.assertEqual(user["email"], "test@example.com")
+        self.assertIn("userId", user)
+        self.assertEqual(user["status"], "active")
+        self.assertEqual(user["role"], "user")
 
     def test_location_codes_validated(self):
-        self.mock_loc_table.get_item.return_value = {}  # location not found
+        self.mock_loc_table.get_item.return_value = {}
         resp = self._create({"email": "a@b.com", "location_codes": ["NoSuchPlace"]})
         self.assertEqual(resp["statusCode"], 422)
 
@@ -174,63 +177,63 @@ class TestCreateSubscriber(unittest.TestCase):
             "stripe_subscription_id": "sub_xyz",
         })
         self.assertEqual(resp["statusCode"], 201)
-        sub = _body(resp)["subscriber"]
-        self.assertEqual(sub["stripeCustomerId"], "cus_abc")
+        user = _body(resp)["user"]
+        self.assertEqual(user["stripeCustomerId"], "cus_abc")
 
     def test_dynamo_error_returns_500(self):
-        self.mock_sub_table.put_item.side_effect = Exception("DynamoDB unavailable")
+        self.mock_user_table.put_item.side_effect = Exception("DynamoDB unavailable")
         resp = self._create({"email": "a@b.com", "location_codes": ["CollinTx"]})
         self.assertEqual(resp["statusCode"], 500)
 
 
 # ---------------------------------------------------------------------------
-# Tests — GET /subscribers/{subscriber_id}
+# Tests — GET /users/{user_id}
 # ---------------------------------------------------------------------------
 
-class TestGetSubscriber(unittest.TestCase):
+class TestGetUser(unittest.TestCase):
 
     def setUp(self):
-        self.mock_sub_table = MagicMock()
-        db.subscribers_table = self.mock_sub_table
+        self.mock_user_table = MagicMock()
+        db.users_table = self.mock_user_table
 
-    def test_returns_200_for_existing_subscriber(self):
-        self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
-        resp = _call("GET", f"{BASE}/sub-uuid-001", {"subscriber_id": "sub-uuid-001"})
+    def test_returns_200_for_existing_user(self):
+        self.mock_user_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
+        resp = _call("GET", f"{BASE}/user-uuid-001", {"user_id": "user-uuid-001"})
         self.assertEqual(resp["statusCode"], 200)
 
-    def test_returns_subscriber_object(self):
-        self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
-        resp = _call("GET", f"{BASE}/sub-uuid-001", {"subscriber_id": "sub-uuid-001"})
-        sub = _body(resp)["subscriber"]
-        self.assertEqual(sub["subscriberId"], "sub-uuid-001")
-        self.assertEqual(sub["email"], "alice@example.com")
+    def test_returns_user_object(self):
+        self.mock_user_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
+        resp = _call("GET", f"{BASE}/user-uuid-001", {"user_id": "user-uuid-001"})
+        user = _body(resp)["user"]
+        self.assertEqual(user["userId"], "user-uuid-001")
+        self.assertEqual(user["email"], "alice@example.com")
 
-    def test_returns_404_for_missing_subscriber(self):
-        self.mock_sub_table.get_item.return_value = {}
-        resp = _call("GET", f"{BASE}/no-such-id", {"subscriber_id": "no-such-id"})
+    def test_returns_404_for_missing_user(self):
+        self.mock_user_table.get_item.return_value = {}
+        resp = _call("GET", f"{BASE}/no-such-id", {"user_id": "no-such-id"})
         self.assertEqual(resp["statusCode"], 404)
 
 
 # ---------------------------------------------------------------------------
-# Tests — PATCH /subscribers/{subscriber_id}
+# Tests — PATCH /users/{user_id}
 # ---------------------------------------------------------------------------
 
-class TestUpdateSubscriber(unittest.TestCase):
+class TestUpdateUser(unittest.TestCase):
 
     def setUp(self):
-        self.mock_sub_table = MagicMock()
-        self.mock_loc_table = MagicMock()
-        db.subscribers_table = self.mock_sub_table
-        db.locations_table   = self.mock_loc_table
-        self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
-        self.mock_loc_table.get_item.return_value = {"Item": COLLIN_TX}
+        self.mock_user_table = MagicMock()
+        self.mock_loc_table  = MagicMock()
+        db.users_table     = self.mock_user_table
+        db.locations_table = self.mock_loc_table
+        self.mock_user_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
+        self.mock_loc_table.get_item.return_value  = {"Item": COLLIN_TX}
 
         updated = copy.deepcopy(ALICE)
         updated["status"] = "inactive"
-        self.mock_sub_table.update_item.return_value = {"Attributes": updated}
+        self.mock_user_table.update_item.return_value = {"Attributes": updated}
 
     def _patch(self, body):
-        return _call("PATCH", f"{BASE}/sub-uuid-001", {"subscriber_id": "sub-uuid-001"}, body)
+        return _call("PATCH", f"{BASE}/user-uuid-001", {"user_id": "user-uuid-001"}, body)
 
     def test_returns_200(self):
         resp = self._patch({"status": "inactive"})
@@ -247,36 +250,36 @@ class TestUpdateSubscriber(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 422)
 
     def test_not_found_returns_404(self):
-        self.mock_sub_table.get_item.return_value = {}
+        self.mock_user_table.get_item.return_value = {}
         resp = self._patch({"status": "inactive"})
         self.assertEqual(resp["statusCode"], 404)
 
 
 # ---------------------------------------------------------------------------
-# Tests — DELETE /subscribers/{subscriber_id}
+# Tests — DELETE /users/{user_id}
 # ---------------------------------------------------------------------------
 
-class TestDeleteSubscriber(unittest.TestCase):
+class TestDeleteUser(unittest.TestCase):
 
     def setUp(self):
-        self.mock_sub_table = MagicMock()
-        db.subscribers_table = self.mock_sub_table
-        self.mock_sub_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
+        self.mock_user_table = MagicMock()
+        db.users_table = self.mock_user_table
+        self.mock_user_table.get_item.return_value = {"Item": copy.deepcopy(ALICE)}
         deleted = copy.deepcopy(ALICE)
         deleted["status"] = "inactive"
-        self.mock_sub_table.update_item.return_value = {"Attributes": deleted}
+        self.mock_user_table.update_item.return_value = {"Attributes": deleted}
 
     def test_returns_200(self):
-        resp = _call("DELETE", f"{BASE}/sub-uuid-001", {"subscriber_id": "sub-uuid-001"})
+        resp = _call("DELETE", f"{BASE}/user-uuid-001", {"user_id": "user-uuid-001"})
         self.assertEqual(resp["statusCode"], 200)
 
     def test_status_set_to_inactive(self):
-        resp = _call("DELETE", f"{BASE}/sub-uuid-001", {"subscriber_id": "sub-uuid-001"})
-        self.assertEqual(_body(resp)["subscriber"]["status"], "inactive")
+        resp = _call("DELETE", f"{BASE}/user-uuid-001", {"user_id": "user-uuid-001"})
+        self.assertEqual(_body(resp)["user"]["status"], "inactive")
 
     def test_not_found_returns_404(self):
-        self.mock_sub_table.get_item.return_value = {}
-        resp = _call("DELETE", f"{BASE}/no-such-id", {"subscriber_id": "no-such-id"})
+        self.mock_user_table.get_item.return_value = {}
+        resp = _call("DELETE", f"{BASE}/no-such-id", {"user_id": "no-such-id"})
         self.assertEqual(resp["statusCode"], 404)
 
 
@@ -290,8 +293,8 @@ WEBHOOK_PATH = "/real-estate/probate-leads/stripe/webhook"
 class TestStripeWebhook(unittest.TestCase):
 
     def setUp(self):
-        self.mock_sub_table = MagicMock()
-        db.subscribers_table = self.mock_sub_table
+        self.mock_user_table = MagicMock()
+        db.users_table = self.mock_user_table
 
     def _webhook(self, event_type: str, customer_id: str, stripe_status: str = "active"):
         """Helper to post a Stripe-style webhook event (no signature verification in tests)."""
@@ -320,24 +323,24 @@ class TestStripeWebhook(unittest.TestCase):
         return app.handler(event, MockContext())
 
     def test_subscription_created_sets_active(self):
-        self.mock_sub_table.scan.return_value = {"Items": [copy.deepcopy(ALICE)]}
-        self.mock_sub_table.update_item.return_value = {}
+        self.mock_user_table.scan.return_value = {"Items": [copy.deepcopy(ALICE)]}
+        self.mock_user_table.update_item.return_value = {}
         resp = self._webhook("customer.subscription.created", "cus_alice123")
         self.assertEqual(resp["statusCode"], 200)
         body = _body(resp)
         self.assertEqual(body["status"], "active")
-        self.assertEqual(body["subscriberId"], "sub-uuid-001")
+        self.assertEqual(body["userId"], "user-uuid-001")
 
     def test_subscription_deleted_sets_canceled(self):
-        self.mock_sub_table.scan.return_value = {"Items": [copy.deepcopy(ALICE)]}
-        self.mock_sub_table.update_item.return_value = {}
+        self.mock_user_table.scan.return_value = {"Items": [copy.deepcopy(ALICE)]}
+        self.mock_user_table.update_item.return_value = {}
         resp = self._webhook("customer.subscription.deleted", "cus_alice123")
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(_body(resp)["status"], "canceled")
 
     def test_payment_failed_sets_past_due(self):
-        self.mock_sub_table.scan.return_value = {"Items": [copy.deepcopy(ALICE)]}
-        self.mock_sub_table.update_item.return_value = {}
+        self.mock_user_table.scan.return_value = {"Items": [copy.deepcopy(ALICE)]}
+        self.mock_user_table.update_item.return_value = {}
         resp = self._webhook("invoice.payment_failed", "cus_alice123")
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(_body(resp)["status"], "past_due")
@@ -347,8 +350,8 @@ class TestStripeWebhook(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(_body(resp)["action"], "ignored")
 
-    def test_no_matching_subscriber_returns_200(self):
-        self.mock_sub_table.scan.return_value = {"Items": []}
+    def test_no_matching_user_returns_200(self):
+        self.mock_user_table.scan.return_value = {"Items": []}
         resp = self._webhook("customer.subscription.updated", "cus_nobody")
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(_body(resp)["action"], "no_subscriber_found")

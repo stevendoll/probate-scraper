@@ -159,13 +159,14 @@ class Location:
 
 
 # ---------------------------------------------------------------------------
-# Subscriber
+# User
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Subscriber:
-    subscriber_id:          str = ""
+class User:
+    user_id:                str = ""
     email:                  str = ""
+    role:                   str = "user"
     stripe_customer_id:     str = ""
     stripe_subscription_id: str = ""
     status:                 str = "active"
@@ -174,11 +175,12 @@ class Subscriber:
     updated_at:             str = ""
 
     @classmethod
-    def from_dynamo(cls, item: dict) -> "Subscriber":
+    def from_dynamo(cls, item: dict) -> "User":
         raw_codes = item.get("location_codes", set())
         return cls(
-            subscriber_id=          item.get("subscriber_id", ""),
+            user_id=                item.get("user_id", ""),
             email=                  item.get("email", ""),
+            role=                   item.get("role", "user"),
             stripe_customer_id=     item.get("stripe_customer_id", ""),
             stripe_subscription_id= item.get("stripe_subscription_id", ""),
             status=                 item.get("status", "active"),
@@ -190,8 +192,9 @@ class Subscriber:
     def to_dict(self) -> dict:
         codes = self.location_codes
         return {
-            "subscriberId":          self.subscriber_id,
+            "userId":                self.user_id,
             "email":                 self.email,
+            "role":                  self.role,
             "stripeCustomerId":      self.stripe_customer_id,
             "stripeSubscriptionId":  self.stripe_subscription_id,
             "status":                self.status,

@@ -1,7 +1,7 @@
 """
 Route: POST /real-estate/probate-leads/stripe/webhook
 
-Handles Stripe lifecycle events to keep subscriber status in sync.
+Handles Stripe lifecycle events to keep user status in sync.
 
 Handled event types:
   customer.subscription.created  → status = active
@@ -39,7 +39,7 @@ def stripe_webhook():
 
     stripe_customer_id = data_object.get("customer") or data_object.get("id", "")
 
-    # Map Stripe event type → our subscriber status
+    # Map Stripe event type → our user status
     if event_type == "customer.subscription.created":
         new_status = "active"
     elif event_type == "customer.subscription.updated":
@@ -62,24 +62,24 @@ def stripe_webhook():
         logger.warning("No customer ID in Stripe event %s", event_type)
         return {"received": True, "action": "no_customer_id"}, 200
 
-    # Find subscriber by stripe_customer_id
+    # Find user by stripe_customer_id
     try:
-        result = db.subscribers_table.scan(
+        result = db.users_table.scan(
             FilterExpression=Attr("stripe_customer_id").eq(stripe_customer_id)
         )
         items = result.get("Items", [])
     except Exception as exc:
-        logger.error("subscribers scan for webhook failed"": %s", exc)
+        logger.error("users scan for webhook failed: %s", exc)
         return {"error": "Database error"}, 500
 
     if not items:
-        logger.warning("No subscriber for Stripe customer: %s", stripe_customer_id)
+        logger.warning("No user for Stripe customer: %s", stripe_customer_id)
         return {"received": True, "action": "no_subscriber_found"}, 200
 
-    subscriber_id = items[0]["subscriber_id"]
+    user_id = items[0]["user_id"]
     try:
-        db.subscribers_table.update_item(
-            Key={"subscriber_id": subscriber_id},
+        db.users_table.update_item(
+            Key={"user_id": user_id},
             UpdateExpression="SET #status = :status, updated_at = :updated_at",
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues={
@@ -88,13 +88,13 @@ def stripe_webhook():
             },
         )
     except Exception as exc:
-        logger.error("subscribers update for webhook failed"": %s", exc)
-        return {"error": "Failed to update subscriber"}, 500
+        logger.error("users update for webhook failed: %s", exc)
+        return {"error": "Failed to update user"}, 500
 
-    logger.info("Subscriber %s status → %s", subscriber_id, new_status)
+    logger.info("User %s status → %s", user_id, new_status)
     return {
-        "received":     True,
-        "action":       "subscriber_updated",
-        "subscriberId": subscriber_id,
-        "status":       new_status,
+        "received": True,
+        "action":   "subscriber_updated",
+        "userId":   user_id,
+        "status":   new_status,
     }

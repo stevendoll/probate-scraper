@@ -24,11 +24,14 @@ os.environ.update(
         "AWS_DEFAULT_REGION":        "us-east-1",
         "DYNAMO_TABLE_NAME":         "leads",
         "LOCATIONS_TABLE_NAME":      "locations",
-        "SUBSCRIBERS_TABLE_NAME":    "subscribers",
+        "USERS_TABLE_NAME":          "users",
         "GSI_NAME":                  "recorded-date-index",
         "LOCATION_DATE_GSI":         "location-date-index",
         "STRIPE_SECRET_KEY":         "",
         "STRIPE_WEBHOOK_SECRET":     "",
+        "JWT_SECRET":                "test-secret",
+        "FROM_EMAIL":                "",
+        "MAGIC_LINK_BASE_URL":       "http://localhost:3000/auth/verify",
         "POWERTOOLS_TRACE_DISABLED": "true",
         "POWERTOOLS_SERVICE_NAME":   "probate-api-test",
         "LOG_LEVEL":                 "WARNING",
@@ -446,10 +449,11 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(result["locationPath"], "collin-tx")
         self.assertEqual(result["locationName"], "Collin County TX")
 
-    def test_transform_subscriber_set_to_list(self):
-        from tests.fixtures.subscribers import ALICE
-        result = app._transform_subscriber(ALICE)
+    def test_transform_user_set_to_list(self):
+        from tests.fixtures.users import ALICE
+        result = app._transform_user(ALICE)
         self.assertIsInstance(result["locationCodes"], list)
+        self.assertIn("userId", result)
         self.assertIn("CollinTx", result["locationCodes"])
 
     def test_response_structure(self):
