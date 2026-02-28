@@ -836,7 +836,7 @@ def extract_page_data(
             recent_total += 1
 
             if doc_number in already_downloaded:
-                break  # doc already in S3 — no further downloads needed
+                continue  # already has a doc in S3; keep scanning for newer ones
 
             if downloads_done >= max_downloads:
                 log.debug("Row %d: download limit (%d) reached — skipping", entry["index"], max_downloads)
