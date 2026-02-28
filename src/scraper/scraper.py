@@ -652,7 +652,7 @@ def get_pdf_url_by_clicking(
         return pdf_url, local_path
 
     except Exception as exc:
-        log.warning("get_pdf_url_by_clicking error: %s", exc)
+        log.warning("get_pdf_url_by_clicking error: %s", str(exc).split("\n")[0].strip())
         return None, None
 
 
@@ -752,6 +752,7 @@ def extract_page_data(
         # Eligibility: doc not already in S3, recorded within MAX_DOC_AGE_DAYS,
         # and downloads_done < max_downloads.
         downloads_done = 0
+        skipped_old = 0
         for entry in extracted:
             row        = entry["row"]
             doc_number = entry.get("doc_number", "")
@@ -766,10 +767,7 @@ def extract_page_data(
                 continue
 
             if not _is_within_days(rec_date):
-                log.info(
-                    "Row %d: recorded_date %r is older than %d days — skipping",
-                    entry["index"], rec_date, MAX_DOC_AGE_DAYS,
-                )
+                skipped_old += 1
                 continue
 
             if downloads_done >= max_downloads:
@@ -789,6 +787,12 @@ def extract_page_data(
                 entry["pdf_url"]    = pdf_url
                 entry["local_path"] = local_path
                 downloads_done += 1
+
+        if skipped_old:
+            log.info(
+                "Skipped %d row(s) with recorded_date older than %d days",
+                skipped_old, MAX_DOC_AGE_DAYS,
+            )
 
         # ── Phase 3: assemble final record dicts
         for entry in extracted:
