@@ -124,14 +124,14 @@ Resources:
         RestrictPublicBuckets: true
 
   # ── DynamoDB — Leads ──────────────────────────────────────────────────────
-  # NOTE: renamed from probate-leads-collin-tx → leads.
-  # CloudFormation will replace (delete + recreate) the table on first deploy.
+  # NOTE: renamed leads → leads-v2 to change the PK from doc_number → lead_id.
+  # CloudFormation requires a name change when replacing a custom-named table.
   # Migrate data before deploying if the live table has records you need.
 
   LeadsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: leads
+      TableName: leads-v2
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: lead_id
