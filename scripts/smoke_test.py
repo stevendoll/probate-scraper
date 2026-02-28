@@ -19,6 +19,7 @@ import os
 import sys
 import uuid
 import json
+import time
 import datetime
 import requests
 
@@ -81,6 +82,11 @@ def check(name: str, condition: bool, details: str = "") -> bool:
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+_RETRY_STATUSES = {502, 503, 504}   # transient server errors worth retrying
+_MAX_RETRIES    = 3
+_RETRY_DELAY    = 5  # seconds between retries
+
+
 def _headers(require_key: bool = True) -> dict:
     h = {"Content-Type": "application/json"}
     if require_key:
@@ -88,22 +94,36 @@ def _headers(require_key: bool = True) -> dict:
     return h
 
 
+def _retry(fn, *args, **kwargs) -> requests.Response:
+    """Call *fn* up to _MAX_RETRIES times, retrying on transient server errors."""
+    for attempt in range(1, _MAX_RETRIES + 1):
+        r = fn(*args, **kwargs)
+        if r.status_code not in _RETRY_STATUSES:
+            return r
+        if attempt < _MAX_RETRIES:
+            print(f"       {YELLOW}⟳  HTTP {r.status_code} — retrying in {_RETRY_DELAY}s "
+                  f"(attempt {attempt}/{_MAX_RETRIES}){RESET}")
+            time.sleep(_RETRY_DELAY)
+    return r
+
+
 def get(path: str, params: dict | None = None) -> requests.Response:
-    return requests.get(f"{BASE}{path}", headers=_headers(), params=params, timeout=TIMEOUT)
+    return _retry(requests.get, f"{BASE}{path}", headers=_headers(), params=params, timeout=TIMEOUT)
 
 
 def post(path: str, body: dict, require_key: bool = True) -> requests.Response:
-    return requests.post(
-        f"{BASE}{path}", headers=_headers(require_key), json=body, timeout=TIMEOUT
+    return _retry(
+        requests.post,
+        f"{BASE}{path}", headers=_headers(require_key), json=body, timeout=TIMEOUT,
     )
 
 
 def patch(path: str, body: dict) -> requests.Response:
-    return requests.patch(f"{BASE}{path}", headers=_headers(), json=body, timeout=TIMEOUT)
+    return _retry(requests.patch, f"{BASE}{path}", headers=_headers(), json=body, timeout=TIMEOUT)
 
 
 def delete(path: str) -> requests.Response:
-    return requests.delete(f"{BASE}{path}", headers=_headers(), timeout=TIMEOUT)
+    return _retry(requests.delete, f"{BASE}{path}", headers=_headers(), timeout=TIMEOUT)
 
 
 def _snippet(r: requests.Response) -> str:

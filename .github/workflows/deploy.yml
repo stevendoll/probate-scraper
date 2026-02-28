@@ -204,6 +204,14 @@ jobs:
               print("CollinTx already exists — skipping")
           EOF
 
+      # ── Wait for API Gateway deployment to propagate ───────────────────────
+      # API Gateway stage updates can take up to ~30 s after CloudFormation
+      # reports success.  Without this pause, early smoke-test requests can hit
+      # a transitional state where routes return 403 "Missing Authentication
+      # Token" instead of reaching Lambda.
+      - name: Wait for API Gateway propagation
+        run: sleep 30
+
       # ── Python env for smoke tests ─────────────────────────────────────────
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
