@@ -63,27 +63,30 @@ MAX_NEXT_RESULT_CLICKS = 4
 # Default local directory for Chrome-triggered document downloads
 DOWNLOAD_DIR = "/tmp/scraper_downloads"
 
-# Rotating user-agent pool — picked randomly each driver init
+# Rotating user-agent pool — picked randomly each driver init.
+# All UAs use Chrome/Chromium so they're consistent with the actual browser
+# fingerprint (mixing in Safari/Firefox UAs would mismatch the real headers
+# and signal automation to bot-detection systems).
 _USER_AGENTS = [
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
     ),
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
     ),
     (
         "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
     ),
     (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
     ),
     (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) "
-        "Gecko/20100101 Firefox/122.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     ),
 ]
 
@@ -188,6 +191,21 @@ _SIGN_IN_TRIGGER_SELECTORS = [
 
 # Direct-navigation fallback used when the Sign In trigger link cannot be clicked
 _SIGNIN_PATH = "/signin"
+
+
+def _cell_text(row, *selectors: str) -> str:
+    """
+    Try each CSS selector against *row* in order; return the first non-empty
+    text value found, or ``"N/A"`` if none match.
+    """
+    for sel in selectors:
+        try:
+            text = row.find_element(By.CSS_SELECTOR, sel).text.strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return "N/A"
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +351,7 @@ def initialize_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-blink-features=AutomationControlled")  # hide automation
     options.add_argument(f"--window-size={width},{height}")
     options.add_argument(f"--user-agent={ua}")
 
@@ -783,27 +802,16 @@ def extract_page_data(
         extracted = []
         for i, row in enumerate(data_rows, start=1):
             try:
-                def _text(*selectors, _row=row):
-                    """Try each selector in order; return first non-empty match."""
-                    for sel in selectors:
-                        try:
-                            text = _row.find_element(By.CSS_SELECTOR, sel).text.strip()
-                            if text:
-                                return text
-                        except Exception:
-                            continue
-                    return "N/A"
-
                 extracted.append({
                     "index":             i,
                     "row":               row,
-                    "grantor":           _text('td.col-3[column="[object Object]"] span', 'td.col-3 span'),
-                    "grantee":           _text('td.col-4[column="[object Object]"] span', 'td.col-4 span'),
-                    "doc_type":          _text('td.col-5[column="[object Object]"] span em', 'td.col-5 span em', 'td.col-5 span'),
-                    "recorded_date":     _text('td.col-6[column="[object Object]"] span', 'td.col-6 span'),
-                    "doc_number":        _text('td.col-7[column="[object Object]"] span', 'td.col-7 span'),
-                    "book_volume_page":  _text('td.col-8[column="[object Object]"] span', 'td.col-8 span'),
-                    "legal_description": _text('td.col-9 span', 'td.col-9'),
+                    "grantor":           _cell_text(row, 'td.col-3[column="[object Object]"] span', 'td.col-3 span'),
+                    "grantee":           _cell_text(row, 'td.col-4[column="[object Object]"] span', 'td.col-4 span'),
+                    "doc_type":          _cell_text(row, 'td.col-5[column="[object Object]"] span em', 'td.col-5 span em', 'td.col-5 span'),
+                    "recorded_date":     _cell_text(row, 'td.col-6[column="[object Object]"] span', 'td.col-6 span'),
+                    "doc_number":        _cell_text(row, 'td.col-7[column="[object Object]"] span', 'td.col-7 span'),
+                    "book_volume_page":  _cell_text(row, 'td.col-8[column="[object Object]"] span', 'td.col-8 span'),
+                    "legal_description": _cell_text(row, 'td.col-9 span', 'td.col-9'),
                     "inline_url":        get_pdf_url_from_row(row),
                 })
             except Exception as exc:
@@ -818,7 +826,8 @@ def extract_page_data(
         downloads_done       = 0
         recent_total         = 0  # rows with recorded_date within MAX_DOC_AGE_DAYS
         new_saved            = 0  # docs obtained this run (inline or via click)
-        recent_no_doc        = 0  # recent rows with no doc (limit hit or nav failed)
+        already_skipped      = 0  # recent rows already in S3 — skipped, no click needed
+        recent_no_doc        = 0  # recent rows where no doc could be obtained
         current_detail_idx   = 0  # 1-based index of currently open detail page (0 = results page)
         next_result_clicks   = 0  # total 'Next Result' clicks used this pass
         for entry in extracted:
@@ -836,6 +845,7 @@ def extract_page_data(
             recent_total += 1
 
             if doc_number in already_downloaded:
+                already_skipped += 1
                 continue  # already has a doc in S3; keep scanning for newer ones
 
             if downloads_done >= max_downloads:
@@ -890,8 +900,8 @@ def extract_page_data(
                     recent_no_doc += 1
 
         log.info(
-            "%d record(s) in past %d days — %d new document(s) saved, %d without document",
-            recent_total, MAX_DOC_AGE_DAYS, new_saved, recent_no_doc,
+            "%d record(s) in past %d days — %d new, %d already had doc, %d without document",
+            recent_total, MAX_DOC_AGE_DAYS, new_saved, already_skipped, recent_no_doc,
         )
 
         # ── Phase 3: assemble final record dicts
