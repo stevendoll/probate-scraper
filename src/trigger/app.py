@@ -79,7 +79,7 @@ def handler(event, context):
             },
         )
     except Exception as exc:
-        log.exception("ecs.run_task failed: %s", exc)
+        log.error("ecs.run_task failed: %s", exc)
         return _response(500, {"error": "Failed to start scrape task. Check CloudWatch logs."})
 
     failures = resp.get("failures", [])

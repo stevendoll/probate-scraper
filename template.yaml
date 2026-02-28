@@ -265,6 +265,10 @@ Resources:
                 Resource: !GetAtt LeadsTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:Query
+                Resource: !Sub "${LeadsTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                 Resource: !GetAtt LocationsTable.Arn

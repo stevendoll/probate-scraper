@@ -22,7 +22,7 @@ def list_locations():
     try:
         result = db.locations_table.scan()
     except Exception as exc:
-        logger.exception("locations scan failed", exc_info=exc)
+        logger.error("locations scan failed"": %s", exc)
         return {"error": "Database scan failed"}, 500
 
     items = [Location.from_dynamo(item).to_dict() for item in result.get("Items", [])]
@@ -40,7 +40,7 @@ def get_location(location_code: str):
     try:
         result = db.locations_table.get_item(Key={"location_code": location_code})
     except Exception as exc:
-        logger.exception("locations get_item failed", exc_info=exc)
+        logger.error("locations get_item failed"": %s", exc)
         return {"error": "Database query failed"}, 500
 
     item = result.get("Item")

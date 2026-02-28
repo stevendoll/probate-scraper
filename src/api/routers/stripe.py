@@ -69,7 +69,7 @@ def stripe_webhook():
         )
         items = result.get("Items", [])
     except Exception as exc:
-        logger.exception("subscribers scan for webhook failed", exc_info=exc)
+        logger.error("subscribers scan for webhook failed"": %s", exc)
         return {"error": "Database error"}, 500
 
     if not items:
@@ -88,7 +88,7 @@ def stripe_webhook():
             },
         )
     except Exception as exc:
-        logger.exception("subscribers update for webhook failed", exc_info=exc)
+        logger.error("subscribers update for webhook failed"": %s", exc)
         return {"error": "Failed to update subscriber"}, 500
 
     logger.info("Subscriber %s status → %s", subscriber_id, new_status)

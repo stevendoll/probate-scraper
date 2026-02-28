@@ -214,6 +214,32 @@ def _is_within_days(date_str: str, days: int = MAX_DOC_AGE_DAYS) -> bool:
     return True
 
 
+def _refetch_row(driver, row_1based_index: int):
+    """
+    Re-locate a data row in the live DOM by its 1-based index.
+
+    Clicking a row to open the detail panel causes React to re-render the
+    results table, staling all previously-captured WebElement references.
+    This helper finds the same logical row position in the freshly-rendered
+    table so Phase 2 can safely click rows 2–N.
+
+    Returns the fresh WebElement, or None if the row cannot be found.
+    """
+    try:
+        tables = driver.find_elements(By.TAG_NAME, "table")
+        for table in tables:
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            if len(rows) <= 2:
+                continue
+            data_rows = rows[2:]
+            idx = row_1based_index - 1
+            if 0 <= idx < len(data_rows):
+                return data_rows[idx]
+    except Exception as exc:
+        log.debug("_refetch_row(%d) error: %s", row_1based_index, exc)
+    return None
+
+
 def _rename_download(local_path: str, doc_number: str, used_names: set) -> str:
     """
     Rename a locally-downloaded file to ``{doc_number}{ext}``.
@@ -638,6 +664,10 @@ def get_pdf_url_by_clicking(
     by _back_to_results(), which tries the 'Back to Results' link then Escape.
     """
     try:
+        # Brief pause before clicking — simulates a human reading the row
+        # before selecting it, and provides a natural gap between successive
+        # detail-panel openings.
+        _random_sleep(0.6, 1.4)
         row.click()
         _random_sleep(DETAIL_WAIT - 0.5, DETAIL_WAIT + 1.0)
 
@@ -674,6 +704,9 @@ def get_pdf_url_by_clicking(
         if download_dir:
             existing = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
             download_clicked = False
+
+            # Pause before clicking Download — simulates reading the panel
+            _random_sleep(0.8, 1.8)
 
             for sel in PANEL_DOWNLOAD_BUTTON_SELECTORS:
                 try:
@@ -761,14 +794,7 @@ def extract_page_data(
             continue
 
         data_rows = rows[2:]
-        log.info("Processing table with %d rows", len(rows))
-
-        # Log first row HTML to confirm selectors (remove once stable)
-        if data_rows:
-            try:
-                log.info("First row HTML: %s", data_rows[0].get_attribute("outerHTML")[:3000])
-            except Exception:
-                pass
+        log.info("Processing table with %d data rows", len(data_rows))
 
         # ── Phase 1: extract text + inline links from ALL rows before any click.
         # Clicking a row to open the detail panel causes React to re-render the
@@ -839,7 +865,9 @@ def extract_page_data(
                 downloads_done += 1
                 new_saved += 1
             else:
-                # Re-fetch the row element — a previous click may have re-rendered the table
+                # Re-fetch the row element from the live DOM.  Any previous click
+                # that opened the detail panel will have caused React to re-render
+                # the table, staling all WebElement references captured in Phase 1.
                 fresh_row = _refetch_row(driver, entry["index"]) or row
                 try:
                     pdf_url, local_path = get_pdf_url_by_clicking(driver, fresh_row, download_dir)
