@@ -33,6 +33,9 @@ parameter_overrides = """
   ScraperUsername=REPLACE_ME
   ScraperPassword=REPLACE_ME
   BedrockModelId=us.amazon.nova-pro-v1:0
+  JwtSecret=REPLACE_ME
+  MagicLinkBaseUrl=https://REPLACE_ME/auth/verify
+  FromEmail=REPLACE_ME
 """
 # ── Sensitive values (keep out of version control) ────────────────────────
 # ScraperPassword has NoEcho=true in template.yaml so it won't appear in the

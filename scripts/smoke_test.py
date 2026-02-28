@@ -2,7 +2,7 @@
 """
 Smoke tests for the deployed probate-leads API.
 
-Exercises every major endpoint, creates and cleans up a test subscriber,
+Exercises every major endpoint, creates and cleans up a test user,
 and exits non-zero if any check fails.
 
 Usage:
@@ -182,62 +182,62 @@ def test_leads() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Subscribers (CRUD)
+# Users (CRUD)
 # ---------------------------------------------------------------------------
 
-def test_subscribers() -> None:
-    print(f"\n{YELLOW}── Subscribers ────────────────────────────────────────────────────────{RESET}")
+def test_users() -> None:
+    print(f"\n{YELLOW}── Users ──────────────────────────────────────────────────────────────{RESET}")
 
     test_email = f"smoke-{uuid.uuid4().hex[:8]}@example.com"
-    subscriber_id: str | None = None
+    user_id: str | None = None
 
     # --- CREATE ---
-    r = post("/subscribers", {"email": test_email, "location_codes": ["CollinTx"]})
-    if check("POST /subscribers → 201", r.status_code == 201, _snippet(r)):
-        sub = r.json().get("subscriber", {})
-        subscriber_id = sub.get("subscriberId")
-        check("response has subscriberId",  bool(subscriber_id))
-        check("email matches",              sub.get("email") == test_email)
-        check("status is active",           sub.get("status") == "active")
-        check("locationCodes is a list",    isinstance(sub.get("locationCodes"), list))
+    r = post("/users", {"email": test_email, "location_codes": ["CollinTx"]})
+    if check("POST /users → 201", r.status_code == 201, _snippet(r)):
+        user = r.json().get("user", {})
+        user_id = user.get("userId")
+        check("response has userId",        bool(user_id))
+        check("email matches",              user.get("email") == test_email)
+        check("status is active",           user.get("status") == "active")
+        check("locationCodes is a list",    isinstance(user.get("locationCodes"), list))
 
     # --- validation: bad payload ---
-    r = post("/subscribers", {"location_codes": ["CollinTx"]})  # missing email
-    check("POST /subscribers (no email) → 400", r.status_code == 400, _snippet(r))
+    r = post("/users", {"location_codes": ["CollinTx"]})  # missing email
+    check("POST /users (no email) → 400", r.status_code == 400, _snippet(r))
 
-    r = post("/subscribers", {"email": test_email, "location_codes": ["DoesNotExist999"]})
-    check("POST /subscribers (bad location) → 422", r.status_code == 422, _snippet(r))
+    r = post("/users", {"email": test_email, "location_codes": ["DoesNotExist999"]})
+    check("POST /users (bad location) → 422", r.status_code == 422, _snippet(r))
 
-    if subscriber_id:
+    if user_id:
         # --- READ ---
-        r = get(f"/subscribers/{subscriber_id}")
-        if check("GET /subscribers/{id} → 200", r.status_code == 200, _snippet(r)):
-            sub = r.json().get("subscriber", {})
-            check("subscriberId matches", sub.get("subscriberId") == subscriber_id)
-            check("email matches",        sub.get("email") == test_email)
+        r = get(f"/users/{user_id}")
+        if check("GET /users/{id} → 200", r.status_code == 200, _snippet(r)):
+            user = r.json().get("user", {})
+            check("userId matches", user.get("userId") == user_id)
+            check("email matches",  user.get("email") == test_email)
 
         # --- UPDATE ---
-        r = patch(f"/subscribers/{subscriber_id}", {"status": "inactive"})
-        if check("PATCH /subscribers/{id} → 200", r.status_code == 200, _snippet(r)):
-            sub = r.json().get("subscriber", {})
-            check("status updated to inactive", sub.get("status") == "inactive")
+        r = patch(f"/users/{user_id}", {"status": "inactive"})
+        if check("PATCH /users/{id} → 200", r.status_code == 200, _snippet(r)):
+            user = r.json().get("user", {})
+            check("status updated to inactive", user.get("status") == "inactive")
 
-        r = patch(f"/subscribers/{subscriber_id}", {"status": "flying"})
-        check("PATCH /subscribers/{id} (bad status) → 400", r.status_code == 400, _snippet(r))
+        r = patch(f"/users/{user_id}", {"status": "flying"})
+        check("PATCH /users/{id} (bad status) → 400", r.status_code == 400, _snippet(r))
 
         # --- DELETE (soft) ---
-        r = delete(f"/subscribers/{subscriber_id}")
-        if check("DELETE /subscribers/{id} → 200", r.status_code == 200, _snippet(r)):
-            sub = r.json().get("subscriber", {})
-            check("status set to inactive on delete", sub.get("status") == "inactive")
+        r = delete(f"/users/{user_id}")
+        if check("DELETE /users/{id} → 200", r.status_code == 200, _snippet(r)):
+            user = r.json().get("user", {})
+            check("status set to inactive on delete", user.get("status") == "inactive")
 
     # --- not found ---
-    r = get(f"/subscribers/does-not-exist-{uuid.uuid4().hex}")
-    check("GET /subscribers/nonexistent → 404", r.status_code == 404, _snippet(r))
+    r = get(f"/users/does-not-exist-{uuid.uuid4().hex}")
+    check("GET /users/nonexistent → 404", r.status_code == 404, _snippet(r))
 
     # --- auth: missing API key ---
-    r = requests.get(f"{BASE}/subscribers", timeout=TIMEOUT)  # no x-api-key
-    check("GET /subscribers (no API key) → 403", r.status_code == 403, _snippet(r))
+    r = requests.get(f"{BASE}/users", timeout=TIMEOUT)  # no x-api-key
+    check("GET /users (no API key) → 403", r.status_code == 403, _snippet(r))
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +273,7 @@ if __name__ == "__main__":
 
     test_locations()
     test_leads()
-    test_subscribers()
+    test_users()
     test_stripe_webhook()
 
     print(f"\n{'='*70}")

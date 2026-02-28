@@ -1,9 +1,10 @@
-"""Mock subscriber records for use in tests."""
+"""Mock user records for use in tests."""
 
-MOCK_SUBSCRIBERS = [
+MOCK_USERS = [
     {
-        "subscriber_id":          "sub-uuid-001",
+        "user_id":                "user-uuid-001",
         "email":                  "alice@example.com",
+        "role":                   "user",
         "stripe_customer_id":     "cus_alice123",
         "stripe_subscription_id": "sub_alice456",
         "status":                 "active",
@@ -12,8 +13,9 @@ MOCK_SUBSCRIBERS = [
         "updated_at":             "2026-02-01T00:00:00+00:00",
     },
     {
-        "subscriber_id":          "sub-uuid-002",
+        "user_id":                "user-uuid-002",
         "email":                  "bob@example.com",
+        "role":                   "user",
         "stripe_customer_id":     "cus_bob789",
         "stripe_subscription_id": "sub_bob012",
         "status":                 "active",
@@ -23,5 +25,5 @@ MOCK_SUBSCRIBERS = [
     },
 ]
 
-ALICE = MOCK_SUBSCRIBERS[0]
-BOB   = MOCK_SUBSCRIBERS[1]
+ALICE = MOCK_USERS[0]
+BOB   = MOCK_USERS[1]

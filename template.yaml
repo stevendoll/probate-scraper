@@ -72,6 +72,28 @@ Parameters:
       the Converse API call succeeds — do not use Claude models here.
       Run "make check-bedrock" to verify access before deploying.
 
+  JwtSecret:
+    Type: String
+    Default: "dev-secret-change-in-prod"
+    NoEcho: true
+    Description: >
+      HMAC-SHA256 secret used to sign magic-link and access tokens.
+      Must be a long random string in production.
+
+  MagicLinkBaseUrl:
+    Type: String
+    Default: "http://localhost:3000/auth/verify"
+    Description: >
+      Base URL for magic-link emails, e.g. https://app.example.com/auth/verify.
+      The token is appended as ?token=<value>.
+
+  FromEmail:
+    Type: String
+    Default: ""
+    Description: >
+      SES-verified sender address for magic-link emails.
+      Leave blank to skip sending (local dev / CI).
+
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
@@ -89,11 +111,14 @@ Globals:
       Variables:
         DYNAMO_TABLE_NAME: !Ref LeadsTable
         LOCATIONS_TABLE_NAME: !Ref LocationsTable
-        SUBSCRIBERS_TABLE_NAME: !Ref SubscribersTable
+        USERS_TABLE_NAME: !Ref UsersTable
         GSI_NAME: recorded-date-index
         LOCATION_DATE_GSI: location-date-index
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
+        JWT_SECRET: !Ref JwtSecret
+        MAGIC_LINK_BASE_URL: !Ref MagicLinkBaseUrl
+        FROM_EMAIL: !Ref FromEmail
 
 # ---------------------------------------------------------------------------
 # Resources
@@ -189,20 +214,23 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  # ── DynamoDB — Subscribers ────────────────────────────────────────────────
+  # ── DynamoDB — Users ──────────────────────────────────────────────────────
+  # NOTE: renamed from subscribers → users (PK subscriber_id → user_id).
+  # CloudFormation will replace (delete + recreate) the table on first deploy
+  # of this branch — export any production data before deploying.
 
-  SubscribersTable:
+  UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: subscribers
+      TableName: users
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: subscriber_id
+        - AttributeName: user_id
           AttributeType: S
         - AttributeName: email
           AttributeType: S
       KeySchema:
-        - AttributeName: subscriber_id
+        - AttributeName: user_id
           KeyType: HASH
       GlobalSecondaryIndexes:
         - IndexName: email-index
@@ -348,7 +376,7 @@ Resources:
             RateLimit: 10
             BurstLimit: 20
 
-  # ── Lambda — API (leads + locations + subscribers + stripe webhook) ────────
+  # ── Lambda — API (leads + locations + users + stripe + auth + admin) ───────
 
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -379,7 +407,7 @@ Resources:
               Resource:
                 - !GetAtt LocationsTable.Arn
                 - !Sub "${LocationsTable.Arn}/index/*"
-        # Subscribers — full CRUD
+        # Users — full CRUD
         - Statement:
             - Effect: Allow
               Action:
@@ -390,8 +418,14 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:Scan
               Resource:
-                - !GetAtt SubscribersTable.Arn
-                - !Sub "${SubscribersTable.Arn}/index/*"
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
+        # SES — send magic-link emails (only when FROM_EMAIL is set)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
       Events:
         # Leads — dynamic by location_path
         GetLeads:
@@ -413,36 +447,36 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/locations/{location_code}
             Method: GET
-        # Subscribers
-        ListSubscribers:
+        # Users
+        ListUsers:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/subscribers
+            Path: /real-estate/probate-leads/users
             Method: GET
-        CreateSubscriber:
+        CreateUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/subscribers
+            Path: /real-estate/probate-leads/users
             Method: POST
-        GetSubscriber:
+        GetUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/subscribers/{subscriber_id}
+            Path: /real-estate/probate-leads/users/{user_id}
             Method: GET
-        UpdateSubscriber:
+        UpdateUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/subscribers/{subscriber_id}
+            Path: /real-estate/probate-leads/users/{user_id}
             Method: PATCH
-        DeleteSubscriber:
+        DeleteUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/subscribers/{subscriber_id}
+            Path: /real-estate/probate-leads/users/{user_id}
             Method: DELETE
         # Stripe webhook — no API key required (verified by signature)
         StripeWebhook:
@@ -451,6 +485,80 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/stripe/webhook
             Method: POST
+            Auth:
+              ApiKeyRequired: false
+        # Auth — magic-link login (no API key required; Bearer JWT used instead)
+        AuthRequestLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/request-login
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+        AuthVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/verify
+            Method: GET
+            Auth:
+              ApiKeyRequired: false
+        AuthMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/me
+            Method: GET
+            Auth:
+              ApiKeyRequired: false
+        AuthPatchMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/me
+            Method: PATCH
+            Auth:
+              ApiKeyRequired: false
+        AuthLeads:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/leads
+            Method: GET
+            Auth:
+              ApiKeyRequired: false
+        # Admin — user management (no API key; admin Bearer JWT required)
+        AdminListUsers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/users
+            Method: GET
+            Auth:
+              ApiKeyRequired: false
+        AdminGetUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/users/{user_id}
+            Method: GET
+            Auth:
+              ApiKeyRequired: false
+        AdminPatchUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/users/{user_id}
+            Method: PATCH
+            Auth:
+              ApiKeyRequired: false
+        AdminDeleteUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/users/{user_id}
+            Method: DELETE
             Auth:
               ApiKeyRequired: false
 
@@ -629,9 +737,9 @@ Outputs:
     Description: Locations DynamoDB table name
     Value: !Ref LocationsTable
 
-  SubscribersTableName:
-    Description: Subscribers DynamoDB table name
-    Value: !Ref SubscribersTable
+  UsersTableName:
+    Description: Users DynamoDB table name
+    Value: !Ref UsersTable
 
   DocumentsBucketName:
     Description: S3 bucket storing scraped documents (documents/{location_code}/{doc_number}.pdf)

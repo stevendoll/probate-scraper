@@ -5,21 +5,33 @@ Routes (all under /real-estate/probate-leads/):
   GET  /{location_path}/leads               — leads for a location (date-range query)
   GET  /locations                           — list all locations
   GET  /locations/{location_code}           — get a single location
-  GET  /subscribers                         — list all subscribers
-  POST /subscribers                         — create a subscriber
-  GET  /subscribers/{subscriber_id}         — get a subscriber
-  PATCH /subscribers/{subscriber_id}        — update subscriber (locations, status)
-  DELETE /subscribers/{subscriber_id}       — soft-delete subscriber (status → inactive)
+  GET  /users                               — list all users
+  POST /users                               — create a user
+  GET  /users/{user_id}                     — get a user
+  PATCH /users/{user_id}                    — update user (locations, status)
+  DELETE /users/{user_id}                   — soft-delete user (status → inactive)
   POST /stripe/webhook                      — Stripe event webhook (no API key)
+  POST /auth/request-login                  — request magic-link email
+  GET  /auth/verify                         — exchange magic token for access token
+  GET  /auth/me                             — own profile (Bearer token)
+  PATCH /auth/me                            — update own email (Bearer token)
+  GET  /auth/leads                          — own leads (Bearer token, active only)
+  GET  /admin/users                         — list all users (admin Bearer token)
+  GET  /admin/users/{user_id}               — get user (admin Bearer token)
+  PATCH /admin/users/{user_id}              — update user (admin Bearer token)
+  DELETE /admin/users/{user_id}             — soft-delete user (admin Bearer token)
 
 Environment variables:
   DYNAMO_TABLE_NAME       — leads table
   LOCATIONS_TABLE_NAME    — locations table
-  SUBSCRIBERS_TABLE_NAME  — subscribers table
+  USERS_TABLE_NAME        — users table
   GSI_NAME                — legacy leads GSI (recorded-date-index)
   LOCATION_DATE_GSI       — new leads GSI (location-date-index)
   STRIPE_SECRET_KEY       — Stripe secret key
   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
+  JWT_SECRET              — HMAC-SHA256 secret for magic + access tokens
+  MAGIC_LINK_BASE_URL     — base URL for magic link emails
+  FROM_EMAIL              — SES verified sender; leave blank to skip sending (local dev)
 """
 
 from aws_lambda_powertools import Logger, Tracer
@@ -27,7 +39,7 @@ from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 import db  # noqa: F401 — imported so tests can patch db.table etc.
-from models import Lead, Location, Subscriber
+from models import Lead, Location, User
 from utils import (
     decode_key as _decode_key,
     encode_key as _encode_key,
@@ -35,7 +47,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import leads, locations, subscribers, stripe
+from routers import leads, locations, users, stripe, auth, admin
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -47,8 +59,10 @@ api    = APIGatewayRestResolver()
 
 api.include_router(leads.router)
 api.include_router(locations.router)
-api.include_router(subscribers.router)
+api.include_router(users.router)
 api.include_router(stripe.router)
+api.include_router(auth.router)
+api.include_router(admin.router)
 
 # ---------------------------------------------------------------------------
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)
@@ -62,8 +76,8 @@ def _transform_location(item: dict) -> dict:
     return Location.from_dynamo(item).to_dict()
 
 
-def _transform_subscriber(item: dict) -> dict:
-    return Subscriber.from_dynamo(item).to_dict()
+def _transform_user(item: dict) -> dict:
+    return User.from_dynamo(item).to_dict()
 
 
 # ---------------------------------------------------------------------------
