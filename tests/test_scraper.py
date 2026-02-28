@@ -356,18 +356,17 @@ class TestGetPdfUrlByClicking(unittest.TestCase):
         self.assertIsNone(url)
         self.assertIsNone(local_path)
 
+    @patch("scraper._back_to_results")
     @patch("scraper.WebDriverWait")
     @patch("scraper.time.sleep")
-    def test_dismisses_panel_with_escape(self, mock_sleep, mock_wait):
+    def test_navigates_back_to_results(self, mock_sleep, mock_wait, mock_back):
         driver = MagicMock()
-        body = MagicMock()
-        driver.find_element.return_value = body
         row = MagicMock()
         panel = self._make_panel("https://collin.tx.publicsearch.us/doc/11111")
         mock_wait.return_value.until.return_value = panel
 
         get_pdf_url_by_clicking(driver, row)
-        body.send_keys.assert_called_once()  # Escape key sent
+        mock_back.assert_called_once_with(driver)  # back navigation called
 
     @patch("scraper._wait_for_new_download")
     @patch("scraper.os.listdir", return_value=[])

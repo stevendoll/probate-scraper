@@ -566,16 +566,76 @@ def get_pdf_url_from_row(row) -> str | None:
     return None
 
 
+def _back_to_results(driver) -> None:
+    """
+    Navigate back to the search results after viewing a detail page or panel.
+    Tries to click a 'Back to Results' link first; falls back to Escape.
+    Waits for the results table to reappear before returning.
+    """
+    back_xpaths = [
+        '//*[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"back to results")]',
+        '//*[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"back to search")]',
+        '//*[contains(translate(@aria-label,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"back")]',
+    ]
+    clicked = False
+    for xpath in back_xpaths:
+        try:
+            link = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, xpath))
+            )
+            link.click()
+            log.debug("Clicked 'Back to Results'")
+            clicked = True
+            break
+        except Exception:
+            continue
+
+    if not clicked:
+        try:
+            driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+            log.debug("Panel dismissed with Escape (no Back link found)")
+        except Exception:
+            pass
+
+    # Wait for the results table to be present again
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "table"))
+        )
+    except Exception:
+        pass
+    _random_sleep(0.8, 1.5)
+
+
+def _refetch_row(driver, row_1based_index: int):
+    """
+    Re-locate a data row by its 1-based position within the results table.
+    Returns the fresh WebElement, or None if the table/row can't be found.
+    """
+    try:
+        for table in driver.find_elements(By.TAG_NAME, "table"):
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            if len(rows) <= 2:
+                continue
+            data_rows = rows[2:]
+            if row_1based_index <= len(data_rows):
+                return data_rows[row_1based_index - 1]
+    except Exception:
+        pass
+    return None
+
+
 def get_pdf_url_by_clicking(
     driver,
     row,
     download_dir: str = "",
 ) -> tuple[str | None, str | None]:
     """
-    Click the row to open its detail panel, extract the document URL, and
+    Click the row to open its detail page/panel, extract the document URL, and
     optionally trigger the Download button to save a local copy.
 
-    Returns ``(pdf_url, local_path)``.  The panel is dismissed with Escape.
+    Returns ``(pdf_url, local_path)``.  Navigation back to results is handled
+    by _back_to_results(), which tries the 'Back to Results' link then Escape.
     """
     try:
         row.click()
@@ -642,12 +702,8 @@ def get_pdf_url_by_clicking(
                 if local_path:
                     log.info("Document downloaded locally: %s", local_path)
 
-        # Dismiss the panel
-        try:
-            driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            _random_sleep(0.3, 0.7)
-        except Exception:
-            pass
+        # Navigate back to the results list so the table DOM is fresh for the next row
+        _back_to_results(driver)
 
         return pdf_url, local_path
 
@@ -783,8 +839,10 @@ def extract_page_data(
                 downloads_done += 1
                 new_saved += 1
             else:
+                # Re-fetch the row element — a previous click may have re-rendered the table
+                fresh_row = _refetch_row(driver, entry["index"]) or row
                 try:
-                    pdf_url, local_path = get_pdf_url_by_clicking(driver, row, download_dir)
+                    pdf_url, local_path = get_pdf_url_by_clicking(driver, fresh_row, download_dir)
                 except Exception as exc:
                     log.warning("Row %d click error: %s", entry["index"], exc)
                     pdf_url, local_path = None, None
