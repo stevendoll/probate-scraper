@@ -752,7 +752,9 @@ def extract_page_data(
         # Eligibility: doc not already in S3, recorded within MAX_DOC_AGE_DAYS,
         # and downloads_done < max_downloads.
         downloads_done = 0
-        skipped_old = 0
+        recent_total   = 0  # rows with recorded_date within MAX_DOC_AGE_DAYS
+        new_saved      = 0  # docs obtained this run (inline or via click)
+        recent_no_doc  = 0  # recent rows with no doc (limit hit or click failed)
         for entry in extracted:
             row        = entry["row"]
             doc_number = entry.get("doc_number", "")
@@ -762,22 +764,24 @@ def extract_page_data(
             entry["pdf_url"]    = entry["inline_url"]
             entry["local_path"] = None
 
-            if doc_number in already_downloaded:
-                log.info("Row %d: %s already in S3 — skipping detail page", entry["index"], doc_number)
+            if not _is_within_days(rec_date):
                 continue
 
-            if not _is_within_days(rec_date):
-                skipped_old += 1
-                continue
+            recent_total += 1
+
+            if doc_number in already_downloaded:
+                continue  # already has a doc in S3
 
             if downloads_done >= max_downloads:
                 log.debug("Row %d: download limit (%d) reached — skipping", entry["index"], max_downloads)
+                recent_no_doc += 1
                 continue
 
             if entry["inline_url"]:
                 # No detail page needed — URL already captured in Phase 1
                 entry["pdf_url"] = entry["inline_url"]
                 downloads_done += 1
+                new_saved += 1
             else:
                 try:
                     pdf_url, local_path = get_pdf_url_by_clicking(driver, row, download_dir)
@@ -787,12 +791,15 @@ def extract_page_data(
                 entry["pdf_url"]    = pdf_url
                 entry["local_path"] = local_path
                 downloads_done += 1
+                if pdf_url:
+                    new_saved += 1
+                else:
+                    recent_no_doc += 1
 
-        if skipped_old:
-            log.info(
-                "Skipped %d row(s) with recorded_date older than %d days",
-                skipped_old, MAX_DOC_AGE_DAYS,
-            )
+        log.info(
+            "%d record(s) in past %d days — %d new document(s) saved, %d without document",
+            recent_total, MAX_DOC_AGE_DAYS, new_saved, recent_no_doc,
+        )
 
         # ── Phase 3: assemble final record dicts
         for entry in extracted:
