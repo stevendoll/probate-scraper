@@ -633,24 +633,6 @@ def _back_to_results(driver) -> None:
     _random_sleep(0.8, 1.5)
 
 
-def _refetch_row(driver, row_1based_index: int):
-    """
-    Re-locate a data row by its 1-based position within the results table.
-    Returns the fresh WebElement, or None if the table/row can't be found.
-    """
-    try:
-        for table in driver.find_elements(By.TAG_NAME, "table"):
-            rows = table.find_elements(By.TAG_NAME, "tr")
-            if len(rows) <= 2:
-                continue
-            data_rows = rows[2:]
-            if row_1based_index <= len(data_rows):
-                return data_rows[row_1based_index - 1]
-    except Exception:
-        pass
-    return None
-
-
 def get_pdf_url_by_clicking(
     driver,
     row,
