@@ -583,10 +583,12 @@ class TestExtractPageData(unittest.TestCase):
         from being written.  Text extraction (Phase 1) runs before any click,
         so all rows' text is captured regardless of click failures.
         """
-        # Row 1 click raises — click error is caught; row still gets a record with pdf_url=None
+        # Row 1 click raises — click error is caught; row still gets a record with pdf_url=None.
+        # Both rows use _RECENT_DATE so the old-date break does not fire before row 2.
         mock_click.side_effect = Exception("unexpected DOM explosion")
-        row1 = _make_row(pdf_href=None)
-        row2 = _make_row(pdf_href="https://collin.tx.publicsearch.us/doc/OK")
+        row1 = _make_row(pdf_href=None, recorded_date=_RECENT_DATE)
+        row2 = _make_row(pdf_href="https://collin.tx.publicsearch.us/doc/OK",
+                         recorded_date=_RECENT_DATE)
         driver = _make_driver_with_rows(row1, row2)
 
         records = extract_page_data(driver)

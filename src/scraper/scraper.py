@@ -57,6 +57,8 @@ DETAIL_WAIT    = 3    # seconds to wait for the detail panel to open
 MAX_DOC_DOWNLOADS = 5
 # Skip documents whose recorded_date is older than this many days
 MAX_DOC_AGE_DAYS  = 30
+# Maximum total 'Next Result' clicks in a single Phase 2 pass
+MAX_NEXT_RESULT_CLICKS = 4
 
 # Default local directory for Chrome-triggered document downloads
 DOWNLOAD_DIR = "/tmp/scraper_downloads"
@@ -813,11 +815,12 @@ def extract_page_data(
         # 'Next Result' button — we never return to the results list mid-loop.
         # Eligibility: doc not already in S3, recorded within MAX_DOC_AGE_DAYS,
         # and downloads_done < max_downloads.
-        downloads_done     = 0
-        recent_total       = 0  # rows with recorded_date within MAX_DOC_AGE_DAYS
-        new_saved          = 0  # docs obtained this run (inline or via click)
-        recent_no_doc      = 0  # recent rows with no doc (limit hit or nav failed)
-        current_detail_idx = 0  # 1-based index of currently open detail page (0 = results page)
+        downloads_done       = 0
+        recent_total         = 0  # rows with recorded_date within MAX_DOC_AGE_DAYS
+        new_saved            = 0  # docs obtained this run (inline or via click)
+        recent_no_doc        = 0  # recent rows with no doc (limit hit or nav failed)
+        current_detail_idx   = 0  # 1-based index of currently open detail page (0 = results page)
+        next_result_clicks   = 0  # total 'Next Result' clicks used this pass
         for entry in extracted:
             row        = entry["row"]
             doc_number = entry.get("doc_number", "")
@@ -828,12 +831,12 @@ def extract_page_data(
             entry["local_path"] = None
 
             if not _is_within_days(rec_date):
-                continue
+                break  # rows are newest-first; old row means all remaining are older
 
             recent_total += 1
 
             if doc_number in already_downloaded:
-                continue  # already has a doc in S3
+                break  # doc already in S3 — no further downloads needed
 
             if downloads_done >= max_downloads:
                 log.debug("Row %d: download limit (%d) reached — skipping", entry["index"], max_downloads)
@@ -860,13 +863,18 @@ def extract_page_data(
                     steps = entry["index"] - current_detail_idx
                     nav_ok = True
                     for step_n in range(steps):
+                        if next_result_clicks >= MAX_NEXT_RESULT_CLICKS:
+                            log.debug("Next Result click limit (%d) reached", MAX_NEXT_RESULT_CLICKS)
+                            nav_ok = False
+                            break
                         if not _click_next_result(driver):
                             log.warning(
-                                "Next Result unavailable after %d step(s) — stopping downloads",
-                                step_n + 1,
+                                "Next Result unavailable after %d click(s) — stopping downloads",
+                                next_result_clicks,
                             )
                             nav_ok = False
                             break
+                        next_result_clicks += 1
                     if not nav_ok:
                         recent_no_doc += 1
                         break  # can't navigate further; exit Phase 2
