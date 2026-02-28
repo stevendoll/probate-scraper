@@ -356,17 +356,19 @@ class TestGetPdfUrlByClicking(unittest.TestCase):
         self.assertIsNone(url)
         self.assertIsNone(local_path)
 
-    @patch("scraper._back_to_results")
-    @patch("scraper.WebDriverWait")
+    @patch("scraper._extract_pdf_from_detail")
     @patch("scraper.time.sleep")
-    def test_navigates_back_to_results(self, mock_sleep, mock_wait, mock_back):
+    def test_delegates_to_extract_pdf_from_detail(self, mock_sleep, mock_extract):
+        """get_pdf_url_by_clicking clicks the row then delegates to _extract_pdf_from_detail."""
+        mock_extract.return_value = ("https://collin.tx.publicsearch.us/doc/11111", None)
         driver = MagicMock()
         row = MagicMock()
-        panel = self._make_panel("https://collin.tx.publicsearch.us/doc/11111")
-        mock_wait.return_value.until.return_value = panel
 
-        get_pdf_url_by_clicking(driver, row)
-        mock_back.assert_called_once_with(driver)  # back navigation called
+        url, local_path = get_pdf_url_by_clicking(driver, row)
+
+        row.click.assert_called_once()
+        mock_extract.assert_called_once_with(driver, "")
+        self.assertEqual(url, "https://collin.tx.publicsearch.us/doc/11111")
 
     @patch("scraper._wait_for_new_download")
     @patch("scraper.os.listdir", return_value=[])
@@ -593,29 +595,39 @@ class TestExtractPageData(unittest.TestCase):
         self.assertIsNone(records[0]["pdf_url"])
         self.assertEqual(records[1]["pdf_url"], "https://collin.tx.publicsearch.us/doc/OK")
 
+    @patch("scraper._extract_pdf_from_detail", return_value=(None, None))
+    @patch("scraper._click_next_result", return_value=True)
     @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
-    def test_download_clicks_all_eligible_rows_up_to_max(self, mock_click):
+    def test_download_clicks_all_eligible_rows_up_to_max(
+        self, mock_click, mock_next, mock_extract
+    ):
         """
         With the default max_downloads (MAX_DOC_DOWNLOADS=5), all recent
-        eligible rows get their detail pages opened.
+        eligible rows get their detail pages opened.  The first row uses
+        get_pdf_url_by_clicking; subsequent rows use _click_next_result +
+        _extract_pdf_from_detail.
         """
         rows = [_make_row(pdf_href=None, recorded_date=_RECENT_DATE) for _ in range(3)]
         driver = _make_driver_with_rows(*rows)
 
         extract_page_data(driver, download_dir="/tmp/dl")
 
-        # All 3 recent rows should be clicked (3 < MAX_DOC_DOWNLOADS)
-        self.assertEqual(mock_click.call_count, 3)
+        # Row 1: get_pdf_url_by_clicking; rows 2-3: _extract_pdf_from_detail
+        self.assertEqual(mock_click.call_count, 1)
+        self.assertEqual(mock_extract.call_count, 2)
+        self.assertEqual(mock_click.call_count + mock_extract.call_count, 3)
 
+    @patch("scraper._extract_pdf_from_detail", return_value=(None, None))
+    @patch("scraper._click_next_result", return_value=True)
     @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
-    def test_download_stops_at_max_downloads(self, mock_click):
+    def test_download_stops_at_max_downloads(self, mock_click, mock_next, mock_extract):
         """Downloads stop after max_downloads rows even if more are eligible."""
         rows = [_make_row(pdf_href=None, recorded_date=_RECENT_DATE) for _ in range(7)]
         driver = _make_driver_with_rows(*rows)
 
         extract_page_data(driver, download_dir="/tmp/dl", max_downloads=3)
 
-        self.assertEqual(mock_click.call_count, 3)
+        self.assertEqual(mock_click.call_count + mock_extract.call_count, 3)
 
     @patch("scraper.get_pdf_url_by_clicking", return_value=(None, None))
     def test_max_downloads_zero_skips_all_panel_clicks(self, mock_click):
