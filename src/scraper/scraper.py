@@ -57,6 +57,8 @@ DETAIL_WAIT    = 3    # seconds to wait for the detail panel to open
 MAX_DOC_DOWNLOADS = 5
 # Skip documents whose recorded_date is older than this many days
 MAX_DOC_AGE_DAYS  = 30
+# Maximum total 'Next Result' clicks in a single Phase 2 pass
+MAX_NEXT_RESULT_CLICKS = 4
 
 # Default local directory for Chrome-triggered document downloads
 DOWNLOAD_DIR = "/tmp/scraper_downloads"
@@ -592,26 +594,44 @@ def get_pdf_url_from_row(row) -> str | None:
     return None
 
 
-def get_pdf_url_by_clicking(
+def _click_next_result(driver) -> bool:
+    """
+    Click the 'Next Result' button on the detail page to advance to the next
+    document without returning to the search results list.
+
+    Returns True if the button was found and clicked, False otherwise.
+    """
+    xpaths = [
+        '//*[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"next result")]',
+        '//*[contains(translate(@aria-label,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"next result")]',
+    ]
+    for xpath in xpaths:
+        try:
+            btn = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, xpath))
+            )
+            btn.click()
+            log.debug("Clicked 'Next Result'")
+            _random_sleep(DETAIL_WAIT - 0.5, DETAIL_WAIT + 1.0)
+            return True
+        except Exception:
+            continue
+    log.debug("'Next Result' button not found")
+    return False
+
+
+def _extract_pdf_from_detail(
     driver,
-    row,
     download_dir: str = "",
 ) -> tuple[str | None, str | None]:
     """
-    Click the row to open its detail panel, extract the document URL, and
-    optionally trigger the Download button to save a local copy.
+    Extract the document URL and optionally download the PDF from the
+    currently-open detail page.  Does not navigate away.
 
-    Returns ``(pdf_url, local_path)``.  The panel is dismissed with Escape.
+    Returns (pdf_url, local_path).
     """
     try:
-        # Brief pause before clicking — simulates a human reading the row
-        # before selecting it, and provides a natural gap between successive
-        # detail-panel openings.
-        _random_sleep(0.6, 1.4)
-        row.click()
-        _random_sleep(DETAIL_WAIT - 0.5, DETAIL_WAIT + 1.0)
-
-        # Find the detail panel
+        # Find the detail panel / content area
         panel = None
         for sel in DETAIL_PANEL_SELECTORS:
             try:
@@ -624,7 +644,7 @@ def get_pdf_url_by_clicking(
                 continue
 
         if panel is None:
-            log.warning("No detail panel found after clicking row")
+            log.warning("No detail panel found")
             return None, None
 
         # Extract document URL from panel link
@@ -645,8 +665,7 @@ def get_pdf_url_by_clicking(
             existing = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
             download_clicked = False
 
-            # Pause before clicking Download — simulates reading the panel
-            _random_sleep(0.8, 1.8)
+            _random_sleep(0.8, 1.8)  # pause before clicking Download
 
             for sel in PANEL_DOWNLOAD_BUTTON_SELECTORS:
                 try:
@@ -675,16 +694,32 @@ def get_pdf_url_by_clicking(
                 if local_path:
                     log.info("Document downloaded locally: %s", local_path)
 
-        # Dismiss the panel, then pause before moving on to the next row —
-        # simulates the time a human takes to review what they just downloaded.
-        try:
-            driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            _random_sleep(1.5, 3.5)
-        except Exception:
-            pass
-
         return pdf_url, local_path
 
+    except Exception as exc:
+        log.warning("detail extraction error: %s", str(exc).split("\n")[0].strip())
+        return None, None
+
+
+def get_pdf_url_by_clicking(
+    driver,
+    row,
+    download_dir: str = "",
+) -> tuple[str | None, str | None]:
+    """
+    Click the row to open its detail page, then extract the document URL and
+    optionally download the PDF via _extract_pdf_from_detail.
+
+    Does NOT navigate back to results — subsequent documents are reached via
+    _click_next_result() in Phase 2.
+
+    Returns (pdf_url, local_path).
+    """
+    try:
+        _random_sleep(0.6, 1.4)
+        row.click()
+        _random_sleep(DETAIL_WAIT - 0.5, DETAIL_WAIT + 1.0)
+        return _extract_pdf_from_detail(driver, download_dir)
     except Exception as exc:
         log.warning("get_pdf_url_by_clicking error: %s", str(exc).split("\n")[0].strip())
         return None, None
@@ -775,13 +810,17 @@ def extract_page_data(
                 log.warning("Row %d text extraction error: %s", i, exc)
 
         # ── Phase 2: click for download on eligible rows (after all text captured).
-        # The click may re-render the table; that's fine because we're done reading.
+        # The first eligible row that needs clicking is opened from the results
+        # page.  Subsequent eligible rows are reached by clicking the site's
+        # 'Next Result' button — we never return to the results list mid-loop.
         # Eligibility: doc not already in S3, recorded within MAX_DOC_AGE_DAYS,
         # and downloads_done < max_downloads.
-        downloads_done = 0
-        recent_total   = 0  # rows with recorded_date within MAX_DOC_AGE_DAYS
-        new_saved      = 0  # docs obtained this run (inline or via click)
-        recent_no_doc  = 0  # recent rows with no doc (limit hit or click failed)
+        downloads_done       = 0
+        recent_total         = 0  # rows with recorded_date within MAX_DOC_AGE_DAYS
+        new_saved            = 0  # docs obtained this run (inline or via click)
+        recent_no_doc        = 0  # recent rows with no doc (limit hit or nav failed)
+        current_detail_idx   = 0  # 1-based index of currently open detail page (0 = results page)
+        next_result_clicks   = 0  # total 'Next Result' clicks used this pass
         for entry in extracted:
             row        = entry["row"]
             doc_number = entry.get("doc_number", "")
@@ -792,12 +831,12 @@ def extract_page_data(
             entry["local_path"] = None
 
             if not _is_within_days(rec_date):
-                continue
+                break  # rows are newest-first; old row means all remaining are older
 
             recent_total += 1
 
             if doc_number in already_downloaded:
-                continue  # already has a doc in S3
+                break  # doc already in S3 — no further downloads needed
 
             if downloads_done >= max_downloads:
                 log.debug("Row %d: download limit (%d) reached — skipping", entry["index"], max_downloads)
@@ -810,15 +849,38 @@ def extract_page_data(
                 downloads_done += 1
                 new_saved += 1
             else:
-                # Re-fetch the row element from the live DOM.  Any previous click
-                # that opened the detail panel will have caused React to re-render
-                # the table, staling all WebElement references captured in Phase 1.
-                fresh_row = _refetch_row(driver, entry["index"]) or row
-                try:
-                    pdf_url, local_path = get_pdf_url_by_clicking(driver, fresh_row, download_dir)
-                except Exception as exc:
-                    log.warning("Row %d click error: %s", entry["index"], exc)
-                    pdf_url, local_path = None, None
+                pdf_url = local_path = None
+                if current_detail_idx == 0:
+                    # Still on the results page — click this row to open its detail
+                    fresh_row = _refetch_row(driver, entry["index"]) or row
+                    try:
+                        pdf_url, local_path = get_pdf_url_by_clicking(driver, fresh_row, download_dir)
+                    except Exception as exc:
+                        log.warning("Row %d click error: %s", entry["index"], str(exc).split("\n")[0])
+                    current_detail_idx = entry["index"]
+                else:
+                    # Already on a detail page — navigate forward using Next Result
+                    steps = entry["index"] - current_detail_idx
+                    nav_ok = True
+                    for step_n in range(steps):
+                        if next_result_clicks >= MAX_NEXT_RESULT_CLICKS:
+                            log.debug("Next Result click limit (%d) reached", MAX_NEXT_RESULT_CLICKS)
+                            nav_ok = False
+                            break
+                        if not _click_next_result(driver):
+                            log.warning(
+                                "Next Result unavailable after %d click(s) — stopping downloads",
+                                next_result_clicks,
+                            )
+                            nav_ok = False
+                            break
+                        next_result_clicks += 1
+                    if not nav_ok:
+                        recent_no_doc += 1
+                        break  # can't navigate further; exit Phase 2
+                    current_detail_idx = entry["index"]
+                    pdf_url, local_path = _extract_pdf_from_detail(driver, download_dir)
+
                 entry["pdf_url"]    = pdf_url
                 entry["local_path"] = local_path
                 downloads_done += 1
