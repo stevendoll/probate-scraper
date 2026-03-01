@@ -5,3 +5,8 @@
 .vscode/
 .secrets
 downloads/
+
+# Next.js UI
+ui/.next/
+ui/node_modules/
+ui/.env.local
