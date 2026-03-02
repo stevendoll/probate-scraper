@@ -116,6 +116,11 @@ sam-build:
 	sam build
 
 deploy: sam-build
+	@echo "Ensuring deploy IAM user has CloudFront permissions..."
+	aws iam put-user-policy \
+		--user-name probate-scraper-deploy \
+		--policy-name CloudFrontDeploy \
+		--policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"cloudfront:*","Resource":"*"}]}'
 	sam deploy
 
 deploy-ui:
