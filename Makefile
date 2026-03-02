@@ -5,7 +5,17 @@ ECR_REPO     := probate-scraper/scraper
 ECR_URI      := $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/$(ECR_REPO)
 STACK_NAME   := probate-scraper-collin-tx
 
-.PHONY: help ecr-create ecr-login build push build-push sam-build deploy \
+# UI deployment — resolved from CloudFormation Outputs after sam deploy
+UI_BUCKET    = $(shell aws cloudformation describe-stacks \
+                 --stack-name $(STACK_NAME) --region $(REGION) \
+                 --query "Stacks[0].Outputs[?OutputKey==\`UiBucketName\`].OutputValue" \
+                 --output text 2>/dev/null)
+CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
+                 --stack-name $(STACK_NAME) --region $(REGION) \
+                 --query "Stacks[0].Outputs[?OutputKey==\`UiDistributionId\`].OutputValue" \
+                 --output text 2>/dev/null)
+
+.PHONY: help ecr-create ecr-login build push build-push sam-build deploy deploy-ui \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
         aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock
@@ -107,6 +117,16 @@ sam-build:
 
 deploy: sam-build
 	sam deploy
+
+deploy-ui:
+	@echo "Building UI..."
+	cd ui && npm run build
+	@echo "Syncing to s3://$(UI_BUCKET)..."
+	aws s3 sync ui/dist/ s3://$(UI_BUCKET) --delete --region $(REGION)
+	@echo "Invalidating CloudFront cache..."
+	aws cloudfront create-invalidation --distribution-id $(CF_DIST_ID) --paths "/*"
+	@echo "Done — https://$(CF_DIST_ID).cloudfront.net"
+
 
 # ── Operations ──────────────────────────────────────────────────────────────
 
