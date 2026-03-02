@@ -33,11 +33,16 @@ parameter_overrides = """
   ScraperUsername=REPLACE_ME
   ScraperPassword=REPLACE_ME
   BedrockModelId=us.amazon.nova-pro-v1:0
-  JwtSecret=REPLACE_ME
-  MagicLinkBaseUrl=https://REPLACE_ME/auth/verify
-  FromEmail=REPLACE_ME
+  JwtSecret={{resolve:ssm-secure:/probate-scraper/jwt-secret}}
+  MagicLinkBaseUrl=https://d2ujyhjv7lyevl.cloudfront.net/auth/verify
+  FromEmail=hello@realestateleadsforpros.com
 """
 # ── Sensitive values (keep out of version control) ────────────────────────
 # ScraperPassword has NoEcho=true in template.yaml so it won't appear in the
 # CloudFormation console.  Alternatively, store it in SSM Parameter Store and
 # reference it here as:  ScraperPassword=/probate-scraper/password
+#
+# JwtSecret uses the SSM dynamic reference syntax above.  Create it once with:
+#   make create-jwt-secret
+# That generates a cryptographically random 48-byte base64 secret and stores
+# it as a SecureString at /probate-scraper/jwt-secret.

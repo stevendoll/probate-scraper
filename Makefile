@@ -18,7 +18,8 @@ CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy deploy-ui \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
-        aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock
+        aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock \
+        create-jwt-secret
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -56,6 +57,7 @@ help:
 	@echo "    ecr-create       Create the ECR repository"
 	@echo "    ecr-login        Authenticate Docker to ECR"
 	@echo "    vpc-info         Print default VPC + subnet IDs (fill into samconfig.toml)"
+	@echo "    create-jwt-secret  Generate random JWT secret → SSM /probate-scraper/jwt-secret"
 	@echo ""
 	@echo "  Build & Deploy:"
 	@echo "    build            Build the scraper Docker image"
@@ -116,11 +118,27 @@ sam-build:
 	sam build
 
 deploy: sam-build
+	@echo "Ensuring deploy IAM user has CloudFront permissions..."
+	aws iam put-user-policy \
+		--user-name probate-scraper-deploy \
+		--policy-name CloudFrontDeploy \
+		--policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"cloudfront:*","Resource":"*"}]}'
 	sam deploy
+	$(MAKE) deploy-ui
 
 deploy-ui:
-	@echo "Building UI..."
-	cd ui && npm run build
+	@echo "Building UI for production..."
+	@KEY_ID=$$(aws cloudformation describe-stack-resources \
+		--stack-name $(STACK_NAME) --region $(REGION) \
+		--query 'StackResources[?ResourceType==`AWS::ApiGateway::ApiKey`].PhysicalResourceId | [0]' \
+		--output text); \
+	API_URL=$$(aws cloudformation describe-stacks \
+		--stack-name $(STACK_NAME) --region $(REGION) \
+		--query "Stacks[0].Outputs[?OutputKey==\`ApiEndpoint\`].OutputValue" \
+		--output text); \
+	API_KEY=$$(aws apigateway get-api-key --api-key $$KEY_ID --include-value \
+		--query value --output text --region $(REGION)); \
+	cd ui && VITE_API_URL=$$API_URL/real-estate/probate-leads VITE_API_KEY=$$API_KEY npm run build
 	@echo "Syncing to s3://$(UI_BUCKET)..."
 	aws s3 sync ui/dist/ s3://$(UI_BUCKET) --delete --region $(REGION)
 	@echo "Invalidating CloudFront cache..."
@@ -207,6 +225,18 @@ smoke-test:
 # Run once per account/region after initial AWS setup, or after changing BedrockModelId.
 check-bedrock:
 	pipenv run python scripts/check_bedrock.py
+
+# Generate a random JWT secret and store it in SSM Parameter Store.
+# Run once before first production deploy, or to rotate the secret.
+create-jwt-secret:
+	@SECRET=$$(python3 -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(48)).decode())"); \
+	aws ssm put-parameter \
+		--name /probate-scraper/jwt-secret \
+		--type SecureString \
+		--value "$$SECRET" \
+		--overwrite \
+		--region $(REGION); \
+	echo "JWT secret stored at /probate-scraper/jwt-secret"
 
 # ── Local DynamoDB ───────────────────────────────────────────────────────────
 
