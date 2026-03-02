@@ -121,21 +121,27 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           USERNAME_COLLINTX: ${{ secrets.USERNAME_COLLINTX }}
           PASSWORD_COLLINTX: ${{ secrets.PASSWORD_COLLINTX }}
+          MAGIC_LINK_BASE_URL: ${{ vars.MAGIC_LINK_BASE_URL }}
+          FROM_EMAIL: ${{ vars.FROM_EMAIL }}
         run: |
           # Build overrides array. Stripe params are optional — SAM rejects
           # "Key=" (empty value), so only include them when the secret is set.
           # ScrapeSchedule is intentionally omitted — it contains spaces which
           # SAM CLI cannot handle in --parameter-overrides. The template
           # Default "cron(0 6 * * ? *)" is used automatically.
+          # JwtSecret is read from SSM via {{resolve:ssm-secure:...}} in samconfig.toml.
           OVERRIDES=(
             "VpcId=$VPC_ID"
             "SubnetIds=$SUBNET_IDS"
             "ScraperImageUri=$ECR_URI"
+            "JwtSecret={{resolve:ssm-secure:/probate-scraper/jwt-secret}}"
           )
           [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
           [ -n "$USERNAME_COLLINTX" ]    && OVERRIDES+=("ScraperUsername=$USERNAME_COLLINTX")
           [ -n "$PASSWORD_COLLINTX" ]    && OVERRIDES+=("ScraperPassword=$PASSWORD_COLLINTX")
+          [ -n "$MAGIC_LINK_BASE_URL" ]  && OVERRIDES+=("MagicLinkBaseUrl=$MAGIC_LINK_BASE_URL")
+          [ -n "$FROM_EMAIL" ]           && OVERRIDES+=("FromEmail=$FROM_EMAIL")
 
           sam deploy \
             --no-confirm-changeset \
@@ -230,3 +236,45 @@ jobs:
           SMOKE_BASE_URL: ${{ steps.stack-outputs.outputs.endpoint }}
           SMOKE_API_KEY: ${{ steps.api-key.outputs.api_key }}
         run: pipenv run python scripts/smoke_test.py
+
+      # ── Deploy UI (React SPA → S3 + CloudFront invalidation) ───────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Get CloudFront distribution ID
+        id: cf
+        run: |
+          DIST_ID=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME --region $AWS_REGION \
+            --query "Stacks[0].Outputs[?OutputKey=='UiDistributionId'].OutputValue" \
+            --output text)
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME --region $AWS_REGION \
+            --query "Stacks[0].Outputs[?OutputKey=='UiBucketName'].OutputValue" \
+            --output text)
+          echo "dist_id=$DIST_ID"   >> $GITHUB_OUTPUT
+          echo "ui_bucket=$BUCKET"  >> $GITHUB_OUTPUT
+
+      - name: Build UI
+        working-directory: ui
+        env:
+          VITE_API_URL: ${{ steps.stack-outputs.outputs.endpoint }}/real-estate/probate-leads
+          VITE_API_KEY: ${{ steps.api-key.outputs.api_key }}
+        run: npm run build
+
+      - name: Sync UI to S3
+        run: |
+          aws s3 sync ui/dist/ s3://${{ steps.cf.outputs.ui_bucket }} \
+            --delete --region $AWS_REGION
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.cf.outputs.dist_id }} \
+            --paths "/*"
