@@ -5,37 +5,38 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
+type State = 'idle' | 'loading' | 'sent' | 'error'
+
 export function LoginForm() {
   const [email, setEmail] = useState('')
-  const [submitted, setSubmitted] = useState(false)
+  const [state, setState] = useState<State>('idle')
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    setLoading(true)
+    setState('loading')
     try {
       await requestLogin(email)
-      setSubmitted(true)
+      setState('sent')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
-    } finally {
-      setLoading(false)
+      setState('error')
     }
   }
 
-  if (submitted) {
+  if (state === 'sent') {
     return (
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Check your email</CardTitle>
           <CardDescription>
             We sent a magic link to <strong>{email}</strong>. Click it to sign in.
+            The link expires in 15 minutes.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="ghost" className="w-full" onClick={() => setSubmitted(false)}>
+          <Button variant="ghost" className="w-full" onClick={() => setState('idle')}>
             Use a different email
           </Button>
         </CardContent>
@@ -56,6 +57,7 @@ export function LoginForm() {
             <Input
               id="email"
               type="email"
+              autoComplete="email"
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -63,9 +65,9 @@ export function LoginForm() {
               autoFocus
             />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Sending…' : 'Send magic link'}
+          {state === 'error' && <p className="text-sm text-destructive">{error}</p>}
+          <Button type="submit" className="w-full" disabled={state === 'loading'}>
+            {state === 'loading' ? 'Sending…' : 'Send magic link'}
           </Button>
         </form>
       </CardContent>
