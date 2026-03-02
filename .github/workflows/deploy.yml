@@ -103,6 +103,18 @@ jobs:
           echo "Discovered VPC: $VPC_ID"
           echo "Discovered subnets: $SUBNET_IDS"
 
+      # ── Ensure deploy IAM permissions ─────────────────────────────────────
+      - name: Ensure deploy IAM permissions
+        run: |
+          aws iam put-user-policy \
+            --user-name probate-scraper-deploy \
+            --policy-name CloudFrontDeploy \
+            --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"cloudfront:*","Resource":"*"}]}'
+          aws iam put-user-policy \
+            --user-name probate-scraper-deploy \
+            --policy-name SsmSecretRead \
+            --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ssm:GetParameter","ssm:GetParameters"],"Resource":"arn:aws:ssm:${{ env.AWS_REGION }}:${{ env.ACCOUNT_ID }}:parameter/probate-scraper/*"}]}'
+
       # ── SAM build + deploy ─────────────────────────────────────────────────
       - name: Set up SAM CLI
         uses: aws-actions/setup-sam@v2

@@ -118,11 +118,15 @@ sam-build:
 	sam build
 
 deploy: sam-build
-	@echo "Ensuring deploy IAM user has CloudFront permissions..."
+	@echo "Ensuring deploy IAM user has required permissions..."
 	aws iam put-user-policy \
 		--user-name probate-scraper-deploy \
 		--policy-name CloudFrontDeploy \
 		--policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"cloudfront:*","Resource":"*"}]}'
+	aws iam put-user-policy \
+		--user-name probate-scraper-deploy \
+		--policy-name SsmSecretRead \
+		--policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ssm:GetParameter","ssm:GetParameters"],"Resource":"arn:aws:ssm:$(REGION):$(ACCOUNT_ID):parameter/probate-scraper/*"}]}'
 	sam deploy
 	$(MAKE) deploy-ui
 
