@@ -5,3 +5,7 @@
 .vscode/
 .secrets
 downloads/
+src/api/__pycache__/
+src/api/routers/__pycache__/
+src/parse_document/__pycache__/
+src/trigger/__pycache__/

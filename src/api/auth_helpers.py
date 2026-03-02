@@ -85,18 +85,21 @@ def send_magic_link(email: str, token: str) -> None:
         log.info("Magic link (FROM_EMAIL unset — not sent via SES): %s", link)
         return
     ses = boto3.client("ses")
-    ses.send_email(
-        Source=FROM_EMAIL,
-        Destination={"ToAddresses": [email]},
-        Message={
-            "Subject": {"Data": "Your login link"},
-            "Body": {
-                "Text": {
-                    "Data": (
-                        f"Click to log in (expires in {MAGIC_LINK_EXPIRY_MIN} minutes):"
-                        f"\n\n{link}"
-                    )
-                }
+    try:
+        ses.send_email(
+            Source=FROM_EMAIL,
+            Destination={"ToAddresses": [email]},
+            Message={
+                "Subject": {"Data": "Your login link"},
+                "Body": {
+                    "Text": {
+                        "Data": (
+                            f"Click to log in (expires in {MAGIC_LINK_EXPIRY_MIN} minutes):"
+                            f"\n\n{link}"
+                        )
+                    }
+                },
             },
-        },
-    )
+        )
+    except Exception as exc:
+        log.error("SES send_email failed: %s", exc)
