@@ -127,7 +127,17 @@ deploy: sam-build
 		--user-name probate-scraper-deploy \
 		--policy-name SsmSecretRead \
 		--policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ssm:GetParameter","ssm:GetParameters"],"Resource":"arn:aws:ssm:$(REGION):$(ACCOUNT_ID):parameter/probate-scraper/*"}]}'
-	sam deploy
+	@JWT_SECRET=$$(aws ssm get-parameter \
+		--name /probate-scraper/jwt-secret \
+		--with-decryption \
+		--query Parameter.Value \
+		--output text \
+		--region $(REGION) 2>/dev/null); \
+	if [ -z "$$JWT_SECRET" ]; then \
+		echo "ERROR: SSM parameter /probate-scraper/jwt-secret not found. Run: make create-jwt-secret"; \
+		exit 1; \
+	fi; \
+	sam deploy --parameter-overrides "JwtSecret=$$JWT_SECRET"
 	$(MAKE) deploy-ui
 
 deploy-ui:

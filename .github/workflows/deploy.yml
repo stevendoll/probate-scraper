@@ -115,6 +115,21 @@ jobs:
             --policy-name SsmSecretRead \
             --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ssm:GetParameter","ssm:GetParameters"],"Resource":"arn:aws:ssm:${{ env.AWS_REGION }}:${{ env.ACCOUNT_ID }}:parameter/probate-scraper/*"}]}'
 
+      # ── Read JWT secret from SSM ───────────────────────────────────────────
+      # {{resolve:ssm-secure:...}} is not supported in Lambda env vars.
+      # Read the value here so it can be passed as a normal parameter override.
+      - name: Read JWT secret from SSM
+        id: jwt
+        run: |
+          JWT_SECRET=$(aws ssm get-parameter \
+            --name /probate-scraper/jwt-secret \
+            --with-decryption \
+            --query Parameter.Value \
+            --output text \
+            --region $AWS_REGION)
+          echo "::add-mask::$JWT_SECRET"
+          echo "value=$JWT_SECRET" >> $GITHUB_OUTPUT
+
       # ── SAM build + deploy ─────────────────────────────────────────────────
       - name: Set up SAM CLI
         uses: aws-actions/setup-sam@v2
@@ -141,12 +156,12 @@ jobs:
           # ScrapeSchedule is intentionally omitted — it contains spaces which
           # SAM CLI cannot handle in --parameter-overrides. The template
           # Default "cron(0 6 * * ? *)" is used automatically.
-          # JwtSecret is read from SSM via {{resolve:ssm-secure:...}} in samconfig.toml.
+          # JwtSecret is read from SSM in the prior step and masked in logs.
           OVERRIDES=(
             "VpcId=$VPC_ID"
             "SubnetIds=$SUBNET_IDS"
             "ScraperImageUri=$ECR_URI"
-            "JwtSecret={{resolve:ssm-secure:/probate-scraper/jwt-secret}}"
+            "JwtSecret=${{ steps.jwt.outputs.value }}"
           )
           [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
