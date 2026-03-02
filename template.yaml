@@ -82,7 +82,7 @@ Parameters:
 
   MagicLinkBaseUrl:
     Type: String
-    Default: "http://localhost:3000/auth/verify"
+    Default: "http://localhost:3001/auth/verify"
     Description: >
       Base URL for magic-link emails, e.g. https://app.example.com/auth/verify.
       The token is appended as ?token=<value>.
@@ -368,6 +368,10 @@ Resources:
     Properties:
       Name: probate-leads-api
       StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,x-api-key'"
+        AllowOrigin: "'*'"
       Auth:
         ApiKeyRequired: true
         UsagePlan:

@@ -8,7 +8,8 @@ STACK_NAME   := probate-scraper-collin-tx
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
-        aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock
+        aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock \
+        deploy-ui
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -218,3 +219,17 @@ local-db-shell:
 		--table-name leads \
 		--endpoint-url $(LOCAL_DYNAMO_URL) \
 		--select COUNT
+
+# ── UI (Vite SPA → S3 + CloudFront) ─────────────────────────────────────────
+
+UI_BUCKET    ?= $(shell aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+                  --query 'Stacks[0].Outputs[?OutputKey==`UiBucketName`].OutputValue' \
+                  --output text 2>/dev/null)
+CF_DIST_ID   ?= $(shell aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+                  --query 'Stacks[0].Outputs[?OutputKey==`UiDistributionId`].OutputValue' \
+                  --output text 2>/dev/null)
+
+deploy-ui:
+	cd ui && npm run build
+	aws s3 sync ui/dist/ s3://$(UI_BUCKET) --delete
+	aws cloudfront create-invalidation --distribution-id $(CF_DIST_ID) --paths "/*"
