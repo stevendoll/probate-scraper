@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Git workflow
 
-- Work on the existing branch. Once a PR is created for that branch, **start a new branch and open a new PR** for any further commits.
+- Continue pushing commits to the existing branch, even after a PR is open. Each new piece of work gets its own branch and PR.
 
 ## Commands
 
