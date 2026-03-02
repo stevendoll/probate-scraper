@@ -122,6 +122,7 @@ deploy: sam-build
 		--policy-name CloudFrontDeploy \
 		--policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"cloudfront:*","Resource":"*"}]}'
 	sam deploy
+	$(MAKE) deploy-ui
 
 deploy-ui:
 	@echo "Building UI..."
