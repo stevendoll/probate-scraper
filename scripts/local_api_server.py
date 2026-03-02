@@ -25,14 +25,17 @@ Supported routes:
 
 import importlib.util
 import json
+import logging
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
 # ── env vars (must be set before importing app) ────────────────────────────────
-os.environ.setdefault("AWS_ENDPOINT_URL",        "http://localhost:8000")
+os.environ.setdefault("AWS_ENDPOINT_URL_DYNAMODB", "http://localhost:8000")
 os.environ.setdefault("AWS_ACCESS_KEY_ID",       "local")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY",   "local")
 os.environ.setdefault("AWS_DEFAULT_REGION",      "us-east-1")
@@ -231,11 +234,23 @@ class LambdaHandler(BaseHTTPRequestHandler):
     def do_PATCH(self):  self._dispatch("PATCH")
     def do_DELETE(self): self._dispatch("DELETE")
 
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._add_cors_headers()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _add_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key")
+
     def _send(self, status: int, body: dict, extra_headers: dict | None = None):
         payload = json.dumps(body, default=str).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
+        self._add_cors_headers()
         for k, v in (extra_headers or {}).items():
             if k.lower() != "content-type":
                 self.send_header(k, v)
@@ -249,7 +264,7 @@ class LambdaHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
     print(f"Local API server running at http://localhost:{port}")
-    print(f"  DynamoDB → {os.environ['AWS_ENDPOINT_URL']}")
+    print(f"  DynamoDB → {os.environ['AWS_ENDPOINT_URL_DYNAMODB']}")
     print(f"  Tables   → leads={os.environ['DYNAMO_TABLE_NAME']}")
     print(f"             locations={os.environ['LOCATIONS_TABLE_NAME']}")
     print(f"             users={os.environ['USERS_TABLE_NAME']}")
