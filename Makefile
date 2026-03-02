@@ -125,8 +125,18 @@ deploy: sam-build
 	$(MAKE) deploy-ui
 
 deploy-ui:
-	@echo "Building UI..."
-	cd ui && npm run build
+	@echo "Building UI for production..."
+	@KEY_ID=$$(aws cloudformation describe-stack-resources \
+		--stack-name $(STACK_NAME) --region $(REGION) \
+		--query 'StackResources[?ResourceType==`AWS::ApiGateway::ApiKey`].PhysicalResourceId | [0]' \
+		--output text); \
+	API_URL=$$(aws cloudformation describe-stacks \
+		--stack-name $(STACK_NAME) --region $(REGION) \
+		--query "Stacks[0].Outputs[?OutputKey==\`ApiEndpoint\`].OutputValue" \
+		--output text); \
+	API_KEY=$$(aws apigateway get-api-key --api-key $$KEY_ID --include-value \
+		--query value --output text --region $(REGION)); \
+	cd ui && VITE_API_URL=$$API_URL/real-estate/probate-leads VITE_API_KEY=$$API_KEY npm run build
 	@echo "Syncing to s3://$(UI_BUCKET)..."
 	aws s3 sync ui/dist/ s3://$(UI_BUCKET) --delete --region $(REGION)
 	@echo "Invalidating CloudFront cache..."
