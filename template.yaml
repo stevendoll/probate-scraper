@@ -82,7 +82,7 @@ Parameters:
 
   MagicLinkBaseUrl:
     Type: String
-    Default: "http://localhost:3000/auth/verify"
+    Default: "http://localhost:3001/auth/verify"
     Description: >
       Base URL for magic-link emails, e.g. https://app.example.com/auth/verify.
       The token is appended as ?token=<value>.
@@ -94,11 +94,19 @@ Parameters:
       SES-verified sender address for magic-link emails.
       Leave blank to skip sending (local dev / CI).
 
+
+  UiBucketName:
+    Type: String
+    Default: ""
+    Description: >
+      S3 bucket name for the React SPA static assets.
+      Leave blank to let CloudFormation generate a unique name.
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
 Conditions:
   HasDocumentsBucketName: !Not [!Equals [!Ref DocumentsBucketName, ""]]
+  HasUiBucketName: !Not [!Equals [!Ref UiBucketName, ""]]
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -368,6 +376,10 @@ Resources:
     Properties:
       Name: probate-leads-api
       StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,x-api-key'"
+        AllowOrigin: "'*'"
       Auth:
         ApiKeyRequired: true
         UsagePlan:
@@ -703,6 +715,83 @@ Resources:
                   - !Ref ScraperSecurityGroup
                 AssignPublicIp: ENABLED
 
+
+  # ── S3 + CloudFront — React SPA ──────────────────────────────────────────
+  # Hosts the compiled Vite build (ui/dist/).  CloudFront uses an Origin Access
+  # Control (OAC) so the bucket stays fully private.
+
+  UiBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - HasUiBucketName
+        - !Ref UiBucketName
+        - !Ref AWS::NoValue
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  UiOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-ui-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  UiBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UiBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${UiBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub
+                  - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
+                  - DistId: !Ref UiDistribution
+
+  UiDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        Origins:
+          - Id: UiS3Origin
+            DomainName: !GetAtt UiBucket.RegionalDomainName
+            OriginAccessControlId: !Ref UiOriginAccessControl
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: UiS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized managed policy
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+        # SPA routing — send all 403/404s back to index.html
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
 # ---------------------------------------------------------------------------
 # Outputs
 # ---------------------------------------------------------------------------
@@ -748,3 +837,16 @@ Outputs:
   DocumentsBucketArn:
     Description: S3 documents bucket ARN
     Value: !GetAtt DocumentsBucket.Arn
+
+  UiBucketName:
+    Description: S3 bucket hosting the React SPA (use with make deploy-ui)
+    Value: !Ref UiBucket
+
+  UiDistributionId:
+    Description: CloudFront distribution ID (use with make deploy-ui to invalidate cache)
+    Value: !Ref UiDistribution
+
+  UiUrl:
+    Description: Public HTTPS URL for the React SPA
+    Value: !Sub "https://${UiDistribution.DomainName}"
+
