@@ -24,8 +24,8 @@ export function decodePayload(token: string): Record<string, unknown> | null {
 
 function isTokenExpired(token: string): boolean {
   const payload = decodePayload(token)
-  if (!payload || typeof payload.exp !== 'number') return false
-  return Date.now() / 1000 > payload.exp
+  if (!payload || typeof payload.exp !== 'number') return true
+  return Date.now() / 1000 >= payload.exp
 }
 
 export function useAuth(): { token: string | null; payload: Record<string, unknown> | null } {
