@@ -30,6 +30,7 @@ import requests
 
 BASE_URL = os.environ.get("SMOKE_BASE_URL", "").rstrip("/")
 API_KEY  = os.environ.get("SMOKE_API_KEY", "")
+UI_URL   = os.environ.get("SMOKE_UI_URL", "").rstrip("/")
 
 if not BASE_URL:
     print("ERROR: SMOKE_BASE_URL is not set", file=sys.stderr)
@@ -261,6 +262,85 @@ def test_users() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Auth — CORS preflight + unauthenticated access
+# ---------------------------------------------------------------------------
+
+def test_auth_cors() -> None:
+    print(f"\n{YELLOW}── Auth / CORS ─────────────────────────────────────────────────────────{RESET}")
+
+    # OPTIONS preflight must succeed without an API key (browsers never send
+    # x-api-key in CORS preflight requests).
+    r = _retry(
+        requests.options,
+        f"{BASE}/auth/request-login",
+        headers={
+            "Origin": UI_URL or "https://example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+        timeout=TIMEOUT,
+    )
+    if check("OPTIONS /auth/request-login (no API key) → 200", r.status_code == 200, _snippet(r)):
+        check(
+            "CORS: access-control-allow-origin present",
+            "access-control-allow-origin" in r.headers,
+            str(dict(r.headers)),
+        )
+        check(
+            "CORS: access-control-allow-methods includes POST",
+            "POST" in r.headers.get("access-control-allow-methods", ""),
+            r.headers.get("access-control-allow-methods", ""),
+        )
+
+    # POST /auth/request-login must accept requests without an API key.
+    r = post("/auth/request-login", {"email": "smoke-noreply@example.com"}, require_key=False)
+    check(
+        "POST /auth/request-login (no API key) → 200",
+        r.status_code == 200,
+        _snippet(r),
+    )
+
+    # GET /auth/verify with a bogus token must return 401 (not 403/404).
+    r = _retry(
+        requests.get,
+        f"{BASE}/auth/verify",
+        params={"token": "not-a-real-token"},
+        headers={"Content-Type": "application/json"},
+        timeout=TIMEOUT,
+    )
+    check(
+        "GET /auth/verify (bad token) → 401",
+        r.status_code == 401,
+        _snippet(r),
+    )
+
+
+# ---------------------------------------------------------------------------
+# UI — CloudFront SPA reachability
+# ---------------------------------------------------------------------------
+
+def test_ui() -> None:
+    if not UI_URL:
+        return
+    print(f"\n{YELLOW}── UI ({UI_URL}) ────────────────────────────────────────────────────────{RESET}")
+
+    r = _retry(requests.get, UI_URL + "/", timeout=TIMEOUT)
+    if check("GET / → 200", r.status_code == 200, _snippet(r)):
+        ct = r.headers.get("content-type", "")
+        check("Content-Type is text/html", "text/html" in ct, ct)
+        check("HTML has <div id=\"root\">", '<div id="root">' in r.text, "(root div missing)")
+        check("HTML references a JS bundle", ".js" in r.text, "(no JS script tag found)")
+
+    # Deep-link (non-root path) must also serve index.html (SPA routing).
+    r = _retry(requests.get, UI_URL + "/auth/verify", timeout=TIMEOUT)
+    check(
+        "GET /auth/verify (deep-link) → 200 with HTML",
+        r.status_code == 200 and "text/html" in r.headers.get("content-type", ""),
+        _snippet(r),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stripe webhook (basic reachability — no real signature)
 # ---------------------------------------------------------------------------
 
@@ -295,6 +375,8 @@ if __name__ == "__main__":
     test_leads()
     test_users()
     test_stripe_webhook()
+    test_auth_cors()
+    test_ui()
 
     print(f"\n{'='*70}")
     total = _passed + _failed
