@@ -376,10 +376,6 @@ Resources:
     Properties:
       Name: probate-leads-api
       StageName: prod
-      Cors:
-        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization,x-api-key'"
-        AllowOrigin: "'*'"
       Auth:
         ApiKeyRequired: true
         UsagePlan:
@@ -571,6 +567,17 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/users/{user_id}
             Method: DELETE
+            Auth:
+              ApiKeyRequired: false
+        # CORS preflight — browsers never send x-api-key in OPTIONS, so this
+        # catch-all must be exempt from API key auth.  The Lambda's CORSConfig
+        # returns 200 + CORS headers automatically for OPTIONS requests.
+        CorsPreflightProxy:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/{proxy+}
+            Method: OPTIONS
             Auth:
               ApiKeyRequired: false
 

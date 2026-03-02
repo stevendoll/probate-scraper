@@ -36,6 +36,7 @@ Environment variables:
 
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+from aws_lambda_powertools.event_handler.api_gateway import CORSConfig
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 import db  # noqa: F401 — imported so tests can patch db.table etc.
@@ -51,7 +52,11 @@ from routers import leads, locations, users, stripe, auth, admin
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
-api    = APIGatewayRestResolver()
+api    = APIGatewayRestResolver(cors=CORSConfig(
+    allow_origin="*",
+    allow_headers=["Content-Type", "Authorization", "x-api-key"],
+    max_age=3000,
+))
 
 # ---------------------------------------------------------------------------
 # Include routers
