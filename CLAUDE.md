@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git workflow
+
+- Each PR gets its own branch. Once a PR is created, **never push new commits to that branch** — start a new branch and open a new PR instead.
+
 ## Commands
 
 ```bash
