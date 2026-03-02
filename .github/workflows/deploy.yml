@@ -156,8 +156,14 @@ jobs:
             --stack-name $STACK_NAME \
             --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
             --output text)
+          UI_URL=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query 'Stacks[0].Outputs[?OutputKey==`UiUrl`].OutputValue' \
+            --output text)
           echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
+          echo "ui_url=$UI_URL"     >> $GITHUB_OUTPUT
           echo "API endpoint: $ENDPOINT"
+          echo "UI URL: $UI_URL"
 
       - name: Get API key
         id: api-key
@@ -230,11 +236,12 @@ jobs:
       - name: Install dependencies
         run: pipenv install
 
-      # ── Smoke tests ────────────────────────────────────────────────────────
+      # ── Smoke tests (API + CORS) ───────────────────────────────────────────
       - name: Run smoke tests
         env:
           SMOKE_BASE_URL: ${{ steps.stack-outputs.outputs.endpoint }}
           SMOKE_API_KEY: ${{ steps.api-key.outputs.api_key }}
+          SMOKE_UI_URL: ${{ steps.stack-outputs.outputs.ui_url }}
         run: pipenv run python scripts/smoke_test.py
 
       # ── Deploy UI (React SPA → S3 + CloudFront invalidation) ───────────────
@@ -278,3 +285,12 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id ${{ steps.cf.outputs.dist_id }} \
             --paths "/*"
+
+      # ── UI smoke test ──────────────────────────────────────────────────────
+      # Re-run after deploy-ui so test_ui() checks the freshly deployed SPA.
+      - name: Run UI smoke test
+        env:
+          SMOKE_BASE_URL: ${{ steps.stack-outputs.outputs.endpoint }}
+          SMOKE_API_KEY: ${{ steps.api-key.outputs.api_key }}
+          SMOKE_UI_URL: ${{ steps.stack-outputs.outputs.ui_url }}
+        run: pipenv run python scripts/smoke_test.py
