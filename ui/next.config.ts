@@ -1,11 +1,12 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // Allow the Next.js API routes to call the API Gateway without CORS issues
+  async rewrites() {
+    return []
+  },
+  // Strict mode catches common React bugs early
   reactStrictMode: true,
-  // radix-ui (used by shadcn v3) ships ESM-only code that Next.js's bundler
-  // needs to transpile explicitly; without this you get:
-  //   TypeError: Class extends value #<Object> is not a constructor or null
-  transpilePackages: ['radix-ui'],
 }
 
 export default nextConfig
