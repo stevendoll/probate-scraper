@@ -33,7 +33,9 @@ parameter_overrides = """
   ScraperUsername=REPLACE_ME
   ScraperPassword=REPLACE_ME
   BedrockModelId=us.amazon.nova-pro-v1:0
-  JwtSecret={{resolve:ssm-secure:/probate-scraper/jwt-secret}}
+  # JwtSecret is injected at deploy time by reading from SSM — not set here.
+  # For local deploys: make deploy reads it automatically via AWS CLI.
+  # For CI/CD: deploy.yml reads it and passes --parameter-overrides JwtSecret=...
   MagicLinkBaseUrl=https://d2ujyhjv7lyevl.cloudfront.net/auth/verify
   FromEmail=hello@realestateleadsforpros.com
 """
@@ -42,7 +44,7 @@ parameter_overrides = """
 # CloudFormation console.  Alternatively, store it in SSM Parameter Store and
 # reference it here as:  ScraperPassword=/probate-scraper/password
 #
-# JwtSecret uses the SSM dynamic reference syntax above.  Create it once with:
-#   make create-jwt-secret
-# That generates a cryptographically random 48-byte base64 secret and stores
-# it as a SecureString at /probate-scraper/jwt-secret.
+# JwtSecret is NOT set here — CloudFormation does not support SSM SecureString
+# dynamic references in Lambda env vars.  Instead it is read from SSM at
+# deploy time by make deploy / deploy.yml and passed via --parameter-overrides.
+# Create the SSM parameter once with:  make create-jwt-secret
