@@ -171,6 +171,7 @@ class User:
     stripe_subscription_id: str = ""
     status:                 str = "active"
     location_codes:         set = field(default_factory=set)
+    offered_price:          int = 0
     created_at:             str = ""
     updated_at:             str = ""
 
@@ -185,6 +186,7 @@ class User:
             stripe_subscription_id= item.get("stripe_subscription_id", ""),
             status=                 item.get("status", "active"),
             location_codes=         set(raw_codes) if raw_codes else set(),
+            offered_price=          int(item.get("offered_price", 0) or 0),
             created_at=             item.get("created_at", ""),
             updated_at=             item.get("updated_at", ""),
         )
@@ -199,6 +201,7 @@ class User:
             "stripeSubscriptionId":  self.stripe_subscription_id,
             "status":                self.status,
             "locationCodes":         sorted(codes) if isinstance(codes, (set, frozenset)) else sorted(codes),
+            "offeredPrice":          self.offered_price,
             "createdAt":             self.created_at,
             "updatedAt":             self.updated_at,
         }

@@ -9,10 +9,13 @@ import { getMe } from '@/lib/api'
 import Landing from '@/pages/Landing'
 import Login from '@/pages/Login'
 import AuthVerify from '@/pages/AuthVerify'
+import Signup from '@/pages/Signup'
+import Unsubscribe from '@/pages/Unsubscribe'
 import Dashboard from '@/pages/Dashboard'
 import Account from '@/pages/Account'
 import AdminUsers from '@/pages/admin/Users'
 import AdminUserDetail from '@/pages/admin/UserDetail'
+import AdminFunnelSend from '@/pages/admin/FunnelSend'
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -72,6 +75,9 @@ function AdminLayout() {
             <Link to="/admin/users" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Users
             </Link>
+            <Link to="/admin/funnel/send" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Funnel
+            </Link>
             <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               My dashboard
             </Link>
@@ -99,6 +105,10 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/auth/verify" element={<AuthVerify />} />
 
+          {/* Public funnel pages — no auth required */}
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/unsubscribe" element={<Unsubscribe />} />
+
           <Route element={<ProtectedRoute />}>
             <Route element={<UserLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
@@ -110,6 +120,7 @@ export default function App() {
             <Route element={<AdminLayout />}>
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/users/:userId" element={<AdminUserDetail />} />
+              <Route path="/admin/funnel/send" element={<AdminFunnelSend />} />
             </Route>
           </Route>
 

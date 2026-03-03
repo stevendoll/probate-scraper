@@ -38,7 +38,22 @@ export interface User {
   role: 'user' | 'admin'
   status: string
   locationCodes: string[]
+  offeredPrice?: number
   createdAt: string
+}
+
+export interface FunnelSendResult {
+  email: string
+  status: 'sent' | 'skipped' | 'error'
+  userId?: string
+  price?: number
+  message?: string
+}
+
+export interface FunnelSendResponse {
+  requestId: string
+  results: FunnelSendResult[]
+  count: number
 }
 
 export interface UserResponse {

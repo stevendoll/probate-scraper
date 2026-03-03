@@ -170,6 +170,7 @@ jobs:
             "AcmCertificateArn=arn:aws:acm:us-east-1:600775874112:certificate/396a9f34-bb06-4414-97ed-16a71c44129b"
             "UiDomainAliases=collincountyleads.com,www.collincountyleads.com"
             "ApiDomainName=api.collincountyleads.com"
+            "UiBaseUrl=https://collincountyleads.com"
           )
           [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")

@@ -38,6 +38,7 @@ parameter_overrides = """
   AcmCertificateArn=arn:aws:acm:us-east-1:600775874112:certificate/396a9f34-bb06-4414-97ed-16a71c44129b
   UiDomainAliases=collincountyleads.com,www.collincountyleads.com
   ApiDomainName=api.collincountyleads.com
+  UiBaseUrl=https://collincountyleads.com
 """
 # ── Sensitive values (keep out of version control) ────────────────────────
 # ScraperPassword has NoEcho=true in template.yaml so it won't appear in the
