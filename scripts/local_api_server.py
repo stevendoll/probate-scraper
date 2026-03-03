@@ -252,8 +252,10 @@ class LambdaHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self._add_cors_headers()
         for k, v in (extra_headers or {}).items():
-            if k.lower() != "content-type":
-                self.send_header(k, v)
+            kl = k.lower()
+            if kl == "content-type" or kl.startswith("access-control-"):
+                continue
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(payload)
 

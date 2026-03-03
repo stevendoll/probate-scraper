@@ -33,8 +33,11 @@ parameter_overrides = """
   ScraperUsername=REPLACE_ME
   ScraperPassword=REPLACE_ME
   BedrockModelId=us.amazon.nova-pro-v1:0
-  MagicLinkBaseUrl=https://d2ujyhjv7lyevl.cloudfront.net/auth/verify
-  FromEmail=hello@realestateleadsforpros.com
+  MagicLinkBaseUrl=https://collincountyleads.com/auth/verify
+  FromEmail=hello@collincountyleads.com
+  AcmCertificateArn=arn:aws:acm:us-east-1:600775874112:certificate/396a9f34-bb06-4414-97ed-16a71c44129b
+  UiDomainAliases=collincountyleads.com,www.collincountyleads.com
+  ApiDomainName=api.collincountyleads.com
 """
 # ── Sensitive values (keep out of version control) ────────────────────────
 # ScraperPassword has NoEcho=true in template.yaml so it won't appear in the
