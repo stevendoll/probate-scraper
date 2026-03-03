@@ -569,14 +569,105 @@ Resources:
             Method: DELETE
             Auth:
               ApiKeyRequired: false
-        # CORS preflight — browsers never send x-api-key in OPTIONS, so this
-        # catch-all must be exempt from API key auth.  The Lambda's CORSConfig
-        # returns 200 + CORS headers automatically for OPTIONS requests.
-        CorsPreflightProxy:
+        # ── CORS preflight OPTIONS ─────────────────────────────────────────
+        # Browsers never include x-api-key in preflight requests, so every path
+        # needs an explicit OPTIONS event with ApiKeyRequired: false.
+        # A {proxy+} catch-all cannot be used here because API Gateway prohibits
+        # sibling variable path parameters ({proxy+} vs {location_path}).
+        # The Lambda's CORSConfig returns 200 + CORS headers for all OPTIONS.
+        OptionsGetLeads:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/{proxy+}
+            Path: /real-estate/probate-leads/{location_path}/leads
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsListLocations:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/locations
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsGetLocation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/locations/{location_code}
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsUsers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/users
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/users/{user_id}
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsStripeWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/stripe/webhook
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAuthRequestLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/request-login
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAuthVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/verify
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAuthMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/me
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAuthLeads:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/leads
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAdminUsers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/users
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAdminUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/users/{user_id}
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
