@@ -8,6 +8,7 @@
 
 import type {
   AuthVerifyResponse,
+  FunnelSendResponse,
   LeadsResponse,
   LocationResponse,
   LocationsResponse,
@@ -169,4 +170,46 @@ export async function adminPatchUser(
 
 export async function adminDeleteUser(userId: string): Promise<UserResponse> {
   return authedFetch(`/admin/users/${userId}`, { method: 'DELETE' })
+}
+
+// ---------------------------------------------------------------------------
+// Funnel
+// ---------------------------------------------------------------------------
+
+export async function adminSendFunnel(
+  emails: string[],
+  leadCount: number,
+): Promise<FunnelSendResponse> {
+  return authedFetch('/admin/funnel/send', {
+    method: 'POST',
+    body: JSON.stringify({ emails, lead_count: leadCount }),
+  })
+}
+
+/** Called from the public /unsubscribe page — no API key or Bearer needed. */
+export async function unsubscribe(token: string): Promise<{ message: string }> {
+  const res = await fetch(`${BASE}/auth/unsubscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? 'Failed to unsubscribe')
+  }
+  return res.json() as Promise<{ message: string }>
+}
+
+/** Called from the public /signup page — no API key or Bearer needed. */
+export async function createCheckoutSession(token: string): Promise<{ url: string }> {
+  const res = await fetch(`${BASE}/stripe/checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? 'Failed to start checkout')
+  }
+  return res.json() as Promise<{ url: string }>
 }

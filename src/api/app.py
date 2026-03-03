@@ -11,6 +11,7 @@ Routes (all under /real-estate/probate-leads/):
   PATCH /users/{user_id}                    — update user (locations, status)
   DELETE /users/{user_id}                   — soft-delete user (status → inactive)
   POST /stripe/webhook                      — Stripe event webhook (no API key)
+  POST /stripe/checkout                     — create Stripe Checkout Session (no API key)
   POST /auth/request-login                  — request magic-link email
   GET  /auth/verify                         — exchange magic token for access token
   GET  /auth/me                             — own profile (Bearer token)
@@ -20,6 +21,9 @@ Routes (all under /real-estate/probate-leads/):
   GET  /admin/users/{user_id}               — get user (admin Bearer token)
   PATCH /admin/users/{user_id}              — update user (admin Bearer token)
   DELETE /admin/users/{user_id}             — soft-delete user (admin Bearer token)
+  POST /admin/funnel/send                   — send funnel emails to prospects (admin Bearer token)
+  POST /auth/unsubscribe                    — unsubscribe via funnel JWT (no API key)
+  POST /stripe/checkout                     — create Stripe Checkout Session (no API key)
 
 Environment variables:
   DYNAMO_TABLE_NAME       — leads table
@@ -31,6 +35,7 @@ Environment variables:
   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
   JWT_SECRET              — HMAC-SHA256 secret for magic + access tokens
   MAGIC_LINK_BASE_URL     — base URL for magic link emails
+  UI_BASE_URL             — base URL for funnel subscribe/unsubscribe links
   FROM_EMAIL              — SES verified sender; leave blank to skip sending (local dev)
 """
 
@@ -48,7 +53,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import leads, locations, users, stripe, auth, admin
+from routers import leads, locations, users, stripe, auth, admin, funnel
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -68,6 +73,7 @@ api.include_router(users.router)
 api.include_router(stripe.router)
 api.include_router(auth.router)
 api.include_router(admin.router)
+api.include_router(funnel.router)
 
 # ---------------------------------------------------------------------------
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)

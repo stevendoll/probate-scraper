@@ -40,7 +40,36 @@ def stripe_webhook():
     stripe_customer_id = data_object.get("customer") or data_object.get("id", "")
 
     # Map Stripe event type → our user status
-    if event_type == "customer.subscription.created":
+    if event_type == "checkout.session.completed":
+        # Link the Stripe customer to our user record.
+        # The subscription.created event fires next and sets status → active.
+        user_id            = data_object.get("client_reference_id", "")
+        stripe_customer_id = data_object.get("customer", "")
+        if not user_id:
+            logger.warning("checkout.session.completed missing client_reference_id")
+            return {"received": True, "action": "no_user_id"}, 200
+        try:
+            db.users_table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET stripe_customer_id = :cid, updated_at = :updated_at",
+                ExpressionAttributeValues={
+                    ":cid":        stripe_customer_id,
+                    ":updated_at": now_iso(),
+                },
+            )
+        except Exception as exc:
+            logger.error("users update stripe_customer_id failed: %s", exc)
+            return {"error": "Database error"}, 500
+        logger.info(
+            "checkout.session.completed user=%s stripe_customer=%s",
+            user_id, stripe_customer_id,
+        )
+        return {
+            "received": True,
+            "action":   "customer_linked",
+            "userId":   user_id,
+        }
+    elif event_type == "customer.subscription.created":
         new_status = "active"
     elif event_type == "customer.subscription.updated":
         new_status = data_object.get("status", "active")

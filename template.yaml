@@ -125,6 +125,13 @@ Parameters:
       Custom domain for API Gateway, e.g. api.collincountyleads.com.
       Leave blank to skip custom domain creation.
 
+  UiBaseUrl:
+    Type: String
+    Default: "https://collincountyleads.com"
+    Description: >
+      Base URL of the React UI, used to build funnel subscribe/unsubscribe links
+      in marketing emails, e.g. https://collincountyleads.com.
+
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
@@ -152,6 +159,7 @@ Globals:
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         JWT_SECRET: !Ref JwtSecret
         MAGIC_LINK_BASE_URL: !Ref MagicLinkBaseUrl
+        UI_BASE_URL: !Ref UiBaseUrl
         FROM_EMAIL: !Ref FromEmail
 
 # ---------------------------------------------------------------------------
@@ -618,6 +626,31 @@ Resources:
             Method: DELETE
             Auth:
               ApiKeyRequired: false
+        # Funnel — admin send + public unsubscribe/checkout (no API key)
+        AdminFunnelSend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/funnel/send
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+        AuthUnsubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/unsubscribe
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+        StripeCheckout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/stripe/checkout
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
         # ── CORS preflight OPTIONS ─────────────────────────────────────────
         # Browsers never include x-api-key in preflight requests, so every path
         # needs an explicit OPTIONS event with ApiKeyRequired: false.
@@ -717,6 +750,30 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/users/{user_id}
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAdminFunnelSend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/funnel/send
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAuthUnsubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/unsubscribe
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsStripeCheckout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/stripe/checkout
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false

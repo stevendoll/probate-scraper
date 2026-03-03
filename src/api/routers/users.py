@@ -19,7 +19,7 @@ from utils import now_iso
 logger = Logger(service="probate-api")
 router = Router()
 
-_VALID_STATUSES = {"active", "inactive", "canceled", "past_due", "trialing"}
+_VALID_STATUSES = {"active", "inactive", "canceled", "past_due", "trialing", "free_trial", "unsubscribed"}
 
 
 @router.get("/real-estate/probate-leads/users")
