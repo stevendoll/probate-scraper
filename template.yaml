@@ -101,12 +101,38 @@ Parameters:
     Description: >
       S3 bucket name for the React SPA static assets.
       Leave blank to let CloudFormation generate a unique name.
+
+  AcmCertificateArn:
+    Type: String
+    Default: ""
+    Description: >
+      ACM certificate ARN (must be in us-east-1) covering collincountyleads.com,
+      www.collincountyleads.com, and api.collincountyleads.com.
+      Leave blank to use the default CloudFront certificate (*.cloudfront.net).
+
+  UiDomainAliases:
+    Type: String
+    Default: ""
+    Description: >
+      Comma-separated custom domain names for the CloudFront distribution,
+      e.g. collincountyleads.com,www.collincountyleads.com.
+      Leave blank to use the default CloudFront domain.
+
+  ApiDomainName:
+    Type: String
+    Default: ""
+    Description: >
+      Custom domain for API Gateway, e.g. api.collincountyleads.com.
+      Leave blank to skip custom domain creation.
+
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
 Conditions:
   HasDocumentsBucketName: !Not [!Equals [!Ref DocumentsBucketName, ""]]
   HasUiBucketName: !Not [!Equals [!Ref UiBucketName, ""]]
+  HasUiDomains: !Not [!Equals [!Ref UiDomainAliases, ""]]
+  HasApiDomain: !Not [!Equals [!Ref ApiDomainName, ""]]
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -383,6 +409,29 @@ Resources:
           Throttle:
             RateLimit: 10
             BurstLimit: 20
+
+  # ── API Gateway custom domain (api.collincountyleads.com) ─────────────────
+  # Edge-optimized: API Gateway manages a CloudFront distribution internally.
+  # In Cloudflare, CNAME api.collincountyleads.com → ApiCustomDomainTarget
+  # output value, with Proxy set to DNS-only (gray cloud).
+
+  ApiCustomDomain:
+    Type: AWS::ApiGateway::DomainName
+    Condition: HasApiDomain
+    Properties:
+      DomainName: !Ref ApiDomainName
+      CertificateArn: !Ref AcmCertificateArn
+      EndpointConfiguration:
+        Types: [EDGE]
+      SecurityPolicy: TLS_1_2
+
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: HasApiDomain
+    Properties:
+      DomainName: !Ref ApiCustomDomain
+      RestApiId: !Ref ProbateApi
+      Stage: prod
 
   # ── Lambda — API (leads + locations + users + stripe + auth + admin) ───────
 
@@ -870,6 +919,16 @@ Resources:
         DefaultRootObject: index.html
         PriceClass: PriceClass_100
         HttpVersion: http2
+        Aliases: !If
+          - HasUiDomains
+          - !Split [",", !Ref UiDomainAliases]
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasUiDomains
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
         Origins:
           - Id: UiS3Origin
             DomainName: !GetAtt UiBucket.RegionalDomainName
@@ -947,4 +1006,10 @@ Outputs:
   UiUrl:
     Description: Public HTTPS URL for the React SPA
     Value: !Sub "https://${UiDistribution.DomainName}"
+
+  ApiCustomDomainTarget:
+    Condition: HasApiDomain
+    Description: >
+      CNAME target for api.collincountyleads.com in Cloudflare (Proxy: DNS only / gray cloud).
+    Value: !GetAtt ApiCustomDomain.DistributionDomainName
 
