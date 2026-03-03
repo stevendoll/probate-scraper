@@ -33,9 +33,6 @@ parameter_overrides = """
   ScraperUsername=REPLACE_ME
   ScraperPassword=REPLACE_ME
   BedrockModelId=us.amazon.nova-pro-v1:0
-  # JwtSecret is injected at deploy time by reading from SSM — not set here.
-  # For local deploys: make deploy reads it automatically via AWS CLI.
-  # For CI/CD: deploy.yml reads it and passes --parameter-overrides JwtSecret=...
   MagicLinkBaseUrl=https://d2ujyhjv7lyevl.cloudfront.net/auth/verify
   FromEmail=hello@realestateleadsforpros.com
 """
