@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Git workflow
 
-- Continue pushing commits to the existing branch, even after a PR is open. Each new piece of work gets its own branch and PR.
+- Always push commits to the current branch. Never create a new branch unless explicitly told to.
 
 ## Commands
 
