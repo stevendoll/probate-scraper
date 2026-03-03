@@ -280,7 +280,7 @@ def test_auth_cors() -> None:
         },
         timeout=TIMEOUT,
     )
-    if check("OPTIONS /auth/request-login (no API key) → 200", r.status_code == 200, _snippet(r)):
+    if check("OPTIONS /auth/request-login (no API key) → 200 or 204", r.status_code in (200, 204), _snippet(r)):
         check(
             "CORS: access-control-allow-origin present",
             "access-control-allow-origin" in r.headers,
