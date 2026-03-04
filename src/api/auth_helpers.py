@@ -17,6 +17,7 @@ signature verification in stripe_helpers.py).
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import boto3
 import jwt
@@ -163,41 +164,16 @@ def send_funnel_email(
         )
         lead_rows_text += f"  {grantor}  |  {date}  |  {doc_num}\n"
 
-    html_body = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family:Arial,sans-serif;color:#111;max-width:600px;margin:0 auto;padding:24px">
-  <h2 style="color:#1d4ed8">Collin County Probate Leads</h2>
-  <p>Here is a sample of recent probate leads in Collin County, TX:</p>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
-    <thead>
-      <tr style="background:#f3f4f6">
-        <th style="padding:8px 12px;text-align:left">Grantor</th>
-        <th style="padding:8px 12px;text-align:left">Recorded Date</th>
-        <th style="padding:8px 12px;text-align:left">Doc Number</th>
-      </tr>
-    </thead>
-    <tbody>
-      {lead_rows_html}
-    </tbody>
-  </table>
-  <p>
-    Subscribe for <strong>${price}/month</strong> to receive daily leads delivered to your
-    dashboard.
-  </p>
-  <p style="margin:24px 0">
-    <a href="{subscribe_url}"
-       style="background:#1d4ed8;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold">
-      Subscribe for ${price}/mo
-    </a>
-  </p>
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0">
-  <p style="font-size:12px;color:#6b7280">
-    You received this because your email was submitted for a free trial.
-    <a href="{unsubscribe_url}" style="color:#6b7280">Unsubscribe</a>
-  </p>
-</body>
-</html>"""
+    # Load HTML template from file
+    template_path = Path(__file__).parent.parent.parent / "templates" / "prospect_email_v1.html"
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            html_template = f.read()
+    except FileNotFoundError:
+        log.error("Funnel email template not found at %s", template_path)
+        raise
+    
+    html_body = html_template.replace("{lead_rows_html}", lead_rows_html).replace("{price}", str(price)).replace("{subscribe_url}", subscribe_url).replace("{unsubscribe_url}", unsubscribe_url)
 
     text_body = (
         f"Collin County Probate Leads\n\n"
