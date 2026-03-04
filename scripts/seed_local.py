@@ -200,7 +200,7 @@ def seed_users():
         TableName=USERS_TABLE_NAME,
         Item={k: serializer.serialize(v) for k, v in {
             "user_id":        "00000000-0000-0000-0000-000000000001",
-            "email":          "admin@example.com",
+            "email":          "admin@collincountyleads.com",
             "role":           "admin",
             "status":         "active",
             "location_codes": ["CollinTx"],

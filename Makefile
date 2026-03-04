@@ -18,15 +18,15 @@ CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy deploy-ui \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
-        aws-db-reset local-api-start local-scraper-run test smoke-test check-bedrock \
-        create-jwt-secret
+        aws-db-reset local-api-start local-scraper-run start-all test smoke-test check-bedrock \
+        create-jwt-secret email-setup
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
-                    AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
                     DYNAMO_TABLE_NAME=leads \
                     LOCATIONS_TABLE_NAME=locations \
-                    SUBSCRIBERS_TABLE_NAME=subscribers
+                    SUBSCRIBERS_TABLE_NAME=subscribers \
+                    FROM_EMAIL=hello@collincountyleads.com
 
 # Scraper local-run defaults — override on the command line or via env:
 #   SCRAPER_USERNAME=you@example.com SCRAPER_PASSWORD='p@ss' make local-scraper-run
@@ -42,6 +42,7 @@ help:
 	@echo "  Probate Scraper — make targets"
 	@echo ""
 	@echo "  Local development:"
+	@echo "    start-all        Start database, API, and UI (in background)"
 	@echo "    local-db-start   Start DynamoDB Local (Docker)"
 	@echo "    local-db-stop    Stop DynamoDB Local"
 	@echo "    local-db-seed    Create tables + load CSV data + seed locations"
@@ -52,6 +53,7 @@ help:
 	@echo "    test             Run unit tests"
 	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
 	@echo "    check-bedrock    Verify Bedrock model access before deploying ParseDocumentFunction"
+	@echo "    email-setup      Configure email for local development"
 	@echo ""
 	@echo "  Setup (one-time):"
 	@echo "    ecr-create       Create the ECR repository"
@@ -210,6 +212,49 @@ invoke-api:
 local-api-start:
 	pipenv run python scripts/local_api_server.py
 
+start-all:
+	@echo "Starting database, API, and UI..."
+	@if curl -s http://localhost:8000 > /dev/null 2>&1; then \
+		echo "Database already running"; \
+	else \
+		$(MAKE) local-db-start; \
+		echo "Waiting for database to be ready..."; \
+		sleep 3; \
+	fi
+	@echo "Seeding database..."
+	$(MAKE) local-db-seed
+	@if pgrep -f "scripts/local_api_server.py" > /dev/null; then \
+		echo "API server already running"; \
+	else \
+		echo "Starting API server..."; \
+		$(MAKE) local-api-start & \
+		API_PID=$$!; \
+		echo "API PID: $$API_PID"; \
+		sleep 5; \
+	fi
+	@if curl -s http://localhost:3001 > /dev/null 2>&1; then \
+		echo "UI already running"; \
+	else \
+		echo "Starting UI..."; \
+		(cd ui && npm run dev) & \
+		UI_PID=$$!; \
+		echo "UI PID: $$UI_PID"; \
+	fi
+	@echo ""; \
+	echo "Services status:"; \
+	echo "  - Database: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000 2>/dev/null || echo "NOT RUNNING")"; \
+	echo "  - API: $$(pgrep -f "scripts/local_api_server.py" > /dev/null && echo "RUNNING" || echo "NOT RUNNING")"; \
+	echo "  - UI: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001 2>/dev/null || echo "NOT RUNNING")"; \
+	echo ""; \
+	echo "Access URLs:"; \
+	echo "  - Database: http://localhost:8000"; \
+	echo "  - API: http://localhost:8000"; \
+	echo "  - UI: http://localhost:3001"; \
+	echo ""; \
+	echo "To stop all services:"; \
+	echo "  - Database: make local-db-stop"; \
+	echo "  - API/UI: pkill -f 'local_api_server.py\|vite --port 3001'"
+
 local-scraper-run:
 	@set -a; [ -f .env ] && source .env; set +a; \
 	$(LOCAL_ENV) \
@@ -282,3 +327,31 @@ local-db-shell:
 		--table-name leads \
 		--endpoint-url $(LOCAL_DYNAMO_URL) \
 		--select COUNT
+
+# ── Email Setup ─────────────────────────────────────────────────────────────
+
+email-setup:
+	@echo "=== Email Configuration for Local Development ==="
+	@echo ""
+	@echo "Current AWS Identity:"
+	@aws sts get-caller-identity --query 'Account' --output text | sed 's/^/  Account: /'
+	@echo ""
+	@echo "Verified SES Identities:"
+	@aws ses list-identities --query 'Identities[]' --output text | sed 's/^/  - /'
+	@echo ""
+	@echo "Current FROM_EMAIL setting:"
+	@if [ -z "$$FROM_EMAIL" ]; then \
+		echo "  FROM_EMAIL is not set (emails will be logged to console)"; \
+	else \
+		echo "  FROM_EMAIL=$$FROM_EMAIL"; \
+	fi
+	@echo ""
+	@echo "Default behavior: Emails are sent via SES using hello@collincountyleads.com"
+	@echo ""
+	@echo "To change email address:"
+	@echo "  export FROM_EMAIL=\"your-verified-email@domain.com\""
+	@echo "  make local-api-start"
+	@echo ""
+	@echo "To disable email sending (console logging only):"
+	@echo "  export FROM_EMAIL=\"\""
+	@echo "  make local-api-start"

@@ -182,7 +182,8 @@ def admin_funnel_send():
                 "stripe_customer_id":     "",
                 "stripe_subscription_id": "",
                 "status":                 "free_trial",
-                "location_codes":         set(),
+                # location_codes omitted intentionally — DynamoDB rejects empty sets.
+                # User.from_dynamo() defaults to set() when the field is absent.
                 "offered_price":          price,
                 "created_at":             now,
                 "updated_at":             now,
