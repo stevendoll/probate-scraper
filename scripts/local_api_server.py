@@ -35,9 +35,11 @@ from urllib.parse import parse_qs, urlparse
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 # ── env vars (must be set before importing app) ────────────────────────────────
+# Use real AWS credentials for SES, but local DynamoDB
 os.environ.setdefault("AWS_ENDPOINT_URL_DYNAMODB", "http://localhost:8000")
-os.environ.setdefault("AWS_ACCESS_KEY_ID",       "local")
-os.environ.setdefault("AWS_SECRET_ACCESS_KEY",   "local")
+# Don't override AWS credentials - use real ones from environment for SES
+# os.environ.setdefault("AWS_ACCESS_KEY_ID",       "local")
+# os.environ.setdefault("AWS_SECRET_ACCESS_KEY",   "local")
 os.environ.setdefault("AWS_DEFAULT_REGION",      "us-east-1")
 os.environ.setdefault("DYNAMO_TABLE_NAME",       "leads")
 os.environ.setdefault("LOCATIONS_TABLE_NAME",    "locations")
@@ -47,7 +49,7 @@ os.environ.setdefault("LOCATION_DATE_GSI",       "location-date-index")
 os.environ.setdefault("STRIPE_SECRET_KEY",       "")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET",   "")
 os.environ.setdefault("JWT_SECRET",          "dev-secret-change-in-prod")
-os.environ.setdefault("FROM_EMAIL",          "")
+os.environ.setdefault("FROM_EMAIL",          "hello@collincountyleads.com")  # Default to verified SES email
 os.environ.setdefault("MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify")
 os.environ.setdefault("UI_BASE_URL",         "http://localhost:3001")
 os.environ.setdefault("POWERTOOLS_TRACE_DISABLED", "true")
