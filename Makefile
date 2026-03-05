@@ -310,15 +310,21 @@ local-db-seed:
 	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
 
 local-db-reset:
-	@echo "Dropping and recreating 'leads' table in DynamoDB Local..."
+	@echo "Dropping and recreating all tables in DynamoDB Local..."
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name leads \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
-	@sleep 1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name locations \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name users \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name subscribers \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	@sleep 2
 	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
 	@echo "Reset complete."
 
 aws-db-reset:
-	@echo "Deleting all items from production 'leads' table..."
+	@echo "Dropping and recreating all tables in production DynamoDB..."
 	pipenv run python3 scripts/reset_leads.py
 	@echo "Reset complete."
 

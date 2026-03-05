@@ -16,7 +16,8 @@ ECS Fargate — Selenium scraper (Docker)
 DynamoDB
   ├── leads          (doc_number PK | location-date-index GSI)
   ├── locations      (location_code PK | location-path-index GSI)
-  └── users          (user_id PK | email-index GSI)
+  ├── users          (user_id PK | email-index GSI)
+  └── activities     (activity_id PK | user-activity-index GSI)
     │
     ▼
 API Gateway (api.collincountyleads.com)
@@ -26,12 +27,18 @@ API Gateway (api.collincountyleads.com)
     │     GET  /locations
     │     GET  /locations/{location_code}
     │     GET/POST/PATCH/DELETE  /users
-    │     POST /auth/request-login   (magic link)
+    │     POST /auth/request-login   (magic link + inbound user creation)
     │     GET  /auth/verify          (exchange token)
     │     GET/PATCH  /auth/me        (own profile)
     │     GET  /auth/leads           (own leads)
     │     GET/PATCH/DELETE  /admin/users
+    │     POST /admin/funnel/send    (send funnel emails)
+    │     POST /admin/activity/log   (log activities)
+    │     POST /admin/activity/query (query activities)
+    │     POST /activity/track       (track funnel clicks)
     │     POST /stripe/webhook       (no API key — Stripe signature)
+    │     POST /auth/unsubscribe     (funnel unsubscribe)
+    │     POST /stripe/checkout      (Stripe checkout)
     │
     └── Lambda TriggerFunction
           POST /{location_path}/update  → runs Fargate scrape task
@@ -49,6 +56,7 @@ All API paths are prefixed with `/real-estate/probate-leads/`.
 | `leads` | `doc_number` | `recorded-date-index`, `location-date-index` | Scraped probate records |
 | `locations` | `location_code` | `location-path-index` | Supported counties |
 | `users` | `user_id` | `email-index` | Magic-link authenticated users |
+| `activities` | `activity_id` | `user-activity-index` | User funnel activity tracking |
 
 Leads carry a `location_code` FK. The `location-date-index` GSI (`location_code` HASH + `recorded_date` RANGE) is the primary query path.
 
@@ -71,6 +79,7 @@ The React SPA lives in `ui/` and is built with Vite + React + TailwindCSS + shad
 | `/` | `Landing` | Marketing landing page |
 | `/login` | `Login` | Magic-link sign-in form |
 | `/auth/verify` | `AuthVerify` | Exchanges magic token for access token, redirects to dashboard |
+| `/signup` | `Signup` | Funnel signup page with pricing |
 | `/dashboard` | `Dashboard` | Leads table with date-range filters and CSV export |
 | `/account` | `Account` | Edit email, view subscription status |
 | `/admin/users` | `admin/Users` | Admin: list and manage all users |
@@ -89,12 +98,16 @@ The React SPA lives in `ui/` and is built with Vite + React + TailwindCSS + shad
 ### Auth flow
 
 1. User submits email on `/login` → `POST /auth/request-login`
-2. API sends a magic link to the email (SES)
-3. User clicks the link → `/auth/verify?token=<jwt>`
+   - **New users**: Created with "inbound" status, CollinTx location, funnel email sent
+   - **Existing users**: Magic link sent
+2. API sends a magic link to the email (SES) or funnel email for new users
+3. User clicks the link → `/auth/verify?token=<jwt>` or `/signup?token=<funnel_jwt>`
 4. `AuthVerify` exchanges the token → API returns an access token stored in `localStorage`
 5. Authenticated requests use `Authorization: Bearer <token>`
 
-Tokens are short-lived JWTs signed with `JWT_SECRET`. Magic-link tokens expire in 15 minutes; access tokens expire in 7 days.
+**User Status Flow**: `inbound` → `prospect` → `free_trial` → `active`
+
+Tokens are short-lived JWTs signed with `JWT_SECRET`. Magic-link tokens expire in 15 minutes; access tokens expire in 7 days; funnel tokens expire in 30 days.
 
 ### Local development
 
@@ -177,6 +190,28 @@ curl -X POST $BASE/auth/request-login \
   -H "Content-Type: application/json" \
   -d '{"email":"you@example.com"}'
 
+# Request a magic link with name parsing
+curl -X POST $BASE/auth/request-login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"John Doe <john@example.com>"}'
+
+# Send funnel emails to prospects (admin)
+curl -X POST $BASE/admin/funnel/send \
+  -H "x-api-key: <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"emails": ["John Doe <john@example.com>", "jane@example.com"], "lead_count": 10}'
+
+# Query user activities (admin)
+curl -X POST $BASE/admin/activity/query \
+  -H "x-api-key: <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "user-uuid", "limit": 50}'
+
+# Track funnel link click (public)
+curl -X POST $BASE/activity/track \
+  -H "Content-Type: application/json" \
+  -d '{"token": "funnel.jwt.token", "activity_type": "subscribe_clicked"}'
+
 # Create a user (admin)
 curl -X POST $BASE/users \
   -H "x-api-key: <key>" \
@@ -237,7 +272,7 @@ Response:
 | `PATCH` | `/users/{user_id}` | API key | Update `location_codes` and/or `status` |
 | `DELETE` | `/users/{user_id}` | API key | Soft-delete (status → `inactive`) |
 
-User statuses: `active` | `inactive` | `canceled` | `past_due`
+User statuses: `inbound` | `prospect` | `free_trial` | `active` | `inactive` | `canceled` | `past_due`
 
 ### Auth
 
@@ -245,11 +280,27 @@ No API key required. All auth routes are public.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/auth/request-login` | Send a magic link to the given email |
+| `POST` | `/auth/request-login` | Send a magic link to the given email (creates inbound users) |
 | `GET` | `/auth/verify?token=<jwt>` | Exchange magic token for access token |
 | `GET` | `/auth/me` | Get own user profile (Bearer token) |
 | `PATCH` | `/auth/me` | Update own email (Bearer token) |
 | `GET` | `/auth/leads` | Get own leads (Bearer token, active users only) |
+| `POST` | `/auth/unsubscribe` | Unsubscribe via funnel JWT (no API key) |
+
+### Funnel
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/admin/funnel/send` | API key | Send funnel emails to prospects |
+| `POST` | `/stripe/checkout` | No key | Create Stripe checkout session |
+
+### Activity Tracking
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/admin/activity/log` | API key | Log user activity manually |
+| `POST` | `/admin/activity/query` | API key | Query user activities |
+| `POST` | `/activity/track` | No key | Track funnel link clicks (token-based) |
 
 ### Admin
 
@@ -278,6 +329,54 @@ Handled events:
 | `invoice.payment_failed` | `past_due` |
 
 Users are matched by `stripe_customer_id`.
+
+## Activity Tracking
+
+The system tracks the complete user funnel journey for analytics and optimization:
+
+### Activity Types
+- `email_sent` - When funnel emails are sent
+- `magic_link_sent` - When login magic links are sent  
+- `subscribe_clicked` - When subscribe links in emails are clicked
+- `unsubscribe_clicked` - When unsubscribe links are clicked
+- `signup_started` - When user begins signup process
+- `signup_completed` - When user completes signup
+- `payment_completed` - When payment succeeds
+
+### Tracking Data
+```json
+{
+  "activity_id": "uuid",
+  "user_id": "uuid", 
+  "activity_type": "email_sent",
+  "timestamp": "2026-03-05T12:00:00Z",
+  "email_template": "prospect_email_v1.html",
+  "from_name": "John Smith",
+  "subject_line": "Your probate leads are ready",
+  "funnel_token": "jwt.token.here",
+  "metadata": {
+    "to_email": "user@example.com",
+    "price": 19,
+    "lead_count": 10,
+    "personalized": true,
+    "user_agent": "Mozilla/5.0...",
+    "ip": "192.168.1.1"
+  }
+}
+```
+
+### Frontend Integration
+```javascript
+// Track link clicks in emails
+fetch('/real-estate/probate-leads/activity/track', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    token: funnelToken,
+    activity_type: 'subscribe_clicked'
+  })
+});
+```
 
 ## Stripe Integration
 
@@ -368,6 +467,7 @@ ui/
       Landing.tsx         # Marketing landing page
       Login.tsx           # Magic-link sign-in
       AuthVerify.tsx      # Token exchange + redirect
+      Signup.tsx          # Funnel signup with pricing
       Dashboard.tsx       # Leads table
       Account.tsx         # User profile
       admin/
@@ -385,7 +485,9 @@ ui/
 src/
   api/
     app.py                # Lambda handler — all API routes
-    routers/              # leads, locations, users, auth, admin, stripe
+    routers/              # leads, locations, users, auth, admin, stripe, funnel, activity
+    auth_helpers.py       # JWT helpers + email sending + activity tracking
+    models.py             # Lead, Location, User, Activity dataclasses
     stripe_helpers.py     # Stripe webhook signature verification
     requirements.txt
   scraper/
@@ -406,6 +508,7 @@ scripts/
 tests/
   test_api.py
   test_auth.py
+  test_funnel.py
   test_locations.py
   test_users.py
   test_dynamo.py
@@ -415,4 +518,5 @@ template.yaml             # SAM / CloudFormation
 samconfig.toml            # Deploy configuration
 docker-compose.yml        # DynamoDB Local
 Makefile
+ACTIVITY_TRACKING_PLAN.md # Comprehensive activity tracking documentation
 ```

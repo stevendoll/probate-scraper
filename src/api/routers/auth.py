@@ -17,8 +17,10 @@ from boto3.dynamodb.conditions import Key
 import db
 from auth_helpers import (
     create_access_token,
+    create_funnel_token,
     create_magic_token,
     get_bearer_payload,
+    send_funnel_email,
     send_magic_link,
     verify_token,
 )
@@ -54,6 +56,74 @@ def _get_user_by_id(user_id: str) -> dict | None:
         return None
 
 
+def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") -> dict:
+    """Create a new user with 'inbound' status and CollinTx location."""
+    user_id = str(uuid.uuid4())
+    now = now_iso()
+    
+    user_item = {
+        "user_id":                user_id,
+        "email":                  email,
+        "first_name":             first_name,
+        "last_name":              last_name,
+        "role":                   "user",
+        "stripe_customer_id":     "",
+        "stripe_subscription_id": "",
+        "status":                 "inbound",
+        "location_codes":         {"COLLIN_TX"},
+        "offered_price":          19,  # Default starting price
+        "created_at":             now,
+        "updated_at":             now,
+    }
+    
+    try:
+        db.users_table.put_item(Item=user_item)
+        logger.info("Created inbound user: %s", email)
+        return user_item
+    except Exception as exc:
+        logger.error("Failed to create inbound user %s: %s", email, exc)
+        raise
+
+
+def _fetch_sample_leads(count: int = 10) -> list:
+    """Fetch sample leads for funnel email."""
+    try:
+        # Query Collin TX for recent leads
+        result = db.table.query(
+            IndexName=db.location_date_gsi,
+            KeyConditionExpression=Key("location_code").eq("COLLIN_TX"),
+            ScanIndexForward=False,
+            Limit=count,
+        )
+        return result.get("Items", [])
+    except Exception as exc:
+        logger.error("Failed to fetch sample leads: %s", exc)
+        return []
+
+
+def _parse_email_name(email_input: str) -> tuple[str, str, str]:
+    """Parse email in 'Name <email@domain.com>' format."""
+    email_input = email_input.strip().lower()
+    
+    if "<" in email_input and ">" in email_input:
+        # Extract name and email
+        name_part = email_input.split("<")[0].strip()
+        clean_email = email_input.split("<")[1].split(">")[0].strip()
+        
+        # Simple name parsing
+        if " " in name_part:
+            name_parts = name_part.split()
+            first_name = name_parts[0].capitalize()
+            last_name = name_parts[-1].capitalize() if len(name_parts) > 1 else ""
+        else:
+            first_name = name_part.capitalize()
+            last_name = ""
+        
+        return clean_email, first_name, last_name
+    else:
+        return email_input, "", ""
+
+
 # ---------------------------------------------------------------------------
 # POST /auth/request-login
 # ---------------------------------------------------------------------------
@@ -66,16 +136,36 @@ def request_login():
     except Exception:
         return {"error": "Invalid JSON body"}, 400
 
-    email = (body.get("email") or "").strip().lower()
-    if not email:
+    email_input = (body.get("email") or "").strip()
+    if not email_input:
         return {"error": "'email' is required"}, 400
 
-    user = _get_user_by_email(email)
+    # Parse email to extract name and clean email
+    clean_email, first_name, last_name = _parse_email_name(email_input)
+    
+    user = _get_user_by_email(clean_email)
     if user:
-        token = create_magic_token(email)
-        send_magic_link(email, token)
+        # Existing user - send magic link
+        token = create_magic_token(clean_email)
+        send_magic_link(clean_email, token)
+        logger.info("Magic link sent to existing user: %s", clean_email)
     else:
-        logger.info("Magic link requested for unknown email: %s", email)
+        # New user - create inbound user and send funnel email
+        try:
+            # Create the user
+            user = _create_inbound_user(clean_email, first_name, last_name)
+            
+            # Send funnel email
+            leads_raw = _fetch_sample_leads(10)
+            leads_dicts = [Lead.from_dynamo(item).to_dict() for item in leads_raw]
+            
+            funnel_token = create_funnel_token(user["user_id"], clean_email, user["offered_price"])
+            send_funnel_email(clean_email, funnel_token, leads_dicts, user["offered_price"], first_name, last_name, user["user_id"])
+            
+            logger.info("Created inbound user and sent funnel email: %s", clean_email)
+        except Exception as exc:
+            logger.error("Failed to create inbound user or send funnel email for %s: %s", clean_email, exc)
+            # Still return 200 to prevent email enumeration
 
     return {"message": "If that email is registered, a login link has been sent."}, 200
 

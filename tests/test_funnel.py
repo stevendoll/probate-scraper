@@ -57,6 +57,7 @@ with patch("boto3.resource", return_value=MagicMock()), \
     import app        # noqa: E402
     import db         # noqa: E402
     import auth_helpers  # noqa: E402
+    import routers.funnel as funnel_module  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tests.fixtures.users import ALICE
@@ -102,6 +103,107 @@ def _admin_bearer() -> dict:
 
 
 BASE = "/real-estate/probate-leads"
+
+
+# ---------------------------------------------------------------------------
+# routers.funnel — _parse_name helper
+# ---------------------------------------------------------------------------
+
+class TestParseName(unittest.TestCase):
+
+    def test_simple_first_last(self):
+        first, last = funnel_module._parse_name("John Doe")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Doe")
+
+    def test_lowercase_names(self):
+        first, last = funnel_module._parse_name("john doe")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Doe")
+
+    def test_with_middle_initial(self):
+        first, last = funnel_module._parse_name("john T. doe")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Doe")
+
+    def test_compound_last_name_van(self):
+        first, last = funnel_module._parse_name("Martin Van Buren")
+        self.assertEqual(first, "Martin")
+        self.assertEqual(last, "Van Buren")
+
+    def test_apostrophe_name(self):
+        first, last = funnel_module._parse_name("Ann D'Souza")
+        self.assertEqual(first, "Ann")
+        self.assertEqual(last, "D'Souza")
+
+    def test_hyphenated_first_name(self):
+        first, last = funnel_module._parse_name("Mary-Jane O'Connor")
+        self.assertEqual(first, "Mary-Jane")
+        self.assertEqual(last, "O'Connor")
+
+    def test_single_name_only(self):
+        first, last = funnel_module._parse_name("Cher")
+        self.assertEqual(first, "Cher")
+        self.assertEqual(last, "")
+
+    def test_with_prefixes(self):
+        first, last = funnel_module._parse_name("Dr. John Smith")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Smith")
+
+    def test_with_suffixes(self):
+        first, last = funnel_module._parse_name("John Smith Jr.")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Smith")
+
+    def test_with_prefix_and_suffix(self):
+        first, last = funnel_module._parse_name("Dr. John Smith Jr.")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Smith")
+
+    def test_empty_string(self):
+        first, last = funnel_module._parse_name("")
+        self.assertEqual(first, "")
+        self.assertEqual(last, "")
+
+    def test_none_input(self):
+        first, last = funnel_module._parse_name(None)
+        self.assertEqual(first, "")
+        self.assertEqual(last, "")
+
+    def test_multiple_middle_names(self):
+        first, last = funnel_module._parse_name("John Michael Andrew Smith")
+        self.assertEqual(first, "John")
+        self.assertEqual(last, "Smith")
+
+    def test_mixed_case_compound(self):
+        first, last = funnel_module._parse_name("martin van buren")
+        self.assertEqual(first, "Martin")
+        self.assertEqual(last, "Van Buren")
+
+    def test_capitalize_helper_apostrophe(self):
+        result = funnel_module._capitalize_name("d'souza")
+        self.assertEqual(result, "D'Souza")
+
+    def test_capitalize_helper_hyphen(self):
+        result = funnel_module._capitalize_name("mary-jane")
+        self.assertEqual(result, "Mary-Jane")
+
+    def test_capitalize_helper_simple(self):
+        result = funnel_module._capitalize_name("john")
+        self.assertEqual(result, "John")
+
+    def test_capitalize_helper_initial(self):
+        result = funnel_module._capitalize_name("t.")
+        self.assertEqual(result, "T.")
+
+    def test_capitalize_helper_single_letter(self):
+        result = funnel_module._capitalize_name("a")
+        self.assertEqual(result, "A")
+
+    def test_capitalize_helper_empty(self):
+        result = funnel_module._capitalize_name("")
+        self.assertEqual(result, "")
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +361,7 @@ class TestAdminFunnelSend(unittest.TestCase):
         existing = copy.deepcopy(ALICE)
         self.mock_users_table.query.return_value = {"Items": [existing]}
         updated = copy.deepcopy(existing)
-        updated["status"] = "free_trial"
+        updated["status"] = "prospect"
         self.mock_users_table.update_item.return_value = {"Attributes": updated}
         with patch("routers.funnel.send_funnel_email"):
             resp = self._post({"emails": ["alice@example.com"]})
@@ -282,6 +384,89 @@ class TestAdminFunnelSend(unittest.TestCase):
         skipped = [r for r in body["results"] if r["status"] == "skipped"]
         self.assertEqual(len(sent), 1)
         self.assertEqual(len(skipped), 2)
+
+    def test_parses_email_with_name_format(self):
+        """Test that 'John Doe <john@email.com>' is parsed correctly."""
+        with patch("routers.funnel.send_funnel_email") as mock_send:
+            resp = self._post({"emails": ["John Doe <john@example.com>"]})
+        
+        body = _body(resp)
+        result = body["results"][0]
+        
+        # Check that clean email was used for user creation
+        self.assertEqual(result["email"], "john@example.com")
+        self.assertEqual(result["status"], "sent")
+        
+        # Check that user was created with parsed names
+        call_args = self.mock_users_table.put_item.call_args[1]
+        user_item = call_args["Item"]
+        self.assertEqual(user_item["email"], "john@example.com")
+        self.assertEqual(user_item["first_name"], "John")
+        self.assertEqual(user_item["last_name"], "Doe")
+        self.assertEqual(user_item["status"], "prospect")
+        self.assertEqual(user_item["location_codes"], {"COLLIN_TX"})
+
+    def test_parses_complex_name_formats(self):
+        """Test various complex name formats in email input."""
+        test_cases = [
+            # ("Dr. John Smith Jr. <john@example.com>", "John", "Smith"),
+            ("Martin Van Buren <martin@example.com>", "Martin", "Van Buren"),
+            ("Ann D'Souza <ann@example.com>", "Ann", "D'Souza"),
+            ("Mary-Jane O'Connor <mary@example.com>", "Mary-Jane", "O'Connor"),
+            ("john T. doe <john@example.com>", "John", "Doe"),
+        ]
+        
+        for email_input, expected_first, expected_last in test_cases:
+            with self.subTest(email=email_input):
+                # Reset all mocks to ensure clean state
+                self.mock_users_table.reset_mock()
+                self.mock_users_table.query.return_value = {"Items": []}
+                self.mock_users_table.put_item.return_value = {}
+                
+                with patch("routers.funnel.send_funnel_email"):
+                    resp = self._post({"emails": [email_input]})
+                
+                # Check user creation call
+                self.mock_users_table.put_item.assert_called_once()
+                call_args = self.mock_users_table.put_item.call_args[1]
+                user_item = call_args["Item"]
+                
+                self.assertEqual(user_item["first_name"], expected_first)
+                self.assertEqual(user_item["last_name"], expected_last)
+                self.assertEqual(user_item["email"], email_input.split("<")[1].split(">")[0].strip())
+
+    def test_sends_clean_email_to_ses(self):
+        """Test that only clean email address is passed to SES, not the full format."""
+        mock_ses = MagicMock()
+        
+        with patch("boto3.client", return_value=mock_ses):
+            with patch("routers.funnel.send_funnel_email") as mock_send:
+                resp = self._post({"emails": ["John Doe <john@example.com>"]})
+        
+        # Check that send_funnel_email was called with clean email
+        mock_send.assert_called_once()
+        send_call_args = mock_send.call_args[0]
+        self.assertEqual(send_call_args[0], "john@example.com")  # to_email parameter
+
+    def test_handles_email_without_brackets(self):
+        """Test that regular email format still works."""
+        with patch("routers.funnel.send_funnel_email") as mock_send:
+            resp = self._post({"emails": ["simple@example.com"]})
+        
+        body = _body(resp)
+        result = body["results"][0]
+        
+        self.assertEqual(result["email"], "simple@example.com")
+        self.assertEqual(result["status"], "sent")
+        
+        # Check that user was created without names
+        call_args = self.mock_users_table.put_item.call_args[1]
+        user_item = call_args["Item"]
+        self.assertEqual(user_item["email"], "simple@example.com")
+        self.assertEqual(user_item["first_name"], "")
+        self.assertEqual(user_item["last_name"], "")
+        self.assertEqual(user_item["status"], "prospect")
+        self.assertEqual(user_item["location_codes"], {"COLLIN_TX"})
 
 
 # ---------------------------------------------------------------------------

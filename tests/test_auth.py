@@ -285,11 +285,100 @@ class TestRequestLogin(unittest.TestCase):
             self._post({"email": "alice@example.com"})
             mock_send.assert_called_once()
 
-    def test_does_not_send_for_unknown_user(self):
+    def test_creates_inbound_user_for_unknown_email(self):
+        """New users should be created with 'inbound' status and get funnel email."""
         self.mock_table.query.return_value = {"Items": []}
-        with patch("routers.auth.send_magic_link") as mock_send:
-            self._post({"email": "nobody@example.com"})
-            mock_send.assert_not_called()
+        
+        # Mock Lead.from_dynamo to avoid serialization issues
+        with patch("routers.auth.Lead") as mock_lead, \
+             patch("routers.auth.send_funnel_email") as mock_funnel, \
+             patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
+            
+            mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
+            
+            self._post({"email": "new@example.com"})
+            
+            # Check that user was created
+            self.mock_table.put_item.assert_called_once()
+            call_args = self.mock_table.put_item.call_args[1]
+            user_item = call_args["Item"]
+            
+            self.assertEqual(user_item["email"], "new@example.com")
+            self.assertEqual(user_item["status"], "inbound")
+            
+            # Check that funnel email was sent
+            mock_funnel.assert_called_once()
+
+    def test_parses_name_from_email_format(self):
+        """Should parse 'John Doe <john@email.com>' format."""
+        self.mock_table.query.return_value = {"Items": []}
+        
+        with patch("routers.auth.Lead") as mock_lead, \
+             patch("routers.auth._create_inbound_user") as mock_create, \
+             patch("routers.auth.send_funnel_email"), \
+             patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
+            
+            mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
+            
+            self._post({"email": "John Doe <john@example.com>"})
+            
+            mock_create.assert_called_once_with("john@example.com", "John", "Doe")
+
+    def test_inbound_user_creation_details(self):
+        """Verify inbound user is created with correct attributes."""
+        self.mock_table.query.return_value = {"Items": []}
+        
+        with patch("routers.auth.Lead") as mock_lead, \
+             patch("routers.auth.send_funnel_email"), \
+             patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
+            
+            mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
+            
+            self._post({"email": "new@example.com"})
+            
+            # Check put_item was called with correct user data
+            self.mock_table.put_item.assert_called_once()
+            call_args = self.mock_table.put_item.call_args[1]
+            user_item = call_args["Item"]
+            
+            self.assertEqual(user_item["email"], "new@example.com")
+            self.assertEqual(user_item["status"], "inbound")
+            self.assertEqual(user_item["location_codes"], {"COLLIN_TX"})
+            self.assertEqual(user_item["offered_price"], 19)
+
+    def test_funnel_email_sent_to_new_user(self):
+        """Verify funnel email is sent with correct parameters."""
+        self.mock_table.query.return_value = {"Items": []}
+        
+        mock_user = {
+            "user_id": "test-user-id",
+            "email": "new@example.com",
+            "offered_price": 19,
+        }
+        
+        with patch("routers.auth.Lead") as mock_lead, \
+             patch("routers.auth._create_inbound_user", return_value=mock_user), \
+             patch("routers.auth.send_funnel_email") as mock_funnel, \
+             patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
+            
+            mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
+            
+            self._post({"email": "new@example.com"})
+            
+            # Verify funnel email was called
+            mock_funnel.assert_called_once()
+            call_args = mock_funnel.call_args[0]
+            
+            self.assertEqual(call_args[0], "new@example.com")  # email
+            self.assertEqual(call_args[3], 19)  # price
+
+    def test_error_handling_still_returns_200(self):
+        """Even if user creation fails, still return 200 to prevent enumeration."""
+        self.mock_table.query.return_value = {"Items": []}
+        
+        with patch("routers.auth._create_inbound_user", side_effect=Exception("DB error")):
+            resp = self._post({"email": "new@example.com"})
+            self.assertEqual(resp["statusCode"], 200)
 
 
 # ---------------------------------------------------------------------------

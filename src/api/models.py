@@ -163,9 +163,52 @@ class Location:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class Activity:
+    """User activity tracking for funnel journey."""
+    activity_id:    str = ""
+    user_id:        str = ""
+    activity_type:  str = ""  # email_sent, link_clicked, subscribe_clicked, unsubscribe_clicked, signup_completed
+    timestamp:      str = ""
+    email_template:  str = ""  # template file used
+    from_name:      str = ""  # from name used
+    subject_line:   str = ""  # subject line used
+    funnel_token:   str = ""  # funnel token for tracking
+    metadata:       dict = field(default_factory=dict)  # additional data
+
+    @classmethod
+    def from_dynamo(cls, item: dict) -> "Activity":
+        return cls(
+            activity_id=    item.get("activity_id", ""),
+            user_id=        item.get("user_id", ""),
+            activity_type=  item.get("activity_type", ""),
+            timestamp=      item.get("timestamp", ""),
+            email_template=  item.get("email_template", ""),
+            from_name=      item.get("from_name", ""),
+            subject_line=   item.get("subject_line", ""),
+            funnel_token=   item.get("funnel_token", ""),
+            metadata=       item.get("metadata", {}),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "activityId":    self.activity_id,
+            "userId":        self.user_id,
+            "activityType":  self.activity_type,
+            "timestamp":     self.timestamp,
+            "emailTemplate": self.email_template,
+            "fromName":      self.from_name,
+            "subjectLine":   self.subject_line,
+            "funnelToken":   self.funnel_token,
+            "metadata":      self.metadata,
+        }
+
+
+@dataclass
 class User:
     user_id:                str = ""
     email:                  str = ""
+    first_name:             str = ""
+    last_name:              str = ""
     role:                   str = "user"
     stripe_customer_id:     str = ""
     stripe_subscription_id: str = ""
@@ -181,6 +224,8 @@ class User:
         return cls(
             user_id=                item.get("user_id", ""),
             email=                  item.get("email", ""),
+            first_name=             item.get("first_name", ""),
+            last_name=              item.get("last_name", ""),
             role=                   item.get("role", "user"),
             stripe_customer_id=     item.get("stripe_customer_id", ""),
             stripe_subscription_id= item.get("stripe_subscription_id", ""),
@@ -196,6 +241,8 @@ class User:
         return {
             "userId":                self.user_id,
             "email":                 self.email,
+            "firstName":             self.first_name,
+            "lastName":              self.last_name,
             "role":                  self.role,
             "stripeCustomerId":      self.stripe_customer_id,
             "stripeSubscriptionId":  self.stripe_subscription_id,

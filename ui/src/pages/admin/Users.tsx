@@ -22,6 +22,7 @@ export default function AdminUsers() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
@@ -33,13 +34,19 @@ export default function AdminUsers() {
             <TableBody>
               {data.users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     No users found.
                   </TableCell>
                 </TableRow>
               )}
               {data.users.map((user) => (
                 <TableRow key={user.userId}>
+                  <TableCell>
+                    {user.firstName || user.lastName 
+                      ? `${user.firstName || ''} ${user.lastName || ''}`.trim() 
+                      : '—'
+                    }
+                  </TableCell>
                   <TableCell>{user.email}</TableCell>
                   <TableCell className="capitalize">{user.role}</TableCell>
                   <TableCell>

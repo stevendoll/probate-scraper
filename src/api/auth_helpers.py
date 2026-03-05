@@ -16,6 +16,8 @@ signature verification in stripe_helpers.py).
 
 import logging
 import os
+import random
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -59,22 +61,48 @@ def create_access_token(user_id: str, role: str) -> str:
 
 
 def create_funnel_token(user_id: str, email: str, price: int) -> str:
-    """Return a signed 30-day JWT for use in marketing funnel emails.
-
-    Payload claims:
-      sub   — user_id
-      email — prospect's email address
-      price — offered monthly price in dollars (int)
-      type  — "funnel"
-    """
+    """Return a signed 30-day JWT for funnel links."""
     payload = {
-        "sub":   user_id,
+        "sub":  user_id,
         "email": email,
         "price": price,
-        "type":  "funnel",
-        "exp":   datetime.now(timezone.utc) + timedelta(days=FUNNEL_TOKEN_EXPIRY_DAYS),
+        "type": "funnel",
+        "exp":  datetime.now(timezone.utc) + timedelta(days=FUNNEL_TOKEN_EXPIRY_DAYS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def log_activity(
+    user_id: str,
+    activity_type: str,
+    email_template: str = "",
+    from_name: str = "",
+    subject_line: str = "",
+    funnel_token: str = "",
+    metadata: dict = None,
+) -> None:
+    """Log user activity to activities table."""
+    if not metadata:
+        metadata = {}
+    
+    try:
+        import db
+        activity_id = str(uuid.uuid4())
+        activity_item = {
+            "activity_id":    activity_id,
+            "user_id":        user_id,
+            "activity_type":  activity_type,
+            "timestamp":      now_iso(),
+            "email_template":  email_template,
+            "from_name":      from_name,
+            "subject_line":   subject_line,
+            "funnel_token":   funnel_token,
+            "metadata":       metadata,
+        }
+        db.activities_table.put_item(Item=activity_item)
+        log.info("Activity logged: %s for user %s", activity_type, user_id)
+    except Exception as exc:
+        log.error("Failed to log activity: %s", exc)
 
 
 def verify_token(token: str) -> dict | None:
@@ -128,11 +156,25 @@ def send_magic_link(email: str, token: str) -> None:
         log.error("SES send_email failed: %s", exc)
 
 
+def _load_random_line_from_file(file_path: Path) -> str:
+    """Load a random line from a text file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+            return random.choice(lines) if lines else ""
+    except FileNotFoundError:
+        log.error("Template file not found: %s", file_path)
+        return ""
+
+
 def send_funnel_email(
     to_email: str,
     token: str,
     leads: list,
     price: int,
+    first_name: str = None,
+    last_name: str = None,
+    user_id: str = None,
 ) -> None:
     """Send a marketing funnel email with sample leads and subscribe/unsubscribe links.
 
@@ -140,14 +182,49 @@ def send_funnel_email(
     logged to console at INFO level and no SES call is made.
 
     Args:
-        to_email: Recipient email address.
+        to_email: Recipient email address (format: "John Doe <john@email.com>" or "john@email.com").
         token:    Signed funnel JWT (used to build subscribe/unsubscribe links).
         leads:    List of lead dicts with at least grantor, recordedDate, docNumber.
         price:    Offered monthly subscription price in dollars.
+        first_name: Optional first name for personalization.
+        last_name: Optional last name for personalization.
+        user_id:  User ID for activity tracking.
     """
     subscribe_url   = f"{UI_BASE_URL}/signup?token={token}"
     unsubscribe_url = f"{UI_BASE_URL}/unsubscribe?token={token}"
 
+    # Load random email components
+    templates_dir = Path(__file__).parent.parent.parent / "templates"
+    
+    # Parse email address to extract name if available
+    email_address = to_email
+    if "<" in to_email and ">" in to_email:
+        # Format: "John Doe <john@email.com>"
+        name_part = to_email.split("<")[0].strip()
+        email_address = to_email.split("<")[1].split(">")[0].strip()
+        # Extract first and last name from name part
+        if " " in name_part:
+            name_parts = name_part.split()
+            first_name = name_parts[0] if not first_name else first_name
+            last_name = name_parts[-1] if not last_name else last_name
+        else:
+            first_name = name_part if not first_name else first_name
+            last_name = "" if not last_name else last_name
+    
+    # Choose subject: personalized if we have first_name, otherwise regular
+    if first_name:
+        personalized_subjects = (templates_dir / "email_subjects_personalized.txt")
+        if personalized_subjects.exists():
+            subject = _load_random_line_from_file(personalized_subjects)
+            subject = subject.replace("{first_name}", first_name)
+        else:
+            subject = _load_random_line_from_file(templates_dir / "email_subjects.txt")
+    else:
+        subject = _load_random_line_from_file(templates_dir / "email_subjects.txt")
+    
+    from_name = _load_random_line_from_file(templates_dir / "email_from_names.txt")
+    preheader = _load_random_line_from_file(templates_dir / "email_preheaders.txt")
+    
     # Build lead rows for the HTML table
     lead_rows_html = ""
     lead_rows_text = ""
@@ -173,7 +250,7 @@ def send_funnel_email(
         log.error("Funnel email template not found at %s", template_path)
         raise
     
-    html_body = html_template.replace("{lead_rows_html}", lead_rows_html).replace("{price}", str(price)).replace("{subscribe_url}", subscribe_url).replace("{unsubscribe_url}", unsubscribe_url)
+    html_body = html_template.replace("{lead_rows_html}", lead_rows_html).replace("{price}", str(price)).replace("{subscribe_url}", subscribe_url).replace("{unsubscribe_url}", unsubscribe_url).replace("{preheader}", preheader)
 
     text_body = (
         f"Collin County Probate Leads\n\n"
@@ -185,6 +262,23 @@ def send_funnel_email(
         f"Unsubscribe: {unsubscribe_url}\n"
     )
 
+    # Log email sent activity
+    if user_id:
+        log_activity(
+            user_id=user_id,
+            activity_type="email_sent",
+            email_template="prospect_email_v1.html",
+            from_name=from_name,
+            subject_line=subject,
+            funnel_token=token,
+            metadata={
+                "to_email": email_address,
+                "price": price,
+                "lead_count": len(leads),
+                "personalized": bool(first_name),
+            }
+        )
+
     if not FROM_EMAIL:
         log.info(
             "Funnel email (FROM_EMAIL unset — not sent via SES) to=%s price=%s subscribe=%s",
@@ -194,11 +288,14 @@ def send_funnel_email(
 
     ses = boto3.client("ses")
     try:
+        # Build source with display name
+        source_email = f"{from_name} <{FROM_EMAIL}>"
+        
         ses.send_email(
-            Source=FROM_EMAIL,
-            Destination={"ToAddresses": [to_email]},
+            Source=source_email,
+            Destination={"ToAddresses": [email_address]},
             Message={
-                "Subject": {"Data": f"Collin County Probate Leads — Subscribe for ${price}/mo"},
+                "Subject": {"Data": subject},
                 "Body": {
                     "Text": {"Data": text_body},
                     "Html": {"Data": html_body},
