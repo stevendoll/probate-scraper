@@ -242,7 +242,7 @@ def send_funnel_email(
         lead_rows_text += f"  {grantor}  |  {date}  |  {doc_num}\n"
 
     # Load HTML template from file
-    template_path = Path(__file__).parent.parent.parent / "templates" / "prospect_email_v1.html"
+    template_path = Path(__file__).parent / "templates" / "prospect_email_v1.html"
     try:
         with open(template_path, "r", encoding="utf-8") as f:
             html_template = f.read()
