@@ -103,7 +103,7 @@ def seed_admin_user(ddb):
         "last_name": {"S": "User"},
         "role": {"S": "admin"},
         "status": {"S": "active"},
-        "location_codes": {"SS": ["CollinTx"]},
+        "location_codes": {"SS": ["COLLIN_TX"]},
         "offered_price": {"N": "0"},
         "created_at": {"S": now},
         "updated_at": {"S": now},
@@ -161,7 +161,7 @@ def main():
     tables_to_reset = [
         "activities",    # Activity tracking
         "users",         # User accounts  
-        # "leads",         # Scraped leads
+        "leads",         # Scraped leads
         "locations",      # Location metadata
     ]
     
