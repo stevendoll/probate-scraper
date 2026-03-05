@@ -194,7 +194,7 @@ def send_funnel_email(
     unsubscribe_url = f"{UI_BASE_URL}/unsubscribe?token={token}"
 
     # Load random email components
-    templates_dir = Path(__file__).parent.parent.parent / "templates"
+    templates_dir = Path(__file__).parent / "templates"
     
     # Parse email address to extract name if available
     email_address = to_email
