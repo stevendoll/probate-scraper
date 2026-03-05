@@ -18,8 +18,8 @@ CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
 .PHONY: help ecr-create ecr-login build push build-push sam-build deploy deploy-ui \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
-        aws-db-reset local-api-start local-scraper-run start-all test smoke-test check-bedrock \
-        create-jwt-secret email-setup
+        local-api-start local-scraper-run start-all test smoke-test check-bedrock \
+        create-jwt-secret email-setup aws-db-reset seed-prod
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -55,6 +55,7 @@ help:
 	@echo "    check-bedrock    Verify Bedrock model access before deploying ParseDocumentFunction"
 	@echo "    email-setup      Configure email for local development"
 	@echo "    aws-db-reset     Reset ALL production tables and seed initial data (DANGEROUS - requires confirmation)"
+	@echo "    seed-prod        Create production tables and seed initial data"
 	@echo ""
 	@echo "  Setup (one-time):"
 	@echo "    ecr-create       Create the ECR repository"
@@ -326,6 +327,10 @@ local-db-reset:
 aws-db-reset:
 	@echo "Dropping and recreating all tables in production DynamoDB..."
 	pipenv run python3 scripts/reset_production_db.py
+
+seed-prod:
+	@echo "Creating production tables and seeding initial data..."
+	pipenv run python3 scripts/seed_production.py
 
 local-db-shell:
 	$(LOCAL_ENV) aws dynamodb scan \

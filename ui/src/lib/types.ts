@@ -35,6 +35,8 @@ export interface LeadsResponse {
 export interface User {
   userId: string
   email: string
+  firstName: string
+  lastName: string
   role: 'user' | 'admin'
   status: string
   locationCodes: string[]
