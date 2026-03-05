@@ -343,7 +343,7 @@ class TestRequestLogin(unittest.TestCase):
             
             self.assertEqual(user_item["email"], "new@example.com")
             self.assertEqual(user_item["status"], "inbound")
-            self.assertEqual(user_item["location_codes"], {"COLLIN_TX"})
+            self.assertEqual(user_item["location_codes"], {"CollinTx"})
             self.assertEqual(user_item["offered_price"], 19)
 
     def test_funnel_email_sent_to_new_user(self):

@@ -330,7 +330,7 @@ def admin_funnel_send():
                 if last_name:
                     expr_attrs[":last_name"] = last_name
                 if not existing.get("location_codes"):
-                    expr_attrs[":location_codes"] = {"COLLIN_TX"}
+                    expr_attrs[":location_codes"] = {"CollinTx"}
                 
                 result = db.users_table.update_item(
                     Key={"user_id": user_id},
@@ -355,7 +355,7 @@ def admin_funnel_send():
                 "stripe_customer_id":     "",
                 "stripe_subscription_id": "",
                 "status":                 "prospect",
-                "location_codes":         {"COLLIN_TX"},
+                "location_codes":         {"CollinTx"},
                 "offered_price":          price,
                 "created_at":             now,
                 "updated_at":             now,

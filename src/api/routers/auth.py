@@ -70,7 +70,7 @@ def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") 
         "stripe_customer_id":     "",
         "stripe_subscription_id": "",
         "status":                 "inbound",
-        "location_codes":         {"COLLIN_TX"},
+        "location_codes":         {"CollinTx"},
         "offered_price":          19,  # Default starting price
         "created_at":             now,
         "updated_at":             now,
@@ -91,7 +91,7 @@ def _fetch_sample_leads(count: int = 10) -> list:
         # Query Collin TX for recent leads
         result = db.table.query(
             IndexName=db.location_date_gsi,
-            KeyConditionExpression=Key("location_code").eq("COLLIN_TX"),
+            KeyConditionExpression=Key("location_code").eq("CollinTx"),
             ScanIndexForward=False,
             Limit=count,
         )
