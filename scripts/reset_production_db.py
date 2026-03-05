@@ -161,7 +161,7 @@ def main():
     tables_to_reset = [
         "activities",    # Activity tracking
         "users",         # User accounts  
-        "leads",         # Scraped leads
+        # "leads",         # Scraped leads
         "locations",      # Location metadata
     ]
     
