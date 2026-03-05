@@ -37,6 +37,146 @@ UI_BASE_URL       = os.environ.get("UI_BASE_URL", "http://localhost:3001")
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _parse_name(name_part: str) -> tuple[str, str]:
+    """Parse various name formats and return (first_name, last_name) with proper capitalization.
+    
+    Handles formats like:
+    - "John Doe"
+    - "john T. Doe"
+    - "Martin Van Buren"
+    - "Ann D'Souza"
+    - "Mary-Jane O'Connor"
+    - "Dr. John Smith Jr."
+    """
+    if not name_part:
+        return "", ""
+    
+    # Remove common prefixes and suffixes
+    prefixes = ["Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sir", "Madam"]
+    suffixes = ["Jr.", "Sr.", "II", "III", "IV", "Ph.D.", "M.D."]
+    
+    # Clean up name
+    for prefix in prefixes:
+        if name_part.startswith(prefix):
+            name_part = name_part[len(prefix):].strip()
+    
+    for suffix in suffixes:
+        if name_part.endswith(suffix):
+            name_part = name_part[:-len(suffix)].strip()
+    
+    # Split into parts
+    parts = name_part.split()
+    if not parts:
+        return "", ""
+    
+    if len(parts) == 1:
+        # Single name
+        return _capitalize_name(parts[0]), ""
+    
+    if len(parts) == 2:
+        # First Last
+        return _capitalize_name(parts[0]), _capitalize_name(parts[1])
+    
+    # Multiple parts - handle various cases
+    # Common patterns for multi-part names:
+    # - First Middle Last (3 parts)
+    # - First Middle Middle Last (4+ parts)
+    # - Compound last names (Van Buren, D'Souza, O'Connor)
+    
+    # Check for common compound last name patterns
+    compound_indicators = ["van", "von", "de", "da", "del", "della", "di", "du", "la", "le", "mc", "mac", "o'"]
+    
+    first_name = _capitalize_name(parts[0])
+    
+    # For simple cases (3 parts or fewer), use standard logic
+    if len(parts) <= 3:
+        # Check if middle part is an initial or compound indicator
+        middle_part = parts[1].lower() if len(parts) > 2 else ""
+        last_part = parts[-1].lower()
+        
+        # If middle is an initial, treat as simple first+last
+        if len(middle_part) == 2 and middle_part.endswith('.'):
+            return first_name, _capitalize_name(parts[-1])
+        
+        # If middle part is a compound indicator, include it in last name
+        if middle_part in compound_indicators and len(parts) == 3:
+            return first_name, f"{_capitalize_name(parts[1])} {_capitalize_name(parts[2])}"
+        
+        # Otherwise, first + last
+        return first_name, _capitalize_name(parts[-1])
+    
+    # For complex cases (4+ parts), look for compound last name patterns
+    last_name_parts = []
+    found_compound = False
+    
+    # Work backwards to identify last name parts
+    for i in range(len(parts) - 1, 0, -1):
+        part = parts[i].lower()
+        # Check if this part should be included in last name
+        # Exclude initials with periods from compound detection
+        is_initial = len(part) == 2 and part.endswith('.')
+        should_include = (
+            i == len(parts) - 1 or  # Always include the last part
+            (not is_initial and (
+                part in compound_indicators or  # Include compound indicators
+                "'" in part or  # Include apostrophe parts
+                "-" in part  # Include hyphenated parts
+            ))
+        )
+        
+        if should_include:
+            last_name_parts.insert(0, _capitalize_name(parts[i]))
+            if not is_initial and (part in compound_indicators or "'" in part or "-" in part):
+                found_compound = True
+        elif found_compound:
+            # We've found the compound pattern, continue including
+            continue
+        else:
+            # No compound pattern found, stop at first non-last part
+            break
+    
+    if not last_name_parts:
+        last_name_parts = [_capitalize_name(parts[-1])]
+    
+    last_name = " ".join(last_name_parts)
+    
+    return first_name, last_name
+
+
+def _capitalize_name(name: str) -> str:
+    """Capitalize name properly, handling special cases like O'Connor, D'Souza, Mary-Jane."""
+    if not name:
+        return ""
+    
+    # Handle hyphenated names
+    if "-" in name:
+        parts = name.split("-")
+        return "-".join(_capitalize_single_name(part) for part in parts)
+    
+    # Handle apostrophe names
+    if "'" in name:
+        parts = name.split("'")
+        return "'".join(_capitalize_single_name(part) for part in parts)
+    
+    return _capitalize_single_name(name)
+
+
+def _capitalize_single_name(name: str) -> str:
+    """Capitalize a single name part."""
+    if not name:
+        return ""
+    
+    # Handle initials with periods (T., J., etc.)
+    if len(name) == 2 and name.endswith('.'):
+        return name.upper()
+    
+    # Handle single letters
+    if len(name) == 1:
+        return name.upper()
+    
+    return name.capitalize()
+
+
 def _require_admin(event: dict) -> dict | None:
     """Verify the request carries a valid admin-role access token."""
     payload = get_bearer_payload(event)
@@ -148,42 +288,74 @@ def admin_funnel_send():
             results.append({"email": raw_email, "status": "skipped", "message": "empty email"})
             continue
 
+        # Parse email to extract names
+        first_name = None
+        last_name = None
+        clean_email = email  # Default to original email
+        
+        if "<" in email and ">" in email:
+            # Format: "John Doe <john@email.com>"
+            name_part = email.split("<")[0].strip()
+            clean_email = email.split("<")[1].split(">")[0].strip()
+            
+            if name_part:
+                first_name, last_name = _parse_name(name_part)
+        
         price = _PRICE_LADDER[(existing_count + idx) % len(_PRICE_LADDER)]
 
         # Upsert user: create new or update existing
-        existing = _get_user_by_email(email)
+        existing = _get_user_by_email(clean_email)
         if existing:
             user_id = existing["user_id"]
             try:
+                update_expr = (
+                    "SET #status = :status, offered_price = :price, updated_at = :updated_at"
+                )
+                if first_name:
+                    update_expr += ", first_name = :first_name"
+                if last_name:
+                    update_expr += ", last_name = :last_name"
+                
+                # Add CollinTx location if user doesn't have any locations
+                if not existing.get("location_codes"):
+                    update_expr += ", location_codes = :location_codes"
+                
+                expr_attrs = {
+                    ":status":     "prospect",
+                    ":price":      price,
+                    ":updated_at": now,
+                }
+                if first_name:
+                    expr_attrs[":first_name"] = first_name
+                if last_name:
+                    expr_attrs[":last_name"] = last_name
+                if not existing.get("location_codes"):
+                    expr_attrs[":location_codes"] = {"COLLIN_TX"}
+                
                 result = db.users_table.update_item(
                     Key={"user_id": user_id},
-                    UpdateExpression=(
-                        "SET #status = :status, offered_price = :price, updated_at = :updated_at"
-                    ),
+                    UpdateExpression=update_expr,
                     ExpressionAttributeNames={"#status": "status"},
-                    ExpressionAttributeValues={
-                        ":status":     "free_trial",
-                        ":price":      price,
-                        ":updated_at": now,
-                    },
+                    ExpressionAttributeValues=expr_attrs,
                     ReturnValues="ALL_NEW",
                 )
                 user_item = result["Attributes"]
             except Exception as exc:
-                logger.error("users update_item (funnel) for %s failed: %s", email, exc)
-                results.append({"email": email, "status": "error", "message": "database error"})
+                logger.error("users update_item (funnel) for %s failed: %s", clean_email, exc)
+                results.append({"email": clean_email, "status": "error", "message": "database error"})
                 continue
         else:
             user_id = str(uuid.uuid4())
             user_item = {
                 "user_id":                user_id,
-                "email":                  email,
+                "email":                  clean_email,
+                "first_name":             first_name or "",
+                "last_name":              last_name or "",
                 "role":                   "user",
                 "stripe_customer_id":     "",
                 "stripe_subscription_id": "",
-                "status":                 "free_trial",
-                # location_codes omitted intentionally — DynamoDB rejects empty sets.
-                # User.from_dynamo() defaults to set() when the field is absent.
+                "status":                 "prospect",
+                "location_codes":         {"COLLIN_TX"},
                 "offered_price":          price,
                 "created_at":             now,
                 "updated_at":             now,
@@ -196,11 +368,13 @@ def admin_funnel_send():
                 continue
 
         # Create funnel token and send email
-        token = create_funnel_token(user_id, email, price)
+        token = create_funnel_token(user_id, clean_email, price)
         try:
-            send_funnel_email(email, token, leads_dicts, price)
+            send_funnel_email(
+                clean_email, token, leads_dicts, price, first_name, last_name, user_id
+            )
             results.append({
-                "email":  email,
+                "email":  clean_email,
                 "status": "sent",
                 "userId": user_id,
                 "price":  price,

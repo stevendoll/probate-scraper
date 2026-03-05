@@ -201,6 +201,8 @@ def seed_users():
         Item={k: serializer.serialize(v) for k, v in {
             "user_id":        "00000000-0000-0000-0000-000000000001",
             "email":          "admin@collincountyleads.com",
+            "first_name":     "Admin",
+            "last_name":      "User",
             "role":           "admin",
             "status":         "active",
             "location_codes": ["CollinTx"],
