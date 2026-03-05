@@ -54,6 +54,7 @@ help:
 	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
 	@echo "    check-bedrock    Verify Bedrock model access before deploying ParseDocumentFunction"
 	@echo "    email-setup      Configure email for local development"
+	@echo "    aws-db-reset     Reset ALL production tables and seed initial data (DANGEROUS - requires confirmation)"
 	@echo ""
 	@echo "  Setup (one-time):"
 	@echo "    ecr-create       Create the ECR repository"
@@ -302,7 +303,6 @@ create-jwt-secret:
 local-db-start:
 	docker compose up -d dynamodb-local
 	@echo "DynamoDB Local running at $(LOCAL_DYNAMO_URL)"
-
 local-db-stop:
 	docker compose down
 
@@ -310,7 +310,7 @@ local-db-seed:
 	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
 
 local-db-reset:
-	@echo "Dropping and recreating all tables in DynamoDB Local..."
+	@echo "    local-db-reset   Drop and recreate all tables in DynamoDB Local"
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name leads \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name locations \
@@ -325,8 +325,7 @@ local-db-reset:
 
 aws-db-reset:
 	@echo "Dropping and recreating all tables in production DynamoDB..."
-	pipenv run python3 scripts/reset_leads.py
-	@echo "Reset complete."
+	pipenv run python3 scripts/reset_production_db.py
 
 local-db-shell:
 	$(LOCAL_ENV) aws dynamodb scan \

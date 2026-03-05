@@ -404,7 +404,7 @@ class TestAdminFunnelSend(unittest.TestCase):
         self.assertEqual(user_item["first_name"], "John")
         self.assertEqual(user_item["last_name"], "Doe")
         self.assertEqual(user_item["status"], "prospect")
-        self.assertEqual(user_item["location_codes"], {"COLLIN_TX"})
+        self.assertEqual(user_item["location_codes"], {"CollinTx"})
 
     def test_parses_complex_name_formats(self):
         """Test various complex name formats in email input."""
@@ -466,7 +466,7 @@ class TestAdminFunnelSend(unittest.TestCase):
         self.assertEqual(user_item["first_name"], "")
         self.assertEqual(user_item["last_name"], "")
         self.assertEqual(user_item["status"], "prospect")
-        self.assertEqual(user_item["location_codes"], {"COLLIN_TX"})
+        self.assertEqual(user_item["location_codes"], {"CollinTx"})
 
 
 # ---------------------------------------------------------------------------
