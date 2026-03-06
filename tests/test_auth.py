@@ -225,27 +225,27 @@ class TestSendMagicLink(unittest.TestCase):
 
     def test_logs_when_from_email_unset(self):
         """When FROM_EMAIL is empty, no SES call is made (just logs)."""
-        original = email_helpers.FROM_EMAIL
-        email_helpers.FROM_EMAIL = ""
+        original = auth_helpers.FROM_EMAIL
+        auth_helpers.FROM_EMAIL = ""
         try:
             with patch("boto3.client") as mock_boto:
                 token = auth_helpers.create_magic_token("x@y.com")
-                email_helpers.send_magic_link("x@y.com", token)
+                auth_helpers.send_magic_link("x@y.com", token)
                 mock_boto.assert_not_called()
         finally:
-            email_helpers.FROM_EMAIL = original
+            auth_helpers.FROM_EMAIL = original
 
     def test_calls_ses_when_from_email_set(self):
-        original = email_helpers.FROM_EMAIL
-        email_helpers.FROM_EMAIL = "noreply@example.com"
+        original = auth_helpers.FROM_EMAIL
+        auth_helpers.FROM_EMAIL = "noreply@example.com"
         try:
             mock_ses = MagicMock()
             with patch("boto3.client", return_value=mock_ses):
                 token = auth_helpers.create_magic_token("x@y.com")
-                email_helpers.send_magic_link("x@y.com", token)
+                auth_helpers.send_magic_link("x@y.com", token)
             mock_ses.send_email.assert_called_once()
         finally:
-            email_helpers.FROM_EMAIL = original
+            auth_helpers.FROM_EMAIL = original
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +291,7 @@ class TestRequestLogin(unittest.TestCase):
         
         # Mock Lead.from_dynamo to avoid serialization issues
         with patch("routers.auth.Lead") as mock_lead, \
-             patch("routers.auth.send_funnel_email") as mock_funnel, \
+             patch("routers.auth.send_prospect_email") as mock_funnel, \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
             
             mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
@@ -315,7 +315,7 @@ class TestRequestLogin(unittest.TestCase):
         
         with patch("routers.auth.Lead") as mock_lead, \
              patch("routers.auth._create_inbound_user") as mock_create, \
-             patch("routers.auth.send_funnel_email"), \
+             patch("routers.auth.send_prospect_email"), \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
             
             mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
@@ -329,7 +329,7 @@ class TestRequestLogin(unittest.TestCase):
         self.mock_table.query.return_value = {"Items": []}
         
         with patch("routers.auth.Lead") as mock_lead, \
-             patch("routers.auth.send_funnel_email"), \
+             patch("routers.auth.send_prospect_email"), \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
             
             mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}
@@ -358,7 +358,7 @@ class TestRequestLogin(unittest.TestCase):
         
         with patch("routers.auth.Lead") as mock_lead, \
              patch("routers.auth._create_inbound_user", return_value=mock_user), \
-             patch("routers.auth.send_funnel_email") as mock_funnel, \
+             patch("routers.auth.send_prospect_email") as mock_funnel, \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
             
             mock_lead.from_dynamo.return_value.to_dict.return_value = {"grantor": "Test"}

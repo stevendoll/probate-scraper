@@ -1,36 +1,12 @@
 """
-data_helpers.py — shared data utilities: user lookup and name parsing.
+data_helpers.py — shared name and email parsing utilities.
 
-Centralises helpers that were previously duplicated across routers/auth.py
-and routers/funnel.py.
+get_user_by_email lives in db.py (alongside the other DynamoDB helpers).
 """
 
 import logging
 
-from boto3.dynamodb.conditions import Key
-
-import db
-
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# User lookup
-# ---------------------------------------------------------------------------
-
-def get_user_by_email(email: str) -> dict | None:
-    """Query the email-index GSI.  Returns the raw DynamoDB item or None."""
-    try:
-        result = db.users_table.query(
-            IndexName="email-index",
-            KeyConditionExpression=Key("email").eq(email),
-            Limit=1,
-        )
-        items = result.get("Items", [])
-        return items[0] if items else None
-    except Exception as exc:
-        log.error("users email-index query failed: %s", exc)
-        return None
 
 
 # ---------------------------------------------------------------------------

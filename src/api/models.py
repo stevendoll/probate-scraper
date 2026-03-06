@@ -164,7 +164,7 @@ class Location:
 
 @dataclass
 class Activity:
-    """User activity tracking for funnel journey."""
+    """User activity tracking for prospect journey."""
     activity_id:    str = ""
     user_id:        str = ""
     activity_type:  str = ""  # email_sent, link_clicked, subscribe_clicked, unsubscribe_clicked, signup_completed
@@ -172,7 +172,7 @@ class Activity:
     email_template:  str = ""  # template file used
     from_name:      str = ""  # from name used
     subject_line:   str = ""  # subject line used
-    funnel_token:   str = ""  # funnel token for tracking
+    prospect_token: str = ""  # prospect token for tracking
     metadata:       dict = field(default_factory=dict)  # additional data
 
     @classmethod
@@ -185,7 +185,7 @@ class Activity:
             email_template=  item.get("email_template", ""),
             from_name=      item.get("from_name", ""),
             subject_line=   item.get("subject_line", ""),
-            funnel_token=   item.get("funnel_token", ""),
+            prospect_token= item.get("prospect_token", ""),
             metadata=       item.get("metadata", {}),
         )
 
@@ -198,7 +198,7 @@ class Activity:
             "emailTemplate": self.email_template,
             "fromName":      self.from_name,
             "subjectLine":   self.subject_line,
-            "funnelToken":   self.funnel_token,
+            "prospectToken": self.prospect_token,
             "metadata":      self.metadata,
         }
 

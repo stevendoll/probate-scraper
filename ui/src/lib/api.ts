@@ -8,7 +8,7 @@
 
 import type {
   AuthVerifyResponse,
-  FunnelSendResponse,
+  ProspectSendResponse,
   LeadsResponse,
   LocationResponse,
   LocationsResponse,
@@ -173,14 +173,14 @@ export async function adminDeleteUser(userId: string): Promise<UserResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// Funnel
+// Prospect
 // ---------------------------------------------------------------------------
 
-export async function adminSendFunnel(
+export async function adminSendProspect(
   emails: string[],
   leadCount: number,
-): Promise<FunnelSendResponse> {
-  return authedFetch('/admin/funnel/send', {
+): Promise<ProspectSendResponse> {
+  return authedFetch('/admin/prospect/send', {
     method: 'POST',
     body: JSON.stringify({ emails, lead_count: leadCount }),
   })

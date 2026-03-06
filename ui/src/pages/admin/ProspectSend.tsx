@@ -1,14 +1,14 @@
 import { useState } from 'react'
-import { adminSendFunnel } from '@/lib/api'
-import type { FunnelSendResult } from '@/lib/types'
+import { adminSendProspect } from '@/lib/api'
+import type { ProspectSendResult } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-export default function FunnelSend() {
+export default function ProspectSend() {
   const [emailsText, setEmailsText]   = useState('')
   const [leadCount, setLeadCount]     = useState(10)
-  const [results, setResults]         = useState<FunnelSendResult[] | null>(null)
+  const [results, setResults]         = useState<ProspectSendResult[] | null>(null)
   const [loading, setLoading]         = useState(false)
   const [error, setError]             = useState<string | null>(null)
 
@@ -29,7 +29,7 @@ export default function FunnelSend() {
 
     setLoading(true)
     try {
-      const resp = await adminSendFunnel(emails, leadCount)
+      const resp = await adminSendProspect(emails, leadCount)
       setResults(resp.results)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -41,9 +41,9 @@ export default function FunnelSend() {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-2xl font-semibold">Send Funnel Emails</h1>
+        <h1 className="text-2xl font-semibold">Send Prospect Emails</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Create free-trial users and send each a leads email with a subscribe link.
+          Create prospect users and send each a leads email with a subscribe link.
           Prices are assigned in round-robin order: $19, $39, $59, $79.
         </p>
       </div>
@@ -82,7 +82,7 @@ export default function FunnelSend() {
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <Button type="submit" disabled={loading}>
-          {loading ? 'Sending…' : 'Send Funnel Emails'}
+          {loading ? 'Sending…' : 'Send Prospect Emails'}
         </Button>
       </form>
 

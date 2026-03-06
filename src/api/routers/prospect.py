@@ -1,9 +1,9 @@
 """
-Marketing funnel routes (no API key required for public endpoints):
+Marketing prospect routes (no API key required for public endpoints):
 
-  POST /real-estate/probate-leads/admin/funnel/send   — admin Bearer required
-  POST /real-estate/probate-leads/auth/unsubscribe    — public, funnel JWT in body
-  POST /real-estate/probate-leads/stripe/checkout     — public, funnel JWT in body
+  POST /real-estate/probate-leads/admin/prospect/send  — admin Bearer required
+  POST /real-estate/probate-leads/auth/unsubscribe     — public, prospect JWT in body
+  POST /real-estate/probate-leads/stripe/checkout      — public, prospect JWT in body
 """
 
 import os
@@ -15,12 +15,12 @@ from boto3.dynamodb.conditions import Key
 
 import db
 from auth_helpers import (
-    create_funnel_token,
+    create_prospect_token,
     get_bearer_payload,
     verify_token,
 )
-from data_helpers import get_user_by_email, parse_email_input
-from email_helpers import send_funnel_email
+from data_helpers import parse_email_input
+from email_helpers import send_prospect_email
 from models import Lead, User
 from utils import now_iso
 
@@ -81,12 +81,12 @@ def _fetch_recent_leads(lead_count: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# POST /admin/funnel/send
+# POST /admin/prospect/send
 # ---------------------------------------------------------------------------
 
-@router.post("/real-estate/probate-leads/admin/funnel/send")
-def admin_funnel_send():
-    """Create free-trial users and send them a leads email with a subscribe link.
+@router.post("/real-estate/probate-leads/admin/prospect/send")
+def admin_prospect_send():
+    """Create prospect users and send them a leads email with a subscribe link.
 
     Request body (JSON):
       emails      (list[str], required) — prospect email addresses
@@ -112,7 +112,7 @@ def admin_funnel_send():
     leads_raw   = _fetch_recent_leads(lead_count)
     leads_dicts = [Lead.from_dynamo(item).to_dict() for item in leads_raw]
 
-    # Count existing free_trial users to continue the round-robin correctly
+    # Count existing prospect users to continue the round-robin correctly
     try:
         count_result = db.users_table.scan(
             FilterExpression="attribute_exists(offered_price)",
@@ -134,7 +134,7 @@ def admin_funnel_send():
         clean_email, first_name, last_name = parse_email_input(raw_email)
         price = _PRICE_LADDER[(existing_count + idx) % len(_PRICE_LADDER)]
 
-        existing = get_user_by_email(clean_email)
+        existing = db.get_user_by_email(clean_email)
         if existing:
             user_id = existing["user_id"]
             try:
@@ -169,7 +169,7 @@ def admin_funnel_send():
                 )
                 user_item = result["Attributes"]
             except Exception as exc:
-                logger.error("users update_item (funnel) for %s failed: %s", clean_email, exc)
+                logger.error("users update_item (prospect) for %s failed: %s", clean_email, exc)
                 results.append({"email": clean_email, "status": "error", "message": "database error"})
                 continue
         else:
@@ -191,13 +191,13 @@ def admin_funnel_send():
             try:
                 db.users_table.put_item(Item=user_item)
             except Exception as exc:
-                logger.error("users put_item (funnel) for %s failed: %s", clean_email, exc)
+                logger.error("users put_item (prospect) for %s failed: %s", clean_email, exc)
                 results.append({"email": clean_email, "status": "error", "message": "database error"})
                 continue
 
-        token = create_funnel_token(user_id, clean_email, price)
+        token = create_prospect_token(user_id, clean_email, price)
         try:
-            send_funnel_email(clean_email, token, leads_dicts, price, first_name, last_name, user_id)
+            send_prospect_email(clean_email, token, leads_dicts, price, first_name, last_name, user_id)
             results.append({
                 "email":  clean_email,
                 "status": "sent",
@@ -205,7 +205,7 @@ def admin_funnel_send():
                 "price":  price,
             })
         except Exception as exc:
-            logger.error("send_funnel_email failed for %s: %s", clean_email, exc)
+            logger.error("send_prospect_email failed for %s: %s", clean_email, exc)
             results.append({"email": clean_email, "status": "error", "message": "email send failed"})
 
     return {
@@ -221,10 +221,10 @@ def admin_funnel_send():
 
 @router.post("/real-estate/probate-leads/auth/unsubscribe")
 def auth_unsubscribe():
-    """Set the user's status to 'unsubscribed' using a funnel JWT.
+    """Set the user's status to 'unsubscribed' using a prospect JWT.
 
     Request body (JSON):
-      token  (str, required) — funnel JWT from the marketing email
+      token  (str, required) — prospect JWT from the marketing email
     """
     try:
         body = router.current_event.json_body or {}
@@ -236,7 +236,7 @@ def auth_unsubscribe():
         return {"error": "'token' is required"}, 400
 
     payload = verify_token(token)
-    if not payload or payload.get("type") != "funnel":
+    if not payload or payload.get("type") != "prospect":
         return {"error": "Invalid or expired token"}, 401
 
     user_id = payload.get("sub", "")
@@ -257,7 +257,7 @@ def auth_unsubscribe():
         logger.error("users update_item (unsubscribe) failed: %s", exc)
         return {"error": "Failed to update status"}, 500
 
-    logger.info("User %s unsubscribed via funnel token", user_id)
+    logger.info("User %s unsubscribed via prospect token", user_id)
     return {"message": "You have been unsubscribed."}
 
 
@@ -267,10 +267,10 @@ def auth_unsubscribe():
 
 @router.post("/real-estate/probate-leads/stripe/checkout")
 def stripe_checkout():
-    """Create a Stripe Checkout Session for a funnel prospect.
+    """Create a Stripe Checkout Session for a prospect.
 
     Request body (JSON):
-      token  (str, required) — funnel JWT from the marketing email
+      token  (str, required) — prospect JWT from the marketing email
 
     Returns:
       { url: <stripe_checkout_url> }
@@ -285,7 +285,7 @@ def stripe_checkout():
         return {"error": "'token' is required"}, 400
 
     payload = verify_token(token)
-    if not payload or payload.get("type") != "funnel":
+    if not payload or payload.get("type") != "prospect":
         return {"error": "Invalid or expired token"}, 401
 
     user_id = payload.get("sub", "")

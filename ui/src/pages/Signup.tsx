@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { createCheckoutSession } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 
-interface FunnelPayload {
+interface ProspectPayload {
   sub: string
   email: string
   price: number
@@ -11,7 +11,7 @@ interface FunnelPayload {
   exp: number
 }
 
-function decodeFunnelToken(token: string): FunnelPayload | null {
+function decodeProspectToken(token: string): ProspectPayload | null {
   try {
     const parts = token.split('.')
     if (parts.length !== 3) return null
@@ -20,7 +20,7 @@ function decodeFunnelToken(token: string): FunnelPayload | null {
       parts[1].length + ((4 - (parts[1].length % 4)) % 4),
       '=',
     )
-    return JSON.parse(atob(padded)) as FunnelPayload
+    return JSON.parse(atob(padded)) as ProspectPayload
   } catch {
     return null
   }
@@ -29,12 +29,12 @@ function decodeFunnelToken(token: string): FunnelPayload | null {
 export default function Signup() {
   const [searchParams]       = useSearchParams()
   const token                = searchParams.get('token') ?? ''
-  const [payload, setPayload]= useState<FunnelPayload | null>(null)
+  const [payload, setPayload]= useState<ProspectPayload | null>(null)
   const [loading, setLoading]= useState(false)
   const [error, setError]    = useState<string | null>(null)
 
   useEffect(() => {
-    if (token) setPayload(decodeFunnelToken(token))
+    if (token) setPayload(decodeProspectToken(token))
   }, [token])
 
   async function handleSubscribe() {
@@ -50,7 +50,7 @@ export default function Signup() {
     }
   }
 
-  if (!token || !payload || payload.type !== 'funnel') {
+  if (!token || !payload || payload.type !== 'prospect') {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
         <div className="max-w-sm text-center space-y-3">

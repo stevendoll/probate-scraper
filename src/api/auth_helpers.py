@@ -1,19 +1,20 @@
 """
-auth_helpers.py — JWT creation/verification and activity logging.
+auth_helpers.py — JWT creation/verification, magic-link sending, and activity logging.
 
 Token types
 -----------
-  magic   — 15-min token sent in the login email; sub = email
-  access  — 7-day session token returned by /auth/verify; sub = user_id
-  funnel  — 30-day token for marketing funnel emails; sub = user_id
+  magic    — 15-min token sent in the login email; sub = email
+  access   — 7-day session token returned by /auth/verify; sub = user_id
+  prospect — 30-day token for marketing prospect emails; sub = user_id
 
 Email sending
 -------------
-See email_helpers.py for send_magic_link and send_funnel_email.
+send_magic_link is here because it is part of the auth flow (login).
+send_prospect_email lives in email_helpers.py (marketing, not auth).
 
 Local dev / tests
 -----------------
-When FROM_EMAIL is unset, email_helpers skips SES and logs to console.
+When FROM_EMAIL is unset, send_magic_link logs to console instead of calling SES.
 """
 
 import logging
@@ -28,10 +29,13 @@ from utils import now_iso  # noqa: F401 — re-exported for convenience in tests
 
 log = logging.getLogger(__name__)
 
-JWT_SECRET               = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
-MAGIC_LINK_EXPIRY_MIN    = 15
-ACCESS_TOKEN_EXPIRY_DAYS = 7
-FUNNEL_TOKEN_EXPIRY_DAYS = 30
+JWT_SECRET                  = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
+MAGIC_LINK_EXPIRY_MIN       = 15
+ACCESS_TOKEN_EXPIRY_DAYS    = 7
+PROSPECT_TOKEN_EXPIRY_DAYS  = 30
+
+FROM_EMAIL          = os.environ.get("FROM_EMAIL", "")
+MAGIC_LINK_BASE_URL = os.environ.get("MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify")
 
 
 def create_magic_token(email: str) -> str:
@@ -55,14 +59,14 @@ def create_access_token(user_id: str, role: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-def create_funnel_token(user_id: str, email: str, price: int) -> str:
-    """Return a signed 30-day JWT for funnel links."""
+def create_prospect_token(user_id: str, email: str, price: int) -> str:
+    """Return a signed 30-day JWT for prospect funnel links."""
     payload = {
         "sub":   user_id,
         "email": email,
         "price": price,
-        "type":  "funnel",
-        "exp":   datetime.now(timezone.utc) + timedelta(days=FUNNEL_TOKEN_EXPIRY_DAYS),
+        "type":  "prospect",
+        "exp":   datetime.now(timezone.utc) + timedelta(days=PROSPECT_TOKEN_EXPIRY_DAYS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
@@ -87,13 +91,43 @@ def get_bearer_payload(event: dict) -> dict | None:
     return verify_token(auth[7:])
 
 
+def send_magic_link(email: str, token: str) -> None:
+    """Send a magic-link login email via SES.
+
+    When FROM_EMAIL is unset the link is logged to console instead.
+    """
+    link = f"{MAGIC_LINK_BASE_URL}?token={token}"
+    if not FROM_EMAIL:
+        log.info("Magic link (FROM_EMAIL unset — not sent via SES): %s", link)
+        return
+    ses = boto3.client("ses")
+    try:
+        ses.send_email(
+            Source=FROM_EMAIL,
+            Destination={"ToAddresses": [email]},
+            Message={
+                "Subject": {"Data": "Your login link"},
+                "Body": {
+                    "Text": {
+                        "Data": (
+                            f"Click to log in (expires in {MAGIC_LINK_EXPIRY_MIN} minutes):"
+                            f"\n\n{link}"
+                        )
+                    }
+                },
+            },
+        )
+    except Exception as exc:
+        log.error("SES send_email failed: %s", exc)
+
+
 def log_activity(
     user_id: str,
     activity_type: str,
     email_template: str = "",
     from_name: str = "",
     subject_line: str = "",
-    funnel_token: str = "",
+    prospect_token: str = "",
     metadata: dict = None,
 ) -> None:
     """Write a user activity record to the activities DynamoDB table.
@@ -106,15 +140,15 @@ def log_activity(
     try:
         import db  # local import keeps auth_helpers free of top-level db dependency
         activity_item = {
-            "activity_id":   str(uuid.uuid4()),
-            "user_id":       user_id,
-            "activity_type": activity_type,
-            "timestamp":     now_iso(),
+            "activity_id":    str(uuid.uuid4()),
+            "user_id":        user_id,
+            "activity_type":  activity_type,
+            "timestamp":      now_iso(),
             "email_template": email_template,
-            "from_name":     from_name,
-            "subject_line":  subject_line,
-            "funnel_token":  funnel_token,
-            "metadata":      metadata,
+            "from_name":      from_name,
+            "subject_line":   subject_line,
+            "prospect_token": prospect_token,
+            "metadata":       metadata,
         }
         db.activities_table.put_item(Item=activity_item)
         log.info("Activity logged: %s for user %s", activity_type, user_id)

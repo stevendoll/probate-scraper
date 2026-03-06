@@ -1,4 +1,4 @@
-"""Activity tracking for user funnel journey.
+"""Activity tracking for user prospect journey.
 
 POST /admin/activity/log
 POST /admin/activity/query
@@ -51,7 +51,7 @@ def log_activity():
         "email_template":  body.get("email_template", ""),
         "from_name":      body.get("from_name", ""),
         "subject_line":   body.get("subject_line", ""),
-        "funnel_token":   body.get("funnel_token", ""),
+        "prospect_token": body.get("prospect_token", ""),
         "metadata":       body.get("metadata", {}),
     }
 
@@ -125,7 +125,7 @@ def track_activity():
         return {"error": "'token' is required"}, 400
 
     payload = verify_token(token)
-    if not payload or payload.get("type") != "funnel":
+    if not payload or payload.get("type") != "prospect":
         return {"error": "Invalid or expired token"}, 401
 
     activity_type = body.get("activity_type")
@@ -142,7 +142,7 @@ def track_activity():
         "user_id":        user_id,
         "activity_type":  activity_type,
         "timestamp":      now_iso(),
-        "funnel_token":   token,
+        "prospect_token": token,
         "metadata":       {
             "email": payload.get("email", ""),
             "price": payload.get("price", 0),

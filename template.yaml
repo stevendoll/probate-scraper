@@ -129,7 +129,7 @@ Parameters:
     Type: String
     Default: "https://collincountyleads.com"
     Description: >
-      Base URL of the React UI, used to build funnel subscribe/unsubscribe links
+      Base URL of the React UI, used to build prospect subscribe/unsubscribe links
       in marketing emails, e.g. https://collincountyleads.com.
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ Globals:
         DYNAMO_TABLE_NAME: !Ref LeadsTable
         LOCATIONS_TABLE_NAME: !Ref LocationsTable
         USERS_TABLE_NAME: !Ref UsersTable
-        ACTIVITIES_TABLE_NAME: !Ref ActivitiesTable
+        ACTIVITIES_TABLE_NAME: activities
         GSI_NAME: recorded-date-index
         LOCATION_DATE_GSI: location-date-index
         USER_ACTIVITY_GSI: user-activity-index
@@ -662,12 +662,12 @@ Resources:
             Method: DELETE
             Auth:
               ApiKeyRequired: false
-        # Funnel — admin send + public unsubscribe/checkout (no API key)
-        AdminFunnelSend:
+        # Prospect — admin send + public unsubscribe/checkout (no API key)
+        AdminProspectSend:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/funnel/send
+            Path: /real-estate/probate-leads/admin/prospect/send
             Method: POST
             Auth:
               ApiKeyRequired: false
@@ -789,11 +789,11 @@ Resources:
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
-        OptionsAdminFunnelSend:
+        OptionsAdminProspectSend:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/funnel/send
+            Path: /real-estate/probate-leads/admin/prospect/send
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false

@@ -1,5 +1,7 @@
 """
-email_helpers.py — SES email sending for magic-link and funnel emails.
+email_helpers.py — SES email sending for prospect/marketing emails.
+
+Magic-link (auth) email is in auth_helpers.send_magic_link.
 
 When FROM_EMAIL is unset (local dev / unit tests) all sends are logged to
 console at INFO level and no SES call is made — same pattern used by
@@ -15,10 +17,8 @@ import boto3
 
 log = logging.getLogger(__name__)
 
-FROM_EMAIL          = os.environ.get("FROM_EMAIL", "")
-MAGIC_LINK_BASE_URL = os.environ.get("MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify")
-MAGIC_LINK_EXPIRY_MIN = 15  # used in link text only
-UI_BASE_URL         = os.environ.get("UI_BASE_URL", "http://localhost:3001")
+FROM_EMAIL  = os.environ.get("FROM_EMAIL", "")
+UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://localhost:3001")
 
 
 def _load_random_line_from_file(file_path: Path) -> str:
@@ -32,37 +32,7 @@ def _load_random_line_from_file(file_path: Path) -> str:
         return ""
 
 
-def send_magic_link(email: str, token: str) -> None:
-    """Send a magic-link login email via SES.
-
-    When FROM_EMAIL is unset the link is logged to console instead.
-    """
-    link = f"{MAGIC_LINK_BASE_URL}?token={token}"
-    if not FROM_EMAIL:
-        log.info("Magic link (FROM_EMAIL unset — not sent via SES): %s", link)
-        return
-    ses = boto3.client("ses")
-    try:
-        ses.send_email(
-            Source=FROM_EMAIL,
-            Destination={"ToAddresses": [email]},
-            Message={
-                "Subject": {"Data": "Your login link"},
-                "Body": {
-                    "Text": {
-                        "Data": (
-                            f"Click to log in (expires in {MAGIC_LINK_EXPIRY_MIN} minutes):"
-                            f"\n\n{link}"
-                        )
-                    }
-                },
-            },
-        )
-    except Exception as exc:
-        log.error("SES send_email failed: %s", exc)
-
-
-def send_funnel_email(
+def send_prospect_email(
     to_email: str,
     token: str,
     leads: list,
@@ -71,13 +41,13 @@ def send_funnel_email(
     last_name: str = None,
     user_id: str = None,
 ) -> None:
-    """Send a marketing funnel email with sample leads and subscribe/unsubscribe links.
+    """Send a marketing prospect email with sample leads and subscribe/unsubscribe links.
 
     When FROM_EMAIL is unset the email content is logged to console instead.
 
     Args:
         to_email:   Recipient email address (plain "email@example.com" format).
-        token:      Signed funnel JWT (used to build subscribe/unsubscribe links).
+        token:      Signed prospect JWT (used to build subscribe/unsubscribe links).
         leads:      List of lead dicts with at least grantor, recordedDate, docNumber.
         price:      Offered monthly subscription price in dollars.
         first_name: Optional first name for subject-line personalization.
@@ -125,7 +95,7 @@ def send_funnel_email(
         with open(template_path, "r", encoding="utf-8") as f:
             html_template = f.read()
     except FileNotFoundError:
-        log.error("Funnel email template not found at %s", template_path)
+        log.error("Prospect email template not found at %s", template_path)
         raise
 
     html_body = (
@@ -149,7 +119,7 @@ def send_funnel_email(
 
     if not FROM_EMAIL:
         log.info(
-            "Funnel email (FROM_EMAIL unset — not sent via SES) to=%s price=%s subscribe=%s",
+            "Prospect email (FROM_EMAIL unset — not sent via SES) to=%s price=%s subscribe=%s",
             to_email, price, subscribe_url,
         )
         return
@@ -169,7 +139,7 @@ def send_funnel_email(
             },
         )
     except Exception as exc:
-        log.error("SES send_email (funnel) failed for %s: %s", to_email, exc)
+        log.error("SES send_email (prospect) failed for %s: %s", to_email, exc)
         raise
 
     # Log activity only after a confirmed successful send
@@ -181,7 +151,7 @@ def send_funnel_email(
             email_template="prospect_email_v1.html",
             from_name=from_name,
             subject_line=subject,
-            funnel_token=token,
+            prospect_token=token,
             metadata={
                 "to_email": to_email,
                 "price": price,

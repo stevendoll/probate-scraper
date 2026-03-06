@@ -21,8 +21,8 @@ Routes (all under /real-estate/probate-leads/):
   GET  /admin/users/{user_id}               — get user (admin Bearer token)
   PATCH /admin/users/{user_id}              — update user (admin Bearer token)
   DELETE /admin/users/{user_id}             — soft-delete user (admin Bearer token)
-  POST /admin/funnel/send                   — send funnel emails to prospects (admin Bearer token)
-  POST /auth/unsubscribe                    — unsubscribe via funnel JWT (no API key)
+  POST /admin/prospect/send                 — send prospect emails (admin Bearer token)
+  POST /auth/unsubscribe                    — unsubscribe via prospect JWT (no API key)
   POST /admin/activity/log                  — log user activity (admin Bearer token)
   POST /admin/activity/query                — query user activities (admin Bearer token)
   POST /activity/track                     — track funnel link clicks (public, token-based)
@@ -40,7 +40,7 @@ Environment variables:
   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
   JWT_SECRET              — HMAC-SHA256 secret for magic + access tokens
   MAGIC_LINK_BASE_URL     — base URL for magic link emails
-  UI_BASE_URL             — base URL for funnel subscribe/unsubscribe links
+  UI_BASE_URL             — base URL for prospect subscribe/unsubscribe links
   FROM_EMAIL              — SES verified sender; leave blank to skip sending (local dev)
 """
 
@@ -58,7 +58,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import leads, locations, users, stripe, auth, admin, funnel, activity
+from routers import leads, locations, users, stripe, auth, admin, prospect, activity
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -78,7 +78,7 @@ api.include_router(users.router)
 api.include_router(stripe.router)
 api.include_router(auth.router)
 api.include_router(admin.router)
-api.include_router(funnel.router)
+api.include_router(prospect.router)
 api.include_router(activity.router)
 
 # ---------------------------------------------------------------------------

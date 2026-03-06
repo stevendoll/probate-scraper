@@ -1,14 +1,18 @@
 """
-Shared DynamoDB table references and configuration constants.
+Shared DynamoDB table references, configuration constants, and common queries.
 
 Imported as ``import db`` so callers can write ``db.table``.
 Tests replace ``db.table``, ``db.locations_table``, ``db.users_table``,
 and ``db.activities_table`` in setUp to inject mocks.
 """
 
+import logging
 import os
 
 import boto3
+from boto3.dynamodb.conditions import Key
+
+log = logging.getLogger(__name__)
 
 _dynamodb = boto3.resource("dynamodb")
 
@@ -31,3 +35,18 @@ activities_table = _dynamodb.Table(_activities_table_name)
 # Query limits
 MAX_LIMIT     = 200
 DEFAULT_LIMIT = 50
+
+
+def get_user_by_email(email: str) -> dict | None:
+    """Query the email-index GSI.  Returns the raw DynamoDB item or None."""
+    try:
+        result = users_table.query(
+            IndexName="email-index",
+            KeyConditionExpression=Key("email").eq(email),
+            Limit=1,
+        )
+        items = result.get("Items", [])
+        return items[0] if items else None
+    except Exception as exc:
+        log.error("users email-index query failed: %s", exc)
+        return None
