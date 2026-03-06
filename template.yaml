@@ -519,8 +519,8 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:Query
               Resource:
-                - !GetAtt ActivitiesTable.Arn
-                - !Sub "${ActivitiesTable.Arn}/index/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/activities"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/activities/index/*"
         # SES — send magic-link emails (only when FROM_EMAIL is set)
         - Statement:
             - Effect: Allow
@@ -1131,7 +1131,7 @@ Outputs:
 
   ActivitiesTableName:
     Description: Activities DynamoDB table name
-    Value: !Ref ActivitiesTable
+    Value: activities
 
   DocumentsBucketName:
     Description: S3 bucket storing scraped documents (documents/{location_code}/{doc_number}.pdf)
