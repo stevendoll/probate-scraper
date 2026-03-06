@@ -29,9 +29,10 @@ from boto3.dynamodb.types import TypeSerializer
 ENDPOINT   = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:8000")
 GSI_NAME   = "recorded-date-index"
 
-LEADS_TABLE_NAME     = os.environ.get("DYNAMO_TABLE_NAME",    "leads")
-LOCATIONS_TABLE_NAME = os.environ.get("LOCATIONS_TABLE_NAME", "locations")
-USERS_TABLE_NAME     = os.environ.get("USERS_TABLE_NAME",     "users")
+LEADS_TABLE_NAME      = os.environ.get("DYNAMO_TABLE_NAME",       "leads")
+LOCATIONS_TABLE_NAME  = os.environ.get("LOCATIONS_TABLE_NAME",  "locations")
+USERS_TABLE_NAME      = os.environ.get("USERS_TABLE_NAME",      "users")
+ACTIVITIES_TABLE_NAME = os.environ.get("ACTIVITIES_TABLE_NAME", "activities")
 
 # Dummy credentials required by DynamoDB Local (values don't matter)
 session = boto3.Session(
@@ -153,6 +154,34 @@ def create_users_table():
     print(f"  '{USERS_TABLE_NAME}' ready.")
 
 
+def create_activities_table():
+    print(f"Creating table '{ACTIVITIES_TABLE_NAME}' at {ENDPOINT} ...")
+    ddb.create_table(
+        TableName=ACTIVITIES_TABLE_NAME,
+        BillingMode="PAY_PER_REQUEST",
+        AttributeDefinitions=[
+            {"AttributeName": "activity_id", "AttributeType": "S"},
+            {"AttributeName": "user_id",     "AttributeType": "S"},
+            {"AttributeName": "timestamp",   "AttributeType": "S"},
+        ],
+        KeySchema=[
+            {"AttributeName": "activity_id", "KeyType": "HASH"},
+        ],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "user-activity-index",
+                "KeySchema": [
+                    {"AttributeName": "user_id",   "KeyType": "HASH"},
+                    {"AttributeName": "timestamp",  "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+    )
+    _wait_active(ACTIVITIES_TABLE_NAME)
+    print(f"  '{ACTIVITIES_TABLE_NAME}' ready.")
+
+
 # ---------------------------------------------------------------------------
 # Date normalisation (mirrors dynamo.py)
 # ---------------------------------------------------------------------------
@@ -268,7 +297,7 @@ def seed_leads_csv(csv_path: Path):
 # ---------------------------------------------------------------------------
 
 def verify():
-    for name in (LEADS_TABLE_NAME, LOCATIONS_TABLE_NAME, USERS_TABLE_NAME):
+    for name in (LEADS_TABLE_NAME, LOCATIONS_TABLE_NAME, USERS_TABLE_NAME, ACTIVITIES_TABLE_NAME):
         resp = ddb.scan(TableName=name, Select="COUNT")
         print(f"  {name}: {resp['Count']} item(s)")
 
@@ -306,6 +335,12 @@ if __name__ == "__main__":
         create_users_table()
     seed_users()  # idempotent (PutItem overwrites)
 
+    # ── Activities table
+    if table_exists(ACTIVITIES_TABLE_NAME):
+        print(f"Table '{ACTIVITIES_TABLE_NAME}' already exists — skipping creation")
+    else:
+        create_activities_table()
+
     print("\nVerification:")
     verify()
 
@@ -313,3 +348,4 @@ if __name__ == "__main__":
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {LEADS_TABLE_NAME} --endpoint-url {ENDPOINT}")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {LOCATIONS_TABLE_NAME} --endpoint-url {ENDPOINT}")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {USERS_TABLE_NAME} --endpoint-url {ENDPOINT}")
+    print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {ACTIVITIES_TABLE_NAME} --endpoint-url {ENDPOINT}")

@@ -20,30 +20,15 @@ from auth_helpers import (
     create_funnel_token,
     create_magic_token,
     get_bearer_payload,
-    send_funnel_email,
-    send_magic_link,
     verify_token,
 )
+from data_helpers import get_user_by_email, parse_email_input
+from email_helpers import send_funnel_email, send_magic_link
 from models import Lead, User
 from utils import now_iso
 
 logger = Logger(service="probate-api")
 router = Router()
-
-
-def _get_user_by_email(email: str) -> dict | None:
-    """Query the email-index GSI.  Returns the raw DynamoDB item or None."""
-    try:
-        result = db.users_table.query(
-            IndexName="email-index",
-            KeyConditionExpression=Key("email").eq(email),
-            Limit=1,
-        )
-        items = result.get("Items", [])
-        return items[0] if items else None
-    except Exception as exc:
-        logger.error("users email-index query failed: %s", exc)
-        return None
 
 
 def _get_user_by_id(user_id: str) -> dict | None:
@@ -60,7 +45,6 @@ def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") 
     """Create a new user with 'inbound' status and CollinTx location."""
     user_id = str(uuid.uuid4())
     now = now_iso()
-    
     user_item = {
         "user_id":                user_id,
         "email":                  email,
@@ -71,11 +55,10 @@ def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") 
         "stripe_subscription_id": "",
         "status":                 "inbound",
         "location_codes":         {"CollinTx"},
-        "offered_price":          19,  # Default starting price
+        "offered_price":          19,
         "created_at":             now,
         "updated_at":             now,
     }
-    
     try:
         db.users_table.put_item(Item=user_item)
         logger.info("Created inbound user: %s", email)
@@ -86,9 +69,8 @@ def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") 
 
 
 def _fetch_sample_leads(count: int = 10) -> list:
-    """Fetch sample leads for funnel email."""
+    """Fetch sample leads for a funnel email (CollinTx only)."""
     try:
-        # Query Collin TX for recent leads
         result = db.table.query(
             IndexName=db.location_date_gsi,
             KeyConditionExpression=Key("location_code").eq("CollinTx"),
@@ -99,29 +81,6 @@ def _fetch_sample_leads(count: int = 10) -> list:
     except Exception as exc:
         logger.error("Failed to fetch sample leads: %s", exc)
         return []
-
-
-def _parse_email_name(email_input: str) -> tuple[str, str, str]:
-    """Parse email in 'Name <email@domain.com>' format."""
-    email_input = email_input.strip().lower()
-    
-    if "<" in email_input and ">" in email_input:
-        # Extract name and email
-        name_part = email_input.split("<")[0].strip()
-        clean_email = email_input.split("<")[1].split(">")[0].strip()
-        
-        # Simple name parsing
-        if " " in name_part:
-            name_parts = name_part.split()
-            first_name = name_parts[0].capitalize()
-            last_name = name_parts[-1].capitalize() if len(name_parts) > 1 else ""
-        else:
-            first_name = name_part.capitalize()
-            last_name = ""
-        
-        return clean_email, first_name, last_name
-    else:
-        return email_input, "", ""
 
 
 # ---------------------------------------------------------------------------
@@ -140,31 +99,29 @@ def request_login():
     if not email_input:
         return {"error": "'email' is required"}, 400
 
-    # Parse email to extract name and clean email
-    clean_email, first_name, last_name = _parse_email_name(email_input)
-    
-    user = _get_user_by_email(clean_email)
+    clean_email, first_name, last_name = parse_email_input(email_input)
+
+    user = get_user_by_email(clean_email)
     if user:
-        # Existing user - send magic link
         token = create_magic_token(clean_email)
         send_magic_link(clean_email, token)
         logger.info("Magic link sent to existing user: %s", clean_email)
     else:
-        # New user - create inbound user and send funnel email
         try:
-            # Create the user
             user = _create_inbound_user(clean_email, first_name, last_name)
-            
-            # Send funnel email
-            leads_raw = _fetch_sample_leads(10)
+            leads_raw  = _fetch_sample_leads(10)
             leads_dicts = [Lead.from_dynamo(item).to_dict() for item in leads_raw]
-            
             funnel_token = create_funnel_token(user["user_id"], clean_email, user["offered_price"])
-            send_funnel_email(clean_email, funnel_token, leads_dicts, user["offered_price"], first_name, last_name, user["user_id"])
-            
+            send_funnel_email(
+                clean_email, funnel_token, leads_dicts, user["offered_price"],
+                first_name, last_name, user["user_id"],
+            )
             logger.info("Created inbound user and sent funnel email: %s", clean_email)
         except Exception as exc:
-            logger.error("Failed to create inbound user or send funnel email for %s: %s", clean_email, exc)
+            logger.error(
+                "Failed to create inbound user or send funnel email for %s: %s",
+                clean_email, exc,
+            )
             # Still return 200 to prevent email enumeration
 
     return {"message": "If that email is registered, a login link has been sent."}, 200
@@ -187,7 +144,7 @@ def verify_login():
         return {"error": "Invalid or expired login link"}, 401
 
     email = payload.get("sub", "")
-    user  = _get_user_by_email(email)
+    user  = get_user_by_email(email)
     if not user:
         return {"error": "User not found"}, 404
 
@@ -295,22 +252,21 @@ def get_my_leads():
             "count": 0,
         }
 
-    qs       = router.current_event.query_string_parameters or {}
+    qs        = router.current_event.query_string_parameters or {}
     from_date = qs.get("from_date")
     to_date   = qs.get("to_date")
 
     all_leads = []
     for location_code in location_codes:
         try:
-            from boto3.dynamodb.conditions import Key as K
             if from_date and to_date:
-                kce = K("location_code").eq(location_code) & K("recorded_date").between(from_date, to_date)
+                kce = Key("location_code").eq(location_code) & Key("recorded_date").between(from_date, to_date)
             elif from_date:
-                kce = K("location_code").eq(location_code) & K("recorded_date").gte(from_date)
+                kce = Key("location_code").eq(location_code) & Key("recorded_date").gte(from_date)
             elif to_date:
-                kce = K("location_code").eq(location_code) & K("recorded_date").lte(to_date)
+                kce = Key("location_code").eq(location_code) & Key("recorded_date").lte(to_date)
             else:
-                kce = K("location_code").eq(location_code)
+                kce = Key("location_code").eq(location_code)
 
             result = db.table.query(
                 IndexName=db.location_date_gsi,

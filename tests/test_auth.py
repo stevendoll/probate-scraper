@@ -47,9 +47,10 @@ _mock_tracer.capture_method = lambda f: f
 
 with patch("boto3.resource", return_value=MagicMock()), \
      patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
-    import app   # noqa: E402
-    import db    # noqa: E402
+    import app          # noqa: E402
+    import db           # noqa: E402
     import auth_helpers  # noqa: E402
+    import email_helpers  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tests.fixtures.users import ALICE, BOB, MOCK_USERS
@@ -224,28 +225,27 @@ class TestSendMagicLink(unittest.TestCase):
 
     def test_logs_when_from_email_unset(self):
         """When FROM_EMAIL is empty, no SES call is made (just logs)."""
-        original = auth_helpers.FROM_EMAIL
-        auth_helpers.FROM_EMAIL = ""
+        original = email_helpers.FROM_EMAIL
+        email_helpers.FROM_EMAIL = ""
         try:
-            # Should not raise; mock boto3 to catch any accidental SES call
             with patch("boto3.client") as mock_boto:
                 token = auth_helpers.create_magic_token("x@y.com")
-                auth_helpers.send_magic_link("x@y.com", token)
+                email_helpers.send_magic_link("x@y.com", token)
                 mock_boto.assert_not_called()
         finally:
-            auth_helpers.FROM_EMAIL = original
+            email_helpers.FROM_EMAIL = original
 
     def test_calls_ses_when_from_email_set(self):
-        original = auth_helpers.FROM_EMAIL
-        auth_helpers.FROM_EMAIL = "noreply@example.com"
+        original = email_helpers.FROM_EMAIL
+        email_helpers.FROM_EMAIL = "noreply@example.com"
         try:
             mock_ses = MagicMock()
             with patch("boto3.client", return_value=mock_ses):
                 token = auth_helpers.create_magic_token("x@y.com")
-                auth_helpers.send_magic_link("x@y.com", token)
+                email_helpers.send_magic_link("x@y.com", token)
             mock_ses.send_email.assert_called_once()
         finally:
-            auth_helpers.FROM_EMAIL = original
+            email_helpers.FROM_EMAIL = original
 
 
 # ---------------------------------------------------------------------------
