@@ -1,15 +1,15 @@
 """
-Unit tests for the marketing funnel feature.
+Unit tests for the marketing prospect feature.
 
 Covers:
-  - auth_helpers: create_funnel_token, send_funnel_email
-  - POST /admin/funnel/send
+  - auth_helpers: create_prospect_token, send_prospect_email
+  - POST /admin/prospect/send
   - POST /auth/unsubscribe
   - POST /stripe/checkout
   - routers/stripe.py: checkout.session.completed webhook branch
 
 Run with:
-    pipenv run python -m unittest tests.test_funnel -v
+    pipenv run python -m unittest tests.test_prospect -v
 """
 
 import copy
@@ -54,12 +54,12 @@ _mock_tracer.capture_method = lambda f: f
 
 with patch("boto3.resource", return_value=MagicMock()), \
      patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
-    import app            # noqa: E402
-    import db             # noqa: E402
-    import auth_helpers   # noqa: E402
-    import email_helpers  # noqa: E402
-    import data_helpers   # noqa: E402
-    import routers.funnel as funnel_module  # noqa: E402
+    import app              # noqa: E402
+    import db               # noqa: E402
+    import auth_helpers     # noqa: E402
+    import email_helpers    # noqa: E402
+    import data_helpers     # noqa: E402
+    import routers.prospect as prospect_module  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tests.fixtures.users import ALICE
@@ -209,29 +209,29 @@ class TestParseName(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# auth_helpers — create_funnel_token
+# auth_helpers — create_prospect_token
 # ---------------------------------------------------------------------------
 
-class TestCreateFunnelToken(unittest.TestCase):
+class TestCreateProspectToken(unittest.TestCase):
 
     def test_returns_string(self):
-        token = auth_helpers.create_funnel_token("user-1", "x@example.com", 39)
+        token = auth_helpers.create_prospect_token("user-1", "x@example.com", 39)
         self.assertIsInstance(token, str)
         self.assertTrue(len(token) > 20)
 
     def test_payload_claims(self):
         import jwt
-        token   = auth_helpers.create_funnel_token("user-1", "x@example.com", 39)
+        token   = auth_helpers.create_prospect_token("user-1", "x@example.com", 39)
         payload = jwt.decode(token, auth_helpers.JWT_SECRET, algorithms=["HS256"])
         self.assertEqual(payload["sub"],   "user-1")
         self.assertEqual(payload["email"], "x@example.com")
         self.assertEqual(payload["price"], 39)
-        self.assertEqual(payload["type"],  "funnel")
+        self.assertEqual(payload["type"],  "prospect")
 
     def test_expiry_is_30_days(self):
         import jwt
         before  = datetime.now(timezone.utc)
-        token   = auth_helpers.create_funnel_token("u", "a@b.com", 19)
+        token   = auth_helpers.create_prospect_token("u", "a@b.com", 19)
         payload = jwt.decode(token, auth_helpers.JWT_SECRET, algorithms=["HS256"])
         exp     = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
         delta   = exp - before
@@ -239,19 +239,19 @@ class TestCreateFunnelToken(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# auth_helpers — send_funnel_email
+# email_helpers — send_prospect_email
 # ---------------------------------------------------------------------------
 
-class TestSendFunnelEmail(unittest.TestCase):
+class TestSendProspectEmail(unittest.TestCase):
 
     def test_no_ses_when_from_email_unset(self):
         original = email_helpers.FROM_EMAIL
         email_helpers.FROM_EMAIL = ""
         try:
             leads = [{"grantor": "SMITH JOHN", "recordedDate": "2026-01-23", "docNumber": "123"}]
-            token = auth_helpers.create_funnel_token("u1", "x@y.com", 19)
+            token = auth_helpers.create_prospect_token("u1", "x@y.com", 19)
             with patch("boto3.client") as mock_boto:
-                email_helpers.send_funnel_email("x@y.com", token, leads, 19)
+                email_helpers.send_prospect_email("x@y.com", token, leads, 19)
                 mock_boto.assert_not_called()
         finally:
             email_helpers.FROM_EMAIL = original
@@ -261,10 +261,10 @@ class TestSendFunnelEmail(unittest.TestCase):
         email_helpers.FROM_EMAIL = "noreply@example.com"
         try:
             leads = [{"grantor": "SMITH JOHN", "recordedDate": "2026-01-23", "docNumber": "123"}]
-            token = auth_helpers.create_funnel_token("u1", "x@y.com", 19)
+            token = auth_helpers.create_prospect_token("u1", "x@y.com", 19)
             mock_ses = MagicMock()
             with patch("boto3.client", return_value=mock_ses):
-                email_helpers.send_funnel_email("x@y.com", token, leads, 19)
+                email_helpers.send_prospect_email("x@y.com", token, leads, 19)
             mock_ses.send_email.assert_called_once()
             call_kwargs = mock_ses.send_email.call_args[1]
             self.assertIn("Html", call_kwargs["Message"]["Body"])
@@ -278,10 +278,10 @@ class TestSendFunnelEmail(unittest.TestCase):
         email_helpers.UI_BASE_URL = "https://example.com"
         try:
             leads = []
-            token = auth_helpers.create_funnel_token("u1", "x@y.com", 39)
+            token = auth_helpers.create_prospect_token("u1", "x@y.com", 39)
             mock_ses = MagicMock()
             with patch("boto3.client", return_value=mock_ses):
-                email_helpers.send_funnel_email("x@y.com", token, leads, 39)
+                email_helpers.send_prospect_email("x@y.com", token, leads, 39)
             html = mock_ses.send_email.call_args[1]["Message"]["Body"]["Html"]["Data"]
             self.assertIn("/signup?token=", html)
             self.assertIn("/unsubscribe?token=", html)
@@ -291,13 +291,13 @@ class TestSendFunnelEmail(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# POST /admin/funnel/send
+# POST /admin/prospect/send
 # ---------------------------------------------------------------------------
 
-FUNNEL_SEND_PATH = f"{BASE}/admin/funnel/send"
+PROSPECT_SEND_PATH = f"{BASE}/admin/prospect/send"
 
 
-class TestAdminFunnelSend(unittest.TestCase):
+class TestAdminProspectSend(unittest.TestCase):
 
     def setUp(self):
         self.mock_users_table    = MagicMock()
@@ -309,7 +309,7 @@ class TestAdminFunnelSend(unittest.TestCase):
 
         # Default: no existing user by email
         self.mock_users_table.query.return_value  = {"Items": []}
-        # scan for Count of existing funnel users
+        # scan for Count of existing prospect users
         self.mock_users_table.scan.return_value   = {"Count": 0}
         # locations scan returns CollinTx
         self.mock_locations_table.scan.return_value = {"Items": [COLLIN_TX]}
@@ -320,15 +320,15 @@ class TestAdminFunnelSend(unittest.TestCase):
         h = _admin_bearer()
         if headers:
             h.update(headers)
-        return _call("POST", FUNNEL_SEND_PATH, body=body, headers=h)
+        return _call("POST", PROSPECT_SEND_PATH, body=body, headers=h)
 
     def test_no_auth_returns_403(self):
-        resp = _call("POST", FUNNEL_SEND_PATH, body={"emails": ["x@y.com"]})
+        resp = _call("POST", PROSPECT_SEND_PATH, body={"emails": ["x@y.com"]})
         self.assertEqual(resp["statusCode"], 403)
 
     def test_non_admin_returns_403(self):
         token = auth_helpers.create_access_token("user-1", "user")
-        resp  = _call("POST", FUNNEL_SEND_PATH, body={"emails": ["x@y.com"]},
+        resp  = _call("POST", PROSPECT_SEND_PATH, body={"emails": ["x@y.com"]},
                       headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp["statusCode"], 403)
 
@@ -341,7 +341,7 @@ class TestAdminFunnelSend(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 400)
 
     def test_success_returns_200_with_results(self):
-        with patch("routers.funnel.send_funnel_email"):
+        with patch("routers.prospect.send_prospect_email"):
             resp = self._post({"emails": ["new@example.com"]})
         self.assertEqual(resp["statusCode"], 200)
         body = _body(resp)
@@ -353,7 +353,7 @@ class TestAdminFunnelSend(unittest.TestCase):
     def test_round_robin_price_assignment(self):
         """First email gets $19, second $39, third $59, fourth $79, fifth cycles to $19."""
         emails = [f"user{i}@example.com" for i in range(5)]
-        with patch("routers.funnel.send_funnel_email"):
+        with patch("routers.prospect.send_prospect_email"):
             resp = self._post({"emails": emails})
         body = _body(resp)
         prices = [r["price"] for r in body["results"] if r["status"] == "sent"]
@@ -365,7 +365,7 @@ class TestAdminFunnelSend(unittest.TestCase):
         updated = copy.deepcopy(existing)
         updated["status"] = "prospect"
         self.mock_users_table.update_item.return_value = {"Attributes": updated}
-        with patch("routers.funnel.send_funnel_email"):
+        with patch("routers.prospect.send_prospect_email"):
             resp = self._post({"emails": ["alice@example.com"]})
         self.assertEqual(resp["statusCode"], 200)
         # update_item called (not put_item)
@@ -373,13 +373,13 @@ class TestAdminFunnelSend(unittest.TestCase):
         self.mock_users_table.put_item.assert_not_called()
 
     def test_email_send_failure_returns_error_status(self):
-        with patch("routers.funnel.send_funnel_email", side_effect=Exception("SES error")):
+        with patch("routers.prospect.send_prospect_email", side_effect=Exception("SES error")):
             resp = self._post({"emails": ["fail@example.com"]})
         body = _body(resp)
         self.assertEqual(body["results"][0]["status"], "error")
 
     def test_skips_empty_emails(self):
-        with patch("routers.funnel.send_funnel_email"):
+        with patch("routers.prospect.send_prospect_email"):
             resp = self._post({"emails": ["", "  ", "valid@example.com"]})
         body = _body(resp)
         sent    = [r for r in body["results"] if r["status"] == "sent"]
@@ -389,16 +389,16 @@ class TestAdminFunnelSend(unittest.TestCase):
 
     def test_parses_email_with_name_format(self):
         """Test that 'John Doe <john@email.com>' is parsed correctly."""
-        with patch("routers.funnel.send_funnel_email") as mock_send:
+        with patch("routers.prospect.send_prospect_email"):
             resp = self._post({"emails": ["John Doe <john@example.com>"]})
-        
+
         body = _body(resp)
         result = body["results"][0]
-        
+
         # Check that clean email was used for user creation
         self.assertEqual(result["email"], "john@example.com")
         self.assertEqual(result["status"], "sent")
-        
+
         # Check that user was created with parsed names
         call_args = self.mock_users_table.put_item.call_args[1]
         user_item = call_args["Item"]
@@ -411,28 +411,27 @@ class TestAdminFunnelSend(unittest.TestCase):
     def test_parses_complex_name_formats(self):
         """Test various complex name formats in email input."""
         test_cases = [
-            # ("Dr. John Smith Jr. <john@example.com>", "John", "Smith"),
             ("Martin Van Buren <martin@example.com>", "Martin", "Van Buren"),
             ("Ann D'Souza <ann@example.com>", "Ann", "D'Souza"),
             ("Mary-Jane O'Connor <mary@example.com>", "Mary-Jane", "O'Connor"),
             ("john T. doe <john@example.com>", "John", "Doe"),
         ]
-        
+
         for email_input, expected_first, expected_last in test_cases:
             with self.subTest(email=email_input):
                 # Reset all mocks to ensure clean state
                 self.mock_users_table.reset_mock()
                 self.mock_users_table.query.return_value = {"Items": []}
                 self.mock_users_table.put_item.return_value = {}
-                
-                with patch("routers.funnel.send_funnel_email"):
+
+                with patch("routers.prospect.send_prospect_email"):
                     resp = self._post({"emails": [email_input]})
-                
+
                 # Check user creation call
                 self.mock_users_table.put_item.assert_called_once()
                 call_args = self.mock_users_table.put_item.call_args[1]
                 user_item = call_args["Item"]
-                
+
                 self.assertEqual(user_item["first_name"], expected_first)
                 self.assertEqual(user_item["last_name"], expected_last)
                 self.assertEqual(user_item["email"], email_input.split("<")[1].split(">")[0].strip())
@@ -440,27 +439,27 @@ class TestAdminFunnelSend(unittest.TestCase):
     def test_sends_clean_email_to_ses(self):
         """Test that only clean email address is passed to SES, not the full format."""
         mock_ses = MagicMock()
-        
+
         with patch("boto3.client", return_value=mock_ses):
-            with patch("routers.funnel.send_funnel_email") as mock_send:
+            with patch("routers.prospect.send_prospect_email") as mock_send:
                 resp = self._post({"emails": ["John Doe <john@example.com>"]})
-        
-        # Check that send_funnel_email was called with clean email
+
+        # Check that send_prospect_email was called with clean email
         mock_send.assert_called_once()
         send_call_args = mock_send.call_args[0]
         self.assertEqual(send_call_args[0], "john@example.com")  # to_email parameter
 
     def test_handles_email_without_brackets(self):
         """Test that regular email format still works."""
-        with patch("routers.funnel.send_funnel_email") as mock_send:
+        with patch("routers.prospect.send_prospect_email") as mock_send:
             resp = self._post({"emails": ["simple@example.com"]})
-        
+
         body = _body(resp)
         result = body["results"][0]
-        
+
         self.assertEqual(result["email"], "simple@example.com")
         self.assertEqual(result["status"], "sent")
-        
+
         # Check that user was created without names
         call_args = self.mock_users_table.put_item.call_args[1]
         user_item = call_args["Item"]
@@ -487,17 +486,17 @@ class TestAuthUnsubscribe(unittest.TestCase):
     def _post(self, body):
         return _call("POST", UNSUBSCRIBE_PATH, body=body)
 
-    def _funnel_token(self, user_id="user-1", email="x@y.com", price=39):
-        return auth_helpers.create_funnel_token(user_id, email, price)
+    def _prospect_token(self, user_id="user-1", email="x@y.com", price=39):
+        return auth_helpers.create_prospect_token(user_id, email, price)
 
     def test_valid_token_returns_200(self):
-        token = self._funnel_token()
+        token = self._prospect_token()
         resp  = self._post({"token": token})
         self.assertEqual(resp["statusCode"], 200)
         self.assertIn("message", _body(resp))
 
     def test_valid_token_calls_update_item(self):
-        token = self._funnel_token(user_id="user-abc")
+        token = self._prospect_token(user_id="user-abc")
         self._post({"token": token})
         self.mock_table.update_item.assert_called_once()
         call_kwargs = self.mock_table.update_item.call_args[1]
@@ -516,18 +515,18 @@ class TestAuthUnsubscribe(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 401)
 
     def test_access_token_rejected(self):
-        """Access tokens (type=access) must not work as funnel tokens."""
+        """Access tokens (type=access) must not work as prospect tokens."""
         token = auth_helpers.create_access_token("user-1", "user")
         resp  = self._post({"token": token})
         self.assertEqual(resp["statusCode"], 401)
 
-    def test_expired_funnel_token_returns_401(self):
+    def test_expired_prospect_token_returns_401(self):
         import jwt
         payload = {
             "sub":   "user-1",
             "email": "x@y.com",
             "price": 39,
-            "type":  "funnel",
+            "type":  "prospect",
             "exp":   datetime.now(timezone.utc) - timedelta(seconds=1),
         }
         token = jwt.encode(payload, auth_helpers.JWT_SECRET, algorithm="HS256")
@@ -536,7 +535,7 @@ class TestAuthUnsubscribe(unittest.TestCase):
 
     def test_database_error_returns_500(self):
         self.mock_table.update_item.side_effect = Exception("DynamoDB error")
-        token = self._funnel_token()
+        token = self._prospect_token()
         resp  = self._post({"token": token})
         self.assertEqual(resp["statusCode"], 500)
 
@@ -551,13 +550,13 @@ CHECKOUT_PATH = f"{BASE}/stripe/checkout"
 class TestStripeCheckout(unittest.TestCase):
     """Tests for POST /stripe/checkout.
 
-    The funnel router does `import stripe` lazily inside the handler, so we
+    The prospect router does `import stripe` lazily inside the handler, so we
     inject a mock stripe module into sys.modules in setUp / tearDown to avoid
     needing the real package installed in the test environment.
     """
 
     def setUp(self):
-        import routers.funnel as funnel_module
+        import routers.prospect as prospect_module
 
         # Build a minimal mock stripe module
         self._mock_stripe = MagicMock()
@@ -566,18 +565,17 @@ class TestStripeCheckout(unittest.TestCase):
         self._mock_stripe.checkout.Session.create.return_value = self._mock_session
         sys.modules["stripe"] = self._mock_stripe
 
-        # Ensure STRIPE_SECRET_KEY is non-empty (may be "" if test_auth loaded the
-        # module first with STRIPE_SECRET_KEY="" in os.environ).
-        self._funnel_module        = funnel_module
-        self._orig_stripe_key      = funnel_module.STRIPE_SECRET_KEY
-        funnel_module.STRIPE_SECRET_KEY = "sk_test_dummy"
+        # Ensure STRIPE_SECRET_KEY is non-empty
+        self._prospect_module        = prospect_module
+        self._orig_stripe_key        = prospect_module.STRIPE_SECRET_KEY
+        prospect_module.STRIPE_SECRET_KEY = "sk_test_dummy"
 
     def tearDown(self):
         sys.modules.pop("stripe", None)
-        self._funnel_module.STRIPE_SECRET_KEY = self._orig_stripe_key
+        self._prospect_module.STRIPE_SECRET_KEY = self._orig_stripe_key
 
-    def _funnel_token(self, user_id="user-1", email="x@y.com", price=39):
-        return auth_helpers.create_funnel_token(user_id, email, price)
+    def _prospect_token(self, user_id="user-1", email="x@y.com", price=39):
+        return auth_helpers.create_prospect_token(user_id, email, price)
 
     def _post(self, body):
         return _call("POST", CHECKOUT_PATH, body=body)
@@ -596,7 +594,7 @@ class TestStripeCheckout(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 401)
 
     def test_valid_token_creates_stripe_session(self):
-        token = self._funnel_token()
+        token = self._prospect_token()
         resp  = self._post({"token": token})
         self.assertEqual(resp["statusCode"], 200)
         body = _body(resp)
@@ -606,7 +604,7 @@ class TestStripeCheckout(unittest.TestCase):
 
     def test_stripe_session_params(self):
         """Verify the Checkout Session is created with the correct parameters."""
-        token = self._funnel_token(user_id="user-abc", email="x@y.com", price=59)
+        token = self._prospect_token(user_id="user-abc", email="x@y.com", price=59)
         self._post({"token": token})
         call_kwargs = self._mock_stripe.checkout.Session.create.call_args[1]
         self.assertEqual(call_kwargs["mode"], "subscription")
@@ -619,21 +617,21 @@ class TestStripeCheckout(unittest.TestCase):
 
     def test_stripe_error_returns_500(self):
         self._mock_stripe.checkout.Session.create.side_effect = Exception("Stripe down")
-        token = self._funnel_token()
+        token = self._prospect_token()
         resp  = self._post({"token": token})
         self.assertEqual(resp["statusCode"], 500)
 
     def test_no_stripe_key_returns_503(self):
         """When STRIPE_SECRET_KEY is empty, return 503."""
-        import routers.funnel as funnel_module
-        original = funnel_module.STRIPE_SECRET_KEY
-        funnel_module.STRIPE_SECRET_KEY = ""
+        import routers.prospect as prospect_module
+        original = prospect_module.STRIPE_SECRET_KEY
+        prospect_module.STRIPE_SECRET_KEY = ""
         try:
-            token = self._funnel_token()
+            token = self._prospect_token()
             resp  = self._post({"token": token})
             self.assertEqual(resp["statusCode"], 503)
         finally:
-            funnel_module.STRIPE_SECRET_KEY = original
+            prospect_module.STRIPE_SECRET_KEY = original
 
 
 # ---------------------------------------------------------------------------
@@ -716,7 +714,7 @@ class TestRoundRobinPrice(unittest.TestCase):
 
     def test_ladder_with_offset(self):
         ladder = [19, 39, 59, 79]
-        # Simulate 3 existing funnel users (offset=3)
+        # Simulate 3 existing prospect users (offset=3)
         prices = [ladder[(3 + i) % len(ladder)] for i in range(4)]
         self.assertEqual(prices, [79, 19, 39, 59])
 

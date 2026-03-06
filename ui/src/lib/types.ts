@@ -44,7 +44,7 @@ export interface User {
   createdAt: string
 }
 
-export interface FunnelSendResult {
+export interface ProspectSendResult {
   email: string
   status: 'sent' | 'skipped' | 'error'
   userId?: string
@@ -52,9 +52,9 @@ export interface FunnelSendResult {
   message?: string
 }
 
-export interface FunnelSendResponse {
+export interface ProspectSendResponse {
   requestId: string
-  results: FunnelSendResult[]
+  results: ProspectSendResult[]
   count: number
 }
 

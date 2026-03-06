@@ -17,13 +17,14 @@ from boto3.dynamodb.conditions import Key
 import db
 from auth_helpers import (
     create_access_token,
-    create_funnel_token,
+    create_prospect_token,
     create_magic_token,
     get_bearer_payload,
+    send_magic_link,
     verify_token,
 )
-from data_helpers import get_user_by_email, parse_email_input
-from email_helpers import send_funnel_email, send_magic_link
+from data_helpers import parse_email_input
+from email_helpers import send_prospect_email
 from models import Lead, User
 from utils import now_iso
 
@@ -101,7 +102,7 @@ def request_login():
 
     clean_email, first_name, last_name = parse_email_input(email_input)
 
-    user = get_user_by_email(clean_email)
+    user = db.get_user_by_email(clean_email)
     if user:
         token = create_magic_token(clean_email)
         send_magic_link(clean_email, token)
@@ -111,15 +112,15 @@ def request_login():
             user = _create_inbound_user(clean_email, first_name, last_name)
             leads_raw  = _fetch_sample_leads(10)
             leads_dicts = [Lead.from_dynamo(item).to_dict() for item in leads_raw]
-            funnel_token = create_funnel_token(user["user_id"], clean_email, user["offered_price"])
-            send_funnel_email(
-                clean_email, funnel_token, leads_dicts, user["offered_price"],
+            prospect_token = create_prospect_token(user["user_id"], clean_email, user["offered_price"])
+            send_prospect_email(
+                clean_email, prospect_token, leads_dicts, user["offered_price"],
                 first_name, last_name, user["user_id"],
             )
-            logger.info("Created inbound user and sent funnel email: %s", clean_email)
+            logger.info("Created inbound user and sent prospect email: %s", clean_email)
         except Exception as exc:
             logger.error(
-                "Failed to create inbound user or send funnel email for %s: %s",
+                "Failed to create inbound user or send prospect email for %s: %s",
                 clean_email, exc,
             )
             # Still return 200 to prevent email enumeration
@@ -144,7 +145,7 @@ def verify_login():
         return {"error": "Invalid or expired login link"}, 401
 
     email = payload.get("sub", "")
-    user  = get_user_by_email(email)
+    user  = db.get_user_by_email(email)
     if not user:
         return {"error": "User not found"}, 404
 

@@ -106,7 +106,7 @@ MOCK_ACTIVITY = {
     "email_template": "prospect_email_v1.html",
     "from_name":     "Jane Smith",
     "subject_line":  "Your leads",
-    "funnel_token":  "tok.abc.xyz",
+    "prospect_token":  "tok.abc.xyz",
     "metadata":      {"to_email": "x@y.com", "price": 39},
 }
 
@@ -171,13 +171,13 @@ class TestAdminActivityLog(unittest.TestCase):
             "email_template": "v1.html",
             "from_name":      "Jane",
             "subject_line":   "Hello",
-            "funnel_token":   "tok.123",
+            "prospect_token": "tok.123",
         })
         item = self.mock_activities.put_item.call_args[1]["Item"]
         self.assertEqual(item["email_template"], "v1.html")
         self.assertEqual(item["from_name"], "Jane")
         self.assertEqual(item["subject_line"], "Hello")
-        self.assertEqual(item["funnel_token"], "tok.123")
+        self.assertEqual(item["prospect_token"], "tok.123")
 
     def test_database_error_returns_500(self):
         self.mock_activities.put_item.side_effect = Exception("DynamoDB error")
@@ -270,7 +270,7 @@ class TestActivityTrack(unittest.TestCase):
         db.activities_table  = self.mock_activities
 
     def _funnel_token(self, user_id="user-1", email="x@y.com", price=39):
-        return auth_helpers.create_funnel_token(user_id, email, price)
+        return auth_helpers.create_prospect_token(user_id, email, price)
 
     def _post(self, body):
         return _call("POST", TRACK_PATH, body=body)
@@ -307,7 +307,7 @@ class TestActivityTrack(unittest.TestCase):
         item = self.mock_activities.put_item.call_args[1]["Item"]
         self.assertEqual(item["user_id"], "user-abc")
         self.assertEqual(item["activity_type"], "subscribe_clicked")
-        self.assertEqual(item["funnel_token"], token)
+        self.assertEqual(item["prospect_token"], token)
 
     def test_metadata_includes_email_and_price(self):
         token = self._funnel_token(user_id="u1", email="test@example.com", price=59)

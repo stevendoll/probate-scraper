@@ -15,7 +15,7 @@ import Dashboard from '@/pages/Dashboard'
 import Account from '@/pages/Account'
 import AdminUsers from '@/pages/admin/Users'
 import AdminUserDetail from '@/pages/admin/UserDetail'
-import AdminFunnelSend from '@/pages/admin/FunnelSend'
+import AdminProspectSend from '@/pages/admin/ProspectSend'
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -75,8 +75,8 @@ function AdminLayout() {
             <Link to="/admin/users" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Users
             </Link>
-            <Link to="/admin/funnel/send" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Funnel
+            <Link to="/admin/prospect/send" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Prospects
             </Link>
             <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               My dashboard
@@ -105,7 +105,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/auth/verify" element={<AuthVerify />} />
 
-          {/* Public funnel pages — no auth required */}
+          {/* Public prospect pages — no auth required */}
           <Route path="/signup" element={<Signup />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
 
@@ -120,7 +120,7 @@ export default function App() {
             <Route element={<AdminLayout />}>
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/users/:userId" element={<AdminUserDetail />} />
-              <Route path="/admin/funnel/send" element={<AdminFunnelSend />} />
+              <Route path="/admin/prospect/send" element={<AdminProspectSend />} />
             </Route>
           </Route>
 
