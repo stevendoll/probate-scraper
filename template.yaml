@@ -153,8 +153,10 @@ Globals:
         DYNAMO_TABLE_NAME: !Ref LeadsTable
         LOCATIONS_TABLE_NAME: !Ref LocationsTable
         USERS_TABLE_NAME: !Ref UsersTable
+        ACTIVITIES_TABLE_NAME: !Ref ActivitiesTable
         GSI_NAME: recorded-date-index
         LOCATION_DATE_GSI: location-date-index
+        USER_ACTIVITY_GSI: user-activity-index
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         JWT_SECRET: !Ref JwtSecret
@@ -279,6 +281,31 @@ Resources:
           KeySchema:
             - AttributeName: email
               KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ActivitiesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: activities
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: activity_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: activity_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-activity-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
           Projection:
             ProjectionType: ALL
 
@@ -485,6 +512,15 @@ Resources:
               Resource:
                 - !GetAtt UsersTable.Arn
                 - !Sub "${UsersTable.Arn}/index/*"
+        # Activities — write + query
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt ActivitiesTable.Arn
+                - !Sub "${ActivitiesTable.Arn}/index/*"
         # SES — send magic-link emails (only when FROM_EMAIL is set)
         - Statement:
             - Effect: Allow
@@ -758,6 +794,55 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/funnel/send
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        # Activity — admin log/query + public track
+        AdminActivityLog:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/activity/log
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+        AdminActivityQuery:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/activity/query
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+        ActivityTrack:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/activity/track
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+        OptionsAdminActivityLog:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/activity/log
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsAdminActivityQuery:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/activity/query
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsActivityTrack:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/activity/track
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
@@ -1043,6 +1128,10 @@ Outputs:
   UsersTableName:
     Description: Users DynamoDB table name
     Value: !Ref UsersTable
+
+  ActivitiesTableName:
+    Description: Activities DynamoDB table name
+    Value: !Ref ActivitiesTable
 
   DocumentsBucketName:
     Description: S3 bucket storing scraped documents (documents/{location_code}/{doc_number}.pdf)

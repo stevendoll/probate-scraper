@@ -6,8 +6,10 @@ POST /activity/track  - for tracking link clicks from emails
 """
 
 import uuid
+
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler.api_gateway import Router
+from boto3.dynamodb.conditions import Key
 
 import db
 from auth_helpers import get_bearer_payload, verify_token
@@ -90,7 +92,7 @@ def query_activities():
     try:
         result = db.activities_table.query(
             IndexName="user-activity-index",
-            KeyConditionExpression=db.Key("user_id").eq(user_id),
+            KeyConditionExpression=Key("user_id").eq(user_id),
             ScanIndexForward=False,
             Limit=body.get("limit", 50),
         )

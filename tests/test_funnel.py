@@ -54,9 +54,11 @@ _mock_tracer.capture_method = lambda f: f
 
 with patch("boto3.resource", return_value=MagicMock()), \
      patch("aws_lambda_powertools.Tracer", return_value=_mock_tracer):
-    import app        # noqa: E402
-    import db         # noqa: E402
-    import auth_helpers  # noqa: E402
+    import app            # noqa: E402
+    import db             # noqa: E402
+    import auth_helpers   # noqa: E402
+    import email_helpers  # noqa: E402
+    import data_helpers   # noqa: E402
     import routers.funnel as funnel_module  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -106,103 +108,103 @@ BASE = "/real-estate/probate-leads"
 
 
 # ---------------------------------------------------------------------------
-# routers.funnel — _parse_name helper
+# data_helpers — parse_name / capitalize_name
 # ---------------------------------------------------------------------------
 
 class TestParseName(unittest.TestCase):
 
     def test_simple_first_last(self):
-        first, last = funnel_module._parse_name("John Doe")
+        first, last = data_helpers.parse_name("John Doe")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Doe")
 
     def test_lowercase_names(self):
-        first, last = funnel_module._parse_name("john doe")
+        first, last = data_helpers.parse_name("john doe")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Doe")
 
     def test_with_middle_initial(self):
-        first, last = funnel_module._parse_name("john T. doe")
+        first, last = data_helpers.parse_name("john T. doe")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Doe")
 
     def test_compound_last_name_van(self):
-        first, last = funnel_module._parse_name("Martin Van Buren")
+        first, last = data_helpers.parse_name("Martin Van Buren")
         self.assertEqual(first, "Martin")
         self.assertEqual(last, "Van Buren")
 
     def test_apostrophe_name(self):
-        first, last = funnel_module._parse_name("Ann D'Souza")
+        first, last = data_helpers.parse_name("Ann D'Souza")
         self.assertEqual(first, "Ann")
         self.assertEqual(last, "D'Souza")
 
     def test_hyphenated_first_name(self):
-        first, last = funnel_module._parse_name("Mary-Jane O'Connor")
+        first, last = data_helpers.parse_name("Mary-Jane O'Connor")
         self.assertEqual(first, "Mary-Jane")
         self.assertEqual(last, "O'Connor")
 
     def test_single_name_only(self):
-        first, last = funnel_module._parse_name("Cher")
+        first, last = data_helpers.parse_name("Cher")
         self.assertEqual(first, "Cher")
         self.assertEqual(last, "")
 
     def test_with_prefixes(self):
-        first, last = funnel_module._parse_name("Dr. John Smith")
+        first, last = data_helpers.parse_name("Dr. John Smith")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Smith")
 
     def test_with_suffixes(self):
-        first, last = funnel_module._parse_name("John Smith Jr.")
+        first, last = data_helpers.parse_name("John Smith Jr.")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Smith")
 
     def test_with_prefix_and_suffix(self):
-        first, last = funnel_module._parse_name("Dr. John Smith Jr.")
+        first, last = data_helpers.parse_name("Dr. John Smith Jr.")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Smith")
 
     def test_empty_string(self):
-        first, last = funnel_module._parse_name("")
+        first, last = data_helpers.parse_name("")
         self.assertEqual(first, "")
         self.assertEqual(last, "")
 
     def test_none_input(self):
-        first, last = funnel_module._parse_name(None)
+        first, last = data_helpers.parse_name(None)
         self.assertEqual(first, "")
         self.assertEqual(last, "")
 
     def test_multiple_middle_names(self):
-        first, last = funnel_module._parse_name("John Michael Andrew Smith")
+        first, last = data_helpers.parse_name("John Michael Andrew Smith")
         self.assertEqual(first, "John")
         self.assertEqual(last, "Smith")
 
     def test_mixed_case_compound(self):
-        first, last = funnel_module._parse_name("martin van buren")
+        first, last = data_helpers.parse_name("martin van buren")
         self.assertEqual(first, "Martin")
         self.assertEqual(last, "Van Buren")
 
     def test_capitalize_helper_apostrophe(self):
-        result = funnel_module._capitalize_name("d'souza")
+        result = data_helpers.capitalize_name("d'souza")
         self.assertEqual(result, "D'Souza")
 
     def test_capitalize_helper_hyphen(self):
-        result = funnel_module._capitalize_name("mary-jane")
+        result = data_helpers.capitalize_name("mary-jane")
         self.assertEqual(result, "Mary-Jane")
 
     def test_capitalize_helper_simple(self):
-        result = funnel_module._capitalize_name("john")
+        result = data_helpers.capitalize_name("john")
         self.assertEqual(result, "John")
 
     def test_capitalize_helper_initial(self):
-        result = funnel_module._capitalize_name("t.")
+        result = data_helpers.capitalize_name("t.")
         self.assertEqual(result, "T.")
 
     def test_capitalize_helper_single_letter(self):
-        result = funnel_module._capitalize_name("a")
+        result = data_helpers.capitalize_name("a")
         self.assertEqual(result, "A")
 
     def test_capitalize_helper_empty(self):
-        result = funnel_module._capitalize_name("")
+        result = data_helpers.capitalize_name("")
         self.assertEqual(result, "")
 
 
@@ -243,49 +245,49 @@ class TestCreateFunnelToken(unittest.TestCase):
 class TestSendFunnelEmail(unittest.TestCase):
 
     def test_no_ses_when_from_email_unset(self):
-        original = auth_helpers.FROM_EMAIL
-        auth_helpers.FROM_EMAIL = ""
+        original = email_helpers.FROM_EMAIL
+        email_helpers.FROM_EMAIL = ""
         try:
             leads = [{"grantor": "SMITH JOHN", "recordedDate": "2026-01-23", "docNumber": "123"}]
             token = auth_helpers.create_funnel_token("u1", "x@y.com", 19)
             with patch("boto3.client") as mock_boto:
-                auth_helpers.send_funnel_email("x@y.com", token, leads, 19)
+                email_helpers.send_funnel_email("x@y.com", token, leads, 19)
                 mock_boto.assert_not_called()
         finally:
-            auth_helpers.FROM_EMAIL = original
+            email_helpers.FROM_EMAIL = original
 
     def test_calls_ses_when_from_email_set(self):
-        original = auth_helpers.FROM_EMAIL
-        auth_helpers.FROM_EMAIL = "noreply@example.com"
+        original = email_helpers.FROM_EMAIL
+        email_helpers.FROM_EMAIL = "noreply@example.com"
         try:
             leads = [{"grantor": "SMITH JOHN", "recordedDate": "2026-01-23", "docNumber": "123"}]
             token = auth_helpers.create_funnel_token("u1", "x@y.com", 19)
             mock_ses = MagicMock()
             with patch("boto3.client", return_value=mock_ses):
-                auth_helpers.send_funnel_email("x@y.com", token, leads, 19)
+                email_helpers.send_funnel_email("x@y.com", token, leads, 19)
             mock_ses.send_email.assert_called_once()
             call_kwargs = mock_ses.send_email.call_args[1]
             self.assertIn("Html", call_kwargs["Message"]["Body"])
         finally:
-            auth_helpers.FROM_EMAIL = original
+            email_helpers.FROM_EMAIL = original
 
     def test_subscribe_url_in_html(self):
-        original_from = auth_helpers.FROM_EMAIL
-        original_ui   = auth_helpers.UI_BASE_URL
-        auth_helpers.FROM_EMAIL  = "noreply@example.com"
-        auth_helpers.UI_BASE_URL = "https://example.com"
+        original_from = email_helpers.FROM_EMAIL
+        original_ui   = email_helpers.UI_BASE_URL
+        email_helpers.FROM_EMAIL  = "noreply@example.com"
+        email_helpers.UI_BASE_URL = "https://example.com"
         try:
             leads = []
             token = auth_helpers.create_funnel_token("u1", "x@y.com", 39)
             mock_ses = MagicMock()
             with patch("boto3.client", return_value=mock_ses):
-                auth_helpers.send_funnel_email("x@y.com", token, leads, 39)
+                email_helpers.send_funnel_email("x@y.com", token, leads, 39)
             html = mock_ses.send_email.call_args[1]["Message"]["Body"]["Html"]["Data"]
             self.assertIn("/signup?token=", html)
             self.assertIn("/unsubscribe?token=", html)
         finally:
-            auth_helpers.FROM_EMAIL  = original_from
-            auth_helpers.UI_BASE_URL = original_ui
+            email_helpers.FROM_EMAIL  = original_from
+            email_helpers.UI_BASE_URL = original_ui
 
 
 # ---------------------------------------------------------------------------
