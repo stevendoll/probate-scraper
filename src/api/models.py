@@ -163,26 +163,28 @@ class Location:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Activity:
-    """User activity tracking for prospect journey."""
-    activity_id:    str = ""
+class Event:
+    """User event tracking for prospect journey."""
+    event_id:       str = ""
     user_id:        str = ""
-    activity_type:  str = ""  # email_sent, link_clicked, subscribe_clicked, unsubscribe_clicked, signup_completed
+    event_type:     str = ""  # email_sent, email_open, email_bounce, email_complaint, link_clicked, subscribe_clicked, unsubscribe_clicked, signup_completed
     timestamp:      str = ""
-    email_template:  str = ""  # template file used
+    variant:        str = ""  # A/B test variant name
+    email_template: str = ""  # template file used
     from_name:      str = ""  # from name used
     subject_line:   str = ""  # subject line used
     prospect_token: str = ""  # prospect token for tracking
     metadata:       dict = field(default_factory=dict)  # additional data
 
     @classmethod
-    def from_dynamo(cls, item: dict) -> "Activity":
+    def from_dynamo(cls, item: dict) -> "Event":
         return cls(
-            activity_id=    item.get("activity_id", ""),
+            event_id=       item.get("event_id", ""),
             user_id=        item.get("user_id", ""),
-            activity_type=  item.get("activity_type", ""),
+            event_type=     item.get("event_type", ""),
             timestamp=      item.get("timestamp", ""),
-            email_template=  item.get("email_template", ""),
+            variant=        item.get("variant", ""),
+            email_template= item.get("email_template", ""),
             from_name=      item.get("from_name", ""),
             subject_line=   item.get("subject_line", ""),
             prospect_token= item.get("prospect_token", ""),
@@ -191,10 +193,11 @@ class Activity:
 
     def to_dict(self) -> dict:
         return {
-            "activityId":    self.activity_id,
+            "eventId":       self.event_id,
             "userId":        self.user_id,
-            "activityType":  self.activity_type,
+            "eventType":     self.event_type,
             "timestamp":     self.timestamp,
+            "variant":       self.variant,
             "emailTemplate": self.email_template,
             "fromName":      self.from_name,
             "subjectLine":   self.subject_line,

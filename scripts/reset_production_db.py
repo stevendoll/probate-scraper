@@ -159,7 +159,7 @@ def main():
     
     # Tables to reset (in safe order - no foreign key dependencies)
     tables_to_reset = [
-        "activities",    # Activity tracking
+        "events",        # Event tracking
         "users",         # User accounts  
         "leads",         # Scraped leads
         "locations",      # Location metadata

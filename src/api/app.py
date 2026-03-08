@@ -23,25 +23,25 @@ Routes (all under /real-estate/probate-leads/):
   DELETE /admin/users/{user_id}             — soft-delete user (admin Bearer token)
   POST /admin/prospect/send                 — send prospect emails (admin Bearer token)
   POST /auth/unsubscribe                    — unsubscribe via prospect JWT (no API key)
-  POST /admin/activity/log                  — log user activity (admin Bearer token)
-  POST /admin/activity/query                — query user activities (admin Bearer token)
-  POST /activity/track                     — track funnel link clicks (public, token-based)
+  POST /events                              — track prospect-initiated events (prospect JWT)
+  GET  /events                              — query events for a user (admin Bearer token, ?user_id=&limit=)
   POST /stripe/checkout                     — create Stripe Checkout Session (no API key)
 
 Environment variables:
   DYNAMO_TABLE_NAME       — leads table
   LOCATIONS_TABLE_NAME    — locations table
   USERS_TABLE_NAME        — users table
-  ACTIVITIES_TABLE_NAME  — activities table
+  EVENTS_TABLE_NAME       — events table
   GSI_NAME                — legacy leads GSI (recorded-date-index)
   LOCATION_DATE_GSI       — new leads GSI (location-date-index)
-  USER_ACTIVITY_GSI       — activities GSI (user-activity-index)
+  USER_EVENT_GSI          — events GSI (user-event-index)
   STRIPE_SECRET_KEY       — Stripe secret key
   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
   JWT_SECRET              — HMAC-SHA256 secret for magic + access tokens
   MAGIC_LINK_BASE_URL     — base URL for magic link emails
   UI_BASE_URL             — base URL for prospect subscribe/unsubscribe links
   FROM_EMAIL              — SES verified sender; leave blank to skip sending (local dev)
+  SES_CONFIGURATION_SET  — SES configuration set name for event publishing
 """
 
 from aws_lambda_powertools import Logger, Tracer
@@ -58,7 +58,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import leads, locations, users, stripe, auth, admin, prospect, activity
+from routers import leads, locations, users, stripe, auth, admin, prospect, event
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -79,7 +79,7 @@ api.include_router(stripe.router)
 api.include_router(auth.router)
 api.include_router(admin.router)
 api.include_router(prospect.router)
-api.include_router(activity.router)
+api.include_router(event.router)
 
 # ---------------------------------------------------------------------------
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)

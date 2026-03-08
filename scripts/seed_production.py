@@ -23,13 +23,13 @@ from boto3.dynamodb.types import TypeSerializer
 DYNAMO_TABLE_NAME       = os.environ.get("DYNAMO_TABLE_NAME", "leads")
 LOCATIONS_TABLE_NAME    = os.environ.get("LOCATIONS_TABLE_NAME", "locations")
 USERS_TABLE_NAME        = os.environ.get("USERS_TABLE_NAME", "users")
-ACTIVITIES_TABLE_NAME  = os.environ.get("ACTIVITIES_TABLE_NAME", "activities")
+EVENTS_TABLE_NAME      = os.environ.get("EVENTS_TABLE_NAME", "events")
 REGION                 = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
 # Index names
-GSI_NAME               = os.environ.get("GSI_NAME", "recorded-date-index")
-LOCATION_DATE_GSI       = os.environ.get("LOCATION_DATE_GSI", "location-date-index")
-USER_ACTIVITY_GSI       = os.environ.get("USER_ACTIVITY_GSI", "user-activity-index")
+GSI_NAME          = os.environ.get("GSI_NAME", "recorded-date-index")
+LOCATION_DATE_GSI = os.environ.get("LOCATION_DATE_GSI", "location-date-index")
+USER_EVENT_GSI    = os.environ.get("USER_EVENT_GSI", "user-event-index")
 
 def table_exists(dynamodb, table_name: str) -> bool:
     """Check if table exists."""
@@ -148,38 +148,38 @@ def create_users_table(dynamodb):
     wait_for_table(dynamodb, USERS_TABLE_NAME)
     print(f"  '{USERS_TABLE_NAME}' ready.")
 
-def create_activities_table(dynamodb):
-    """Create activities table with GSI."""
-    print(f"Creating table '{ACTIVITIES_TABLE_NAME}'...")
-    
-    if table_exists(dynamodb, ACTIVITIES_TABLE_NAME):
-        print(f"  Table '{ACTIVITIES_TABLE_NAME}' already exists.")
+def create_events_table(dynamodb):
+    """Create events table with GSI."""
+    print(f"Creating table '{EVENTS_TABLE_NAME}'...")
+
+    if table_exists(dynamodb, EVENTS_TABLE_NAME):
+        print(f"  Table '{EVENTS_TABLE_NAME}' already exists.")
         return
-    
+
     dynamodb.create_table(
-        TableName=ACTIVITIES_TABLE_NAME,
+        TableName=EVENTS_TABLE_NAME,
         BillingMode="PAY_PER_REQUEST",
         AttributeDefinitions=[
-            {"AttributeName": "activity_id",    "AttributeType": "S"},
-            {"AttributeName": "user_id",        "AttributeType": "S"},
-            {"AttributeName": "timestamp",      "AttributeType": "S"},
+            {"AttributeName": "event_id",  "AttributeType": "S"},
+            {"AttributeName": "user_id",   "AttributeType": "S"},
+            {"AttributeName": "timestamp", "AttributeType": "S"},
         ],
         KeySchema=[
-            {"AttributeName": "activity_id", "KeyType": "HASH"},
+            {"AttributeName": "event_id", "KeyType": "HASH"},
         ],
         GlobalSecondaryIndexes=[
             {
-                "IndexName": USER_ACTIVITY_GSI,
+                "IndexName": USER_EVENT_GSI,
                 "KeySchema": [
-                    {"AttributeName": "user_id", "KeyType": "HASH"},
-                    {"AttributeName": "timestamp", "KeyType": "RANGE"},
+                    {"AttributeName": "user_id",   "KeyType": "HASH"},
+                    {"AttributeName": "timestamp",  "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },
         ],
     )
-    wait_for_table(dynamodb, ACTIVITIES_TABLE_NAME)
-    print(f"  '{ACTIVITIES_TABLE_NAME}' ready.")
+    wait_for_table(dynamodb, EVENTS_TABLE_NAME)
+    print(f"  '{EVENTS_TABLE_NAME}' ready.")
 
 def seed_locations(dynamodb):
     """Seed CollinTx location."""
@@ -269,7 +269,7 @@ def main():
     # create_leads_table(dynamodb)
     create_locations_table(dynamodb)
     create_users_table(dynamodb)
-    create_activities_table(dynamodb)
+    create_events_table(dynamodb)
     print("")
     
     # Seed initial data

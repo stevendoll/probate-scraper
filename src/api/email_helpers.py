@@ -17,8 +17,9 @@ import boto3
 
 log = logging.getLogger(__name__)
 
-FROM_EMAIL  = os.environ.get("FROM_EMAIL", "")
-UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://localhost:3001")
+FROM_EMAIL            = os.environ.get("FROM_EMAIL", "")
+UI_BASE_URL           = os.environ.get("UI_BASE_URL", "http://localhost:3001")
+SES_CONFIGURATION_SET = os.environ.get("SES_CONFIGURATION_SET", "")
 
 
 def _load_random_line_from_file(file_path: Path) -> str:
@@ -40,6 +41,7 @@ def send_prospect_email(
     first_name: str = None,
     last_name: str = None,
     user_id: str = None,
+    variant: str = "default",
 ) -> None:
     """Send a marketing prospect email with sample leads and subscribe/unsubscribe links.
 
@@ -52,7 +54,8 @@ def send_prospect_email(
         price:      Offered monthly subscription price in dollars.
         first_name: Optional first name for subject-line personalization.
         last_name:  Optional last name (unused currently, available for templates).
-        user_id:    User ID for activity logging after a successful send.
+        user_id:    User ID for event logging after a successful send.
+        variant:    A/B test variant name for event tracking (default: "default").
     """
     subscribe_url   = f"{UI_BASE_URL}/signup?token={token}"
     unsubscribe_url = f"{UI_BASE_URL}/unsubscribe?token={token}"
@@ -126,36 +129,44 @@ def send_prospect_email(
 
     ses = boto3.client("ses")
     source_email = f"{from_name} <{FROM_EMAIL}>" if from_name else FROM_EMAIL
-    try:
-        ses.send_email(
-            Source=source_email,
-            Destination={"ToAddresses": [to_email]},
-            Message={
-                "Subject": {"Data": subject},
-                "Body": {
-                    "Text": {"Data": text_body},
-                    "Html": {"Data": html_body},
-                },
+    send_kwargs = {
+        "Source":      source_email,
+        "Destination": {"ToAddresses": [to_email]},
+        "Message": {
+            "Subject": {"Data": subject},
+            "Body": {
+                "Text": {"Data": text_body},
+                "Html": {"Data": html_body},
             },
-        )
+        },
+    }
+    if SES_CONFIGURATION_SET:
+        send_kwargs["ConfigurationSetName"] = SES_CONFIGURATION_SET
+        send_kwargs["Tags"] = [
+            {"Name": "user_id", "Value": user_id or ""},
+            {"Name": "variant", "Value": variant},
+        ]
+    try:
+        ses.send_email(**send_kwargs)
     except Exception as exc:
         log.error("SES send_email (prospect) failed for %s: %s", to_email, exc)
         raise
 
-    # Log activity only after a confirmed successful send
+    # Log event only after a confirmed successful send
     if user_id:
-        from auth_helpers import log_activity  # local import avoids circular dep at module load
-        log_activity(
+        from auth_helpers import log_event  # local import avoids circular dep at module load
+        log_event(
             user_id=user_id,
-            activity_type="email_sent",
+            event_type="email_sent",
+            variant=variant,
             email_template="prospect_email_v1.html",
             from_name=from_name,
             subject_line=subject,
             prospect_token=token,
             metadata={
-                "to_email": to_email,
-                "price": price,
-                "lead_count": len(leads),
+                "to_email":    to_email,
+                "price":       price,
+                "lead_count":  len(leads),
                 "personalized": bool(first_name),
             },
         )
