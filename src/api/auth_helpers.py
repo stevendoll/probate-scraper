@@ -1,5 +1,5 @@
 """
-auth_helpers.py — JWT creation/verification, magic-link sending, and activity logging.
+auth_helpers.py — JWT creation/verification, magic-link sending, and event logging.
 
 Token types
 -----------
@@ -121,36 +121,38 @@ def send_magic_link(email: str, token: str) -> None:
         log.error("SES send_email failed: %s", exc)
 
 
-def log_activity(
+def log_event(
     user_id: str,
-    activity_type: str,
+    event_type: str,
+    variant: str = "",
     email_template: str = "",
     from_name: str = "",
     subject_line: str = "",
     prospect_token: str = "",
     metadata: dict = None,
 ) -> None:
-    """Write a user activity record to the activities DynamoDB table.
+    """Write a user event record to the events DynamoDB table.
 
-    Failures are logged and swallowed — activity logging must never break
+    Failures are logged and swallowed — event logging must never break
     the primary email or auth flow.
     """
     if metadata is None:
         metadata = {}
     try:
         import db  # local import keeps auth_helpers free of top-level db dependency
-        activity_item = {
-            "activity_id":    str(uuid.uuid4()),
+        event_item = {
+            "event_id":       str(uuid.uuid4()),
             "user_id":        user_id,
-            "activity_type":  activity_type,
+            "event_type":     event_type,
             "timestamp":      now_iso(),
+            "variant":        variant,
             "email_template": email_template,
             "from_name":      from_name,
             "subject_line":   subject_line,
             "prospect_token": prospect_token,
             "metadata":       metadata,
         }
-        db.activities_table.put_item(Item=activity_item)
-        log.info("Activity logged: %s for user %s", activity_type, user_id)
+        db.events_table.put_item(Item=event_item)
+        log.info("Event logged: %s for user %s", event_type, user_id)
     except Exception as exc:
-        log.error("Failed to log activity: %s", exc)
+        log.error("Failed to log event: %s", exc)

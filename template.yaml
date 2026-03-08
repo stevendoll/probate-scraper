@@ -153,10 +153,11 @@ Globals:
         DYNAMO_TABLE_NAME: !Ref LeadsTable
         LOCATIONS_TABLE_NAME: !Ref LocationsTable
         USERS_TABLE_NAME: !Ref UsersTable
-        ACTIVITIES_TABLE_NAME: activities
+        EVENTS_TABLE_NAME: events
         GSI_NAME: recorded-date-index
         LOCATION_DATE_GSI: location-date-index
-        USER_ACTIVITY_GSI: user-activity-index
+        USER_EVENT_GSI: user-event-index
+        SES_CONFIGURATION_SET: !Ref SesConfigurationSet
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         JWT_SECRET: !Ref JwtSecret
@@ -284,23 +285,24 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  ActivitiesTable:
+  EventsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
     Properties:
-      TableName: activities
+      TableName: events
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: activity_id
+        - AttributeName: event_id
           AttributeType: S
         - AttributeName: user_id
           AttributeType: S
         - AttributeName: timestamp
           AttributeType: S
       KeySchema:
-        - AttributeName: activity_id
+        - AttributeName: event_id
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: user-activity-index
+        - IndexName: user-event-index
           KeySchema:
             - AttributeName: user_id
               KeyType: HASH
@@ -308,6 +310,77 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  # ── SES — Configuration Set + Event Publishing ─────────────────────────────
+  # Publishes send/delivery/open/bounce/complaint events to SNS.
+  # SES automatically adds a tracking pixel to HTML emails for open tracking.
+  # Click tracking is intentionally disabled to preserve prospect token links.
+
+  SesConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: !Sub "${AWS::StackName}-events"
+
+  SesEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-ses-events"
+
+  SesEventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SesEventsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SesEventsTopic
+
+  SesConfigurationSetEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesConfigurationSet
+      EventDestination:
+        Name: ses-events-sns
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          - delivery
+          - open
+          - bounce
+          - complaint
+        SnsDestination:
+          TopicARN: !Ref SesEventsTopic
+
+  # ── Lambda — SES event processor ──────────────────────────────────────────
+
+  SesEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: probate-leads-ses-events
+      CodeUri: src/ses_events/
+      Handler: app.handler
+      MemorySize: 128
+      Timeout: 30
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: events
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/events"
+      Events:
+        SnsEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref SesEventsTopic
 
   # ── CloudWatch Log Group ──────────────────────────────────────────────────
 
@@ -512,15 +585,15 @@ Resources:
               Resource:
                 - !GetAtt UsersTable.Arn
                 - !Sub "${UsersTable.Arn}/index/*"
-        # Activities — write + query
+        # Events — write + query
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:PutItem
                 - dynamodb:Query
               Resource:
-                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/activities"
-                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/activities/index/*"
+                - !GetAtt EventsTable.Arn
+                - !Sub "${EventsTable.Arn}/index/*"
         # SES — send magic-link emails (only when FROM_EMAIL is set)
         - Statement:
             - Effect: Allow
@@ -797,52 +870,28 @@ Resources:
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
-        # Activity — admin log/query + public track
-        AdminActivityLog:
+        # Events — POST (prospect JWT) + GET (admin Bearer token)
+        PostEvents:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/activity/log
+            Path: /real-estate/probate-leads/events
             Method: POST
             Auth:
               ApiKeyRequired: false
-        AdminActivityQuery:
+        GetEvents:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/activity/query
-            Method: POST
+            Path: /real-estate/probate-leads/events
+            Method: GET
             Auth:
               ApiKeyRequired: false
-        ActivityTrack:
+        OptionsEvents:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/activity/track
-            Method: POST
-            Auth:
-              ApiKeyRequired: false
-        OptionsAdminActivityLog:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/activity/log
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAdminActivityQuery:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/activity/query
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsActivityTrack:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/activity/track
+            Path: /real-estate/probate-leads/events
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
@@ -1129,9 +1178,9 @@ Outputs:
     Description: Users DynamoDB table name
     Value: !Ref UsersTable
 
-  ActivitiesTableName:
-    Description: Activities DynamoDB table name
-    Value: activities
+  EventsTableName:
+    Description: Events DynamoDB table name
+    Value: !Ref EventsTable
 
   DocumentsBucketName:
     Description: S3 bucket storing scraped documents (documents/{location_code}/{doc_number}.pdf)
