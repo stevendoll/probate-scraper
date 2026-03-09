@@ -19,7 +19,8 @@ CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
         local-api-start local-scraper-run start-all test smoke-test check-bedrock \
-        create-jwt-secret email-setup aws-db-reset seed-prod
+        create-jwt-secret email-setup aws-db-reset seed-prod \
+        backfill-s3-uris backfill-s3-uris-local
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
@@ -51,6 +52,10 @@ help:
 	@echo "    local-api-start  Start API server locally (no Docker)"
 	@echo "    local-scraper-run  Run scraper against DynamoDB Local"
 	@echo "                       SCRAPER_USERNAME=x SCRAPER_PASSWORD='y' make local-scraper-run"
+	@echo "    backfill-s3-uris     Back-fill doc_s3_uri in AWS DynamoDB from S3 bucket"
+	@echo "                         DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris [DRY_RUN=1]"
+	@echo "    backfill-s3-uris-local  Same but targets local DynamoDB"
+	@echo "                         DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris-local [DRY_RUN=1]"
 	@echo "    test             Run unit tests"
 	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
 	@echo "    check-bedrock    Verify Bedrock model access before deploying ParseDocumentFunction"
@@ -346,6 +351,38 @@ local-db-shell:
 		--table-name documents \
 		--endpoint-url $(LOCAL_DYNAMO_URL) \
 		--select COUNT
+
+# ── Email Setup ─────────────────────────────────────────────────────────────
+
+# ── S3 URI backfill ──────────────────────────────────────────────────────────
+# Scan the S3 bucket and populate doc_s3_uri on documents that are missing it.
+#
+# DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris          # live run (AWS DDB)
+# DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris DRY_RUN=1 # dry run
+# DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris-local    # live run (local DDB)
+
+DRY_RUN ?=
+
+backfill-s3-uris:
+	@if [ -z "$(DOCUMENTS_BUCKET)" ]; then \
+		echo "ERROR: DOCUMENTS_BUCKET is not set."; \
+		echo "Usage: DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris"; \
+		exit 1; \
+	fi
+	DOCUMENTS_BUCKET="$(DOCUMENTS_BUCKET)" \
+	pipenv run python scripts/backfill_s3_uris.py \
+		$(if $(DRY_RUN),--dry-run,)
+
+backfill-s3-uris-local:
+	@if [ -z "$(DOCUMENTS_BUCKET)" ]; then \
+		echo "ERROR: DOCUMENTS_BUCKET is not set."; \
+		echo "Usage: DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris-local"; \
+		exit 1; \
+	fi
+	DOCUMENTS_BUCKET="$(DOCUMENTS_BUCKET)" \
+	LOCAL_DYNAMO_URL="$(LOCAL_DYNAMO_URL)" \
+	pipenv run python scripts/backfill_s3_uris_local.py \
+		$(if $(DRY_RUN),--dry-run,)
 
 # ── Email Setup ─────────────────────────────────────────────────────────────
 
