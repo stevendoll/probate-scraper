@@ -33,7 +33,7 @@ export function LeadsTable({ locationPath, showParsed = false }: Props) {
     ? ['leads', locationPath, fromDate, toDate, cursor]
     : ['my-leads', fromDate, toDate, cursor]
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error } = useQuery<DocumentsResponse | LeadsResponse>({
     queryKey,
     queryFn: () =>
       locationPath

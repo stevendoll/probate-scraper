@@ -37,12 +37,7 @@ API Gateway (api.collincountyleads.com)
     │     GET/PATCH  /auth/me        (own profile)
     │     GET  /auth/leads           (own leads)
     │     GET/PATCH/DELETE  /admin/users
-    │     POST /admin/funnel/send    (send funnel emails)
-    │     POST /admin/activity/log   (log activities)
-    │     POST /admin/activity/query (query activities)
-    │     POST /activity/track       (track funnel clicks)
     │     POST /stripe/webhook       (no API key — Stripe signature)
-    │     POST /auth/unsubscribe     (funnel unsubscribe)
     │     POST /stripe/checkout      (Stripe checkout)
     │
     ├── Lambda TriggerFunction
@@ -217,23 +212,6 @@ curl -X POST $BASE/auth/request-login \
   -H "Content-Type: application/json" \
   -d '{"email":"John Doe <john@example.com>"}'
 
-# Send funnel emails to prospects (admin)
-curl -X POST $BASE/admin/funnel/send \
-  -H "x-api-key: <key>" \
-  -H "Content-Type: application/json" \
-  -d '{"emails": ["John Doe <john@example.com>", "jane@example.com"], "lead_count": 10}'
-
-# Query user activities (admin)
-curl -X POST $BASE/admin/activity/query \
-  -H "x-api-key: <key>" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "user-uuid", "limit": 50}'
-
-# Track funnel link click (public)
-curl -X POST $BASE/activity/track \
-  -H "Content-Type: application/json" \
-  -d '{"token": "funnel.jwt.token", "activity_type": "subscribe_clicked"}'
-
 # Create a user (admin)
 curl -X POST $BASE/users \
   -H "x-api-key: <key>" \
@@ -355,21 +333,6 @@ No API key required. All auth routes are public.
 | `GET` | `/auth/leads` | Get own leads (Bearer token, active users only) |
 | `POST` | `/auth/unsubscribe` | Unsubscribe via funnel JWT (no API key) |
 
-### Funnel
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/admin/funnel/send` | API key | Send funnel emails to prospects |
-| `POST` | `/stripe/checkout` | No key | Create Stripe checkout session |
-
-### Activity Tracking
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/admin/activity/log` | API key | Log user activity manually |
-| `POST` | `/admin/activity/query` | API key | Query user activities |
-| `POST` | `/activity/track` | No key | Track funnel link clicks (token-based) |
-
 ### Admin
 
 Bearer token required, user must have `role: admin`.
@@ -397,54 +360,6 @@ Handled events:
 | `invoice.payment_failed` | `past_due` |
 
 Users are matched by `stripe_customer_id`.
-
-## Activity Tracking
-
-The system tracks the complete user funnel journey for analytics and optimization:
-
-### Activity Types
-- `email_sent` - When funnel emails are sent
-- `magic_link_sent` - When login magic links are sent  
-- `subscribe_clicked` - When subscribe links in emails are clicked
-- `unsubscribe_clicked` - When unsubscribe links are clicked
-- `signup_started` - When user begins signup process
-- `signup_completed` - When user completes signup
-- `payment_completed` - When payment succeeds
-
-### Tracking Data
-```json
-{
-  "activity_id": "uuid",
-  "user_id": "uuid", 
-  "activity_type": "email_sent",
-  "timestamp": "2026-03-05T12:00:00Z",
-  "email_template": "prospect_email_v1.html",
-  "from_name": "John Smith",
-  "subject_line": "Your probate leads are ready",
-  "funnel_token": "jwt.token.here",
-  "metadata": {
-    "to_email": "user@example.com",
-    "price": 19,
-    "lead_count": 10,
-    "personalized": true,
-    "user_agent": "Mozilla/5.0...",
-    "ip": "192.168.1.1"
-  }
-}
-```
-
-### Frontend Integration
-```javascript
-// Track link clicks in emails
-fetch('/real-estate/probate-leads/activity/track', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    token: funnelToken,
-    activity_type: 'subscribe_clicked'
-  })
-});
-```
 
 ## Stripe Integration
 
