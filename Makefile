@@ -3,7 +3,8 @@ ACCOUNT_ID   := 600775874112
 REGION       := us-east-1
 ECR_REPO     := probate-scraper/scraper
 ECR_URI      := $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/$(ECR_REPO)
-STACK_NAME   := probate-scraper-collin-tx
+STACK_NAME        := probate-scraper-collin-tx
+DOCUMENTS_BUCKET  ?= probate-scraper-collin-tx-documentsbucket-atqg0aimr8md
 
 # UI deployment — resolved from CloudFormation Outputs after sam deploy
 UI_BUCKET    = $(shell aws cloudformation describe-stacks \
@@ -19,13 +20,15 @@ CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
         run-task logs-scraper logs-api get-api-key invoke-trigger invoke-api \
         vpc-info local-db-start local-db-stop local-db-seed local-db-reset local-db-shell \
         local-api-start local-scraper-run start-all test smoke-test check-bedrock \
-        create-jwt-secret email-setup aws-db-reset seed-prod
+        create-jwt-secret email-setup aws-db-reset seed-prod \
+        backfill-s3-uris backfill-s3-uris-local
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
-                    DYNAMO_TABLE_NAME=leads \
+                    DOCUMENTS_TABLE_NAME=documents \
+                    CONTACTS_TABLE_NAME=contacts \
+                    PROPERTIES_TABLE_NAME=properties \
                     LOCATIONS_TABLE_NAME=locations \
-                    SUBSCRIBERS_TABLE_NAME=subscribers \
                     FROM_EMAIL=hello@collincountyleads.com
 
 # Scraper local-run defaults — override on the command line or via env:
@@ -46,10 +49,14 @@ help:
 	@echo "    local-db-start   Start DynamoDB Local (Docker)"
 	@echo "    local-db-stop    Stop DynamoDB Local"
 	@echo "    local-db-seed    Create tables + load CSV data + seed locations"
-	@echo "    local-db-shell   Scan leads table (quick sanity check)"
+	@echo "    local-db-shell   Scan documents table (quick sanity check)"
 	@echo "    local-api-start  Start API server locally (no Docker)"
-	@echo "    local-scraper-run  Run scraper against DynamoDB Local"
+	@echo "    local-scraper-run  Run scraper against DynamoDB Local + upload PDFs to S3"
 	@echo "                       SCRAPER_USERNAME=x SCRAPER_PASSWORD='y' make local-scraper-run"
+	@echo "    backfill-s3-uris     Back-fill doc_s3_uri in AWS DynamoDB from S3 bucket"
+	@echo "                         DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris [DRY_RUN=1]"
+	@echo "    backfill-s3-uris-local  Same but targets local DynamoDB"
+	@echo "                         DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris-local [DRY_RUN=1]"
 	@echo "    test             Run unit tests"
 	@echo "    smoke-test       Smoke test the deployed API (set SMOKE_BASE_URL + SMOKE_API_KEY)"
 	@echo "    check-bedrock    Verify Bedrock model access before deploying ParseDocumentFunction"
@@ -76,7 +83,7 @@ help:
 	@echo "    logs-api         Tail ApiFunction Lambda logs"
 	@echo "    get-api-key      Print the API Gateway key value"
 	@echo "    invoke-trigger   Invoke POST /{location_path}/update locally via sam local"
-	@echo "    invoke-api       Invoke GET /{location_path}/leads locally via sam local"
+	@echo "    invoke-api       Invoke GET /{location_path}/documents locally via sam local"
 	@echo ""
 
 # ── One-time setup ──────────────────────────────────────────────────────────
@@ -234,11 +241,15 @@ start-all:
 		echo "API PID: $$API_PID"; \
 		sleep 5; \
 	fi
+	@if [ ! -f ui/.env.local ]; then \
+		echo "Creating ui/.env.local from example (VITE_API_KEY=local)..."; \
+		sed 's/your-api-key-here/local/' ui/.env.local.example > ui/.env.local; \
+	fi
 	@if curl -s http://localhost:3001 > /dev/null 2>&1; then \
 		echo "UI already running"; \
 	else \
 		echo "Starting UI..."; \
-		(cd ui && npm run dev) & \
+		(cd ui && [ -d node_modules ] || npm install && npm run dev) & \
 		UI_PID=$$!; \
 		echo "UI PID: $$UI_PID"; \
 	fi
@@ -250,7 +261,7 @@ start-all:
 	echo ""; \
 	echo "Access URLs:"; \
 	echo "  - Database: http://localhost:8000"; \
-	echo "  - API: http://localhost:8000"; \
+	echo "  - API: http://localhost:3000"; \
 	echo "  - UI: http://localhost:3001"; \
 	echo ""; \
 	echo "To stop all services:"; \
@@ -264,6 +275,7 @@ local-scraper-run:
 	CHROMEDRIVER_PATH="$(CHROMEDRIVER_PATH)" \
 	CHROME_BIN="$(CHROME_BIN)" \
 	DOWNLOAD_DIR="$(DOWNLOAD_DIR)" \
+	DOCUMENTS_BUCKET="$${DOCUMENTS_BUCKET:-$(DOCUMENTS_BUCKET)}" \
 	SCRAPER_USERNAME="$${SCRAPER_USERNAME:-$(SCRAPER_USERNAME)}" \
 	SCRAPER_PASSWORD="$${SCRAPER_PASSWORD:-$(SCRAPER_PASSWORD)}" \
 	pipenv run python src/scraper/app.py
@@ -312,13 +324,17 @@ local-db-seed:
 
 local-db-reset:
 	@echo "    local-db-reset   Drop and recreate all tables in DynamoDB Local"
-	-$(LOCAL_ENV) aws dynamodb delete-table --table-name leads \
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name documents \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name contacts \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name properties \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name locations \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name users \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
-	-$(LOCAL_ENV) aws dynamodb delete-table --table-name subscribers \
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name events \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	@sleep 2
 	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
@@ -334,9 +350,41 @@ seed-prod:
 
 local-db-shell:
 	$(LOCAL_ENV) aws dynamodb scan \
-		--table-name leads \
+		--table-name documents \
 		--endpoint-url $(LOCAL_DYNAMO_URL) \
 		--select COUNT
+
+# ── Email Setup ─────────────────────────────────────────────────────────────
+
+# ── S3 URI backfill ──────────────────────────────────────────────────────────
+# Scan the S3 bucket and populate doc_s3_uri on documents that are missing it.
+#
+# DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris          # live run (AWS DDB)
+# DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris DRY_RUN=1 # dry run
+# DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris-local    # live run (local DDB)
+
+DRY_RUN ?=
+
+backfill-s3-uris:
+	@if [ -z "$(DOCUMENTS_BUCKET)" ]; then \
+		echo "ERROR: DOCUMENTS_BUCKET is not set."; \
+		echo "Usage: DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris"; \
+		exit 1; \
+	fi
+	DOCUMENTS_BUCKET="$(DOCUMENTS_BUCKET)" \
+	pipenv run python scripts/backfill_s3_uris.py \
+		$(if $(DRY_RUN),--dry-run,)
+
+backfill-s3-uris-local:
+	@if [ -z "$(DOCUMENTS_BUCKET)" ]; then \
+		echo "ERROR: DOCUMENTS_BUCKET is not set."; \
+		echo "Usage: DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris-local"; \
+		exit 1; \
+	fi
+	DOCUMENTS_BUCKET="$(DOCUMENTS_BUCKET)" \
+	LOCAL_DYNAMO_URL="$(LOCAL_DYNAMO_URL)" \
+	pipenv run python scripts/backfill_s3_uris_local.py \
+		$(if $(DRY_RUN),--dry-run,)
 
 # ── Email Setup ─────────────────────────────────────────────────────────────
 

@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getLeads, getMyLeads } from '@/lib/api'
-import type { Lead } from '@/lib/types'
+import type { DocumentsResponse, Lead, LeadsResponse } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -100,56 +101,75 @@ export function LeadsTable({ locationPath, showParsed = false }: Props) {
         </p>
       )}
 
-      {data && (
-        <div className="rounded-md border overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Doc #</TableHead>
-                <TableHead>Grantor</TableHead>
-                <TableHead>Grantee</TableHead>
-                <TableHead>County</TableHead>
-                {showParsed && <TableHead>Deceased</TableHead>}
-                <TableHead>Status</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.leads.length === 0 && (
+      {data && (() => {
+        // Normalize: getLeads returns `documents`, getMyLeads returns `leads`
+        const items: Lead[] =
+          (data as DocumentsResponse).documents ?? (data as LeadsResponse).leads ?? []
+        return (
+          <div className="rounded-md border overflow-x-auto">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={showParsed ? 8 : 7} className="text-center text-muted-foreground py-8">
-                    No leads found for this date range.
-                  </TableCell>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Doc #</TableHead>
+                  <TableHead>Grantor</TableHead>
+                  <TableHead>Grantee</TableHead>
+                  <TableHead>County</TableHead>
+                  {showParsed && <TableHead>Deceased</TableHead>}
+                  <TableHead>Status</TableHead>
+                  <TableHead />
                 </TableRow>
-              )}
-              {data.leads.map((lead) => (
-                <TableRow key={lead.leadId ?? lead.docNumber}>
-                  <TableCell className="whitespace-nowrap">{lead.recordedDate}</TableCell>
-                  <TableCell className="font-mono text-xs">{lead.docNumber}</TableCell>
-                  <TableCell className="max-w-[180px] truncate">{lead.grantor}</TableCell>
-                  <TableCell className="max-w-[180px] truncate">{lead.grantee}</TableCell>
-                  <TableCell>{lead.locationCode}</TableCell>
-                  {showParsed && <TableCell>{lead.deceasedName ?? '—'}</TableCell>}
-                  <TableCell><LeadStatusBadge lead={lead} /></TableCell>
-                  <TableCell>
-                    {lead.pdfUrl && (
-                      <a
-                        href={lead.pdfUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary underline-offset-2 hover:underline"
-                      >
-                        PDF
-                      </a>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+              </TableHeader>
+              <TableBody>
+                {items.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={showParsed ? 8 : 7} className="text-center text-muted-foreground py-8">
+                      No leads found for this date range.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {items.map((lead) => {
+                  const detailId = lead.documentId ?? lead.leadId
+                  return (
+                    <TableRow key={lead.documentId ?? lead.leadId ?? lead.docNumber}>
+                      <TableCell className="whitespace-nowrap">{lead.recordedDate}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {detailId ? (
+                          <Link
+                            to={`/documents/${detailId}`}
+                            className="text-primary underline-offset-2 hover:underline"
+                          >
+                            {lead.docNumber}
+                          </Link>
+                        ) : (
+                          lead.docNumber
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-[180px] truncate">{lead.grantor}</TableCell>
+                      <TableCell className="max-w-[180px] truncate">{lead.grantee}</TableCell>
+                      <TableCell>{lead.locationCode}</TableCell>
+                      {showParsed && <TableCell>{lead.deceasedName ?? '—'}</TableCell>}
+                      <TableCell><LeadStatusBadge lead={lead} /></TableCell>
+                      <TableCell>
+                        {lead.pdfUrl && (
+                          <a
+                            href={lead.pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary underline-offset-2 hover:underline"
+                          >
+                            PDF
+                          </a>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )
+      })()}
 
       {(data?.nextKey || history.length > 0) && (
         <div className="flex gap-2 justify-end">

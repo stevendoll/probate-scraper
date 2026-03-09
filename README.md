@@ -11,10 +11,12 @@ EventBridge (daily cron)
     │
     ▼
 ECS Fargate — Selenium scraper (Docker)
-    │  writes leads + stamps locations.retrieved_at
+    │  writes documents + stamps locations.retrieved_at
     ▼
 DynamoDB
-  ├── leads          (doc_number PK | location-date-index GSI)
+  ├── documents      (document_id PK | location-date-index GSI)
+  ├── contacts       (contact_id PK | document-contact-index GSI)
+  ├── properties     (property_id PK | document-property-index GSI)
   ├── locations      (location_code PK | location-path-index GSI)
   ├── users          (user_id PK | email-index GSI)
   └── activities     (activity_id PK | user-activity-index GSI)
@@ -23,7 +25,10 @@ DynamoDB
 API Gateway (api.collincountyleads.com)
     │
     ├── Lambda ApiFunction
-    │     GET  /{location_path}/leads
+    │     GET  /{location_path}/documents
+    │     GET  /documents/{document_id}
+    │     GET  /documents/{document_id}/contacts
+    │     GET  /documents/{document_id}/properties
     │     GET  /locations
     │     GET  /locations/{location_code}
     │     GET/POST/PATCH/DELETE  /users
@@ -40,8 +45,11 @@ API Gateway (api.collincountyleads.com)
     │     POST /auth/unsubscribe     (funnel unsubscribe)
     │     POST /stripe/checkout      (Stripe checkout)
     │
-    └── Lambda TriggerFunction
-          POST /{location_path}/update  → runs Fargate scrape task
+    ├── Lambda TriggerFunction
+    │     POST /{location_path}/update  → runs Fargate scrape task
+    │
+    └── Lambda ParseDocumentFunction
+          POST /documents/{document_id}/parse-document  → Bedrock AI parsing
 
 CloudFront (collincountyleads.com)
     └── S3 — React SPA (Vite)
@@ -53,12 +61,16 @@ All API paths are prefixed with `/real-estate/probate-leads/`.
 
 | Table | Partition key | GSI | Purpose |
 |---|---|---|---|
-| `leads` | `doc_number` | `recorded-date-index`, `location-date-index` | Scraped probate records |
+| `documents` | `document_id` | `location-date-index` | Scraped probate filings |
+| `contacts` | `contact_id` | `document-contact-index` | People parsed from documents (deceased, executors, heirs) |
+| `properties` | `property_id` | `document-property-index` | Real estate assets parsed from documents |
 | `locations` | `location_code` | `location-path-index` | Supported counties |
 | `users` | `user_id` | `email-index` | Magic-link authenticated users |
 | `activities` | `activity_id` | `user-activity-index` | User funnel activity tracking |
 
-Leads carry a `location_code` FK. The `location-date-index` GSI (`location_code` HASH + `recorded_date` RANGE) is the primary query path.
+Documents carry a `location_code` FK. The `location-date-index` GSI (`location_code` HASH + `recorded_date` RANGE) is the primary query path.
+
+Contacts and properties are written by `ParseDocumentFunction` after Bedrock AI analysis of the archived PDF. Each links back to its parent document via `document_id`.
 
 ## Locations
 
@@ -80,7 +92,8 @@ The React SPA lives in `ui/` and is built with Vite + React + TailwindCSS + shad
 | `/login` | `Login` | Magic-link sign-in form |
 | `/auth/verify` | `AuthVerify` | Exchanges magic token for access token, redirects to dashboard |
 | `/signup` | `Signup` | Funnel signup page with pricing |
-| `/dashboard` | `Dashboard` | Leads table with date-range filters and CSV export |
+| `/dashboard` | `Dashboard` | Leads table with date-range filters |
+| `/documents/:documentId` | `DocumentDetail` | Filing details, parsed people (contacts), and real estate (properties) |
 | `/account` | `Account` | Edit email, view subscription status |
 | `/admin/users` | `admin/Users` | Admin: list and manage all users |
 | `/admin/users/:id` | `admin/UserDetail` | Admin: view and edit a single user |
@@ -182,8 +195,17 @@ BASE=http://localhost:3000/real-estate/probate-leads
 # List locations
 curl $BASE/locations
 
-# Query leads
-curl "$BASE/collin-tx/leads?from_date=2026-01-01&to_date=2026-02-20&limit=10"
+# Query documents for a county
+curl "$BASE/collin-tx/documents?from_date=2026-01-01&to_date=2026-02-20&limit=10"
+
+# Get a single document (with contacts + properties)
+curl $BASE/documents/3f2ab7c4-f5d1-5e71-b650-97b7c2ff37d1
+
+# Get contacts for a document
+curl $BASE/documents/3f2ab7c4-f5d1-5e71-b650-97b7c2ff37d1/contacts
+
+# Parse a document with Bedrock AI (requires DOCUMENTS_BUCKET + AWS credentials)
+curl -X POST $BASE/documents/3f2ab7c4-f5d1-5e71-b650-97b7c2ff37d1/parse-document
 
 # Request a magic link (token printed to stdout, email skipped locally)
 curl -X POST $BASE/auth/request-login \
@@ -229,16 +251,18 @@ make test   # unit tests, no external services needed
 
 All routes require an `x-api-key` header except `/auth/*` and `POST /stripe/webhook`.
 
-### Leads
+### Documents
 
-#### `GET /{location_path}/leads`
+#### `GET /{location_path}/documents`
+
+List documents for a county, newest first.
 
 Query params:
 
 | Param | Type | Default | Description |
 |---|---|---|---|
 | `from_date` | `YYYY-MM-DD` | — | Lower bound on `recorded_date` (inclusive) |
-| `to_date` | `YYYY-MM-DD` | today | Upper bound on `recorded_date` (inclusive) |
+| `to_date` | `YYYY-MM-DD` | — | Upper bound on `recorded_date` (inclusive) |
 | `doc_type` | string | `PROBATE` | Filter by document type (`ALL` to skip filter) |
 | `limit` | int | `50` | Records per page (max 200) |
 | `last_key` | string | — | Base64 pagination cursor from previous `nextKey` |
@@ -248,12 +272,56 @@ Response:
 {
   "requestId": "uuid",
   "location": { "locationCode": "CollinTx", "locationPath": "collin-tx", ... },
-  "leads": [ { "docNumber": "...", "grantor": "...", "recordedDate": "...", ... } ],
+  "documents": [ { "documentId": "...", "docNumber": "...", "grantor": "...", "recordedDate": "...", ... } ],
   "count": 50,
   "nextKey": "base64...",
   "query": { "locationPath": "collin-tx", "fromDate": "2026-01-01", ... }
 }
 ```
+
+#### `GET /documents/{document_id}`
+
+Fetch a single document along with its parsed contacts and properties.
+
+Response:
+```json
+{
+  "requestId": "uuid",
+  "document": {
+    "documentId": "...",
+    "docNumber": "2026000028265",
+    "grantor": "CIATTI, CESARE FRED",
+    "grantee": "SHANNON CIATTI ET AL",
+    "recordedDate": "2026-01-15",
+    "locationCode": "CollinTx",
+    "pdfUrl": "https://...",
+    "docS3Uri": "s3://bucket/documents/CollinTx/2026000028265.pdf"
+  },
+  "contacts": [
+    { "contactId": "...", "documentId": "...", "role": "deceased", "name": "Cesare Fred Ciatti", "dod": "2025-12-01", ... },
+    { "contactId": "...", "documentId": "...", "role": "executor", "name": "Shannon Ciatti", ... }
+  ],
+  "properties": [
+    { "propertyId": "...", "documentId": "...", "address": "301 Oregonfly Drive", "city": "Prosper", "state": "TX", ... }
+  ]
+}
+```
+
+Returns `404` if the document is not found.
+
+#### `GET /documents/{document_id}/contacts`
+
+Returns the contacts array only (same items as in the full document response above).
+
+#### `GET /documents/{document_id}/properties`
+
+Returns the properties array only.
+
+#### `POST /documents/{document_id}/parse-document`
+
+Trigger Bedrock AI parsing of the archived PDF. Requires `doc_s3_uri` to be set on the document (run the scraper with `DOCUMENTS_BUCKET` set, or use the backfill script).
+
+Returns `{ contactsWritten, propertiesWritten }` on success.
 
 ### Locations
 
@@ -464,47 +532,52 @@ SES is configured to send from `hello@collincountyleads.com`. The domain must be
 ui/
   src/
     pages/
-      Landing.tsx         # Marketing landing page
-      Login.tsx           # Magic-link sign-in
-      AuthVerify.tsx      # Token exchange + redirect
-      Signup.tsx          # Funnel signup with pricing
-      Dashboard.tsx       # Leads table
-      Account.tsx         # User profile
+      Landing.tsx            # Marketing landing page
+      Login.tsx              # Magic-link sign-in
+      AuthVerify.tsx         # Token exchange + redirect
+      Signup.tsx             # Funnel signup with pricing
+      Dashboard.tsx          # Documents table (own leads)
+      DocumentDetail.tsx     # Single document: filing details, people, real estate
+      Account.tsx            # User profile
       admin/
-        Users.tsx         # Admin user list
-        UserDetail.tsx    # Admin user detail
+        Users.tsx            # Admin user list
+        UserDetail.tsx       # Admin user detail
     components/
-      leads-table.tsx     # Sortable/filterable leads table
-      login-form.tsx      # Email form
-      user-nav.tsx        # Avatar dropdown
+      leads-table.tsx        # Filterable documents table with links to detail page
+      login-form.tsx         # Email form
+      user-nav.tsx           # Avatar dropdown
     lib/
-      api.ts              # Typed API client
-      auth.ts             # Token storage helpers
-      types.ts            # Shared TypeScript types
-      utils.ts            # cn() and other utilities
+      api.ts                 # Typed API client
+      auth.ts                # Token storage helpers
+      types.ts               # Shared TypeScript types (Document, Contact, Property, …)
+      utils.ts               # cn() and other utilities
 src/
   api/
-    app.py                # Lambda handler — all API routes
-    routers/              # leads, locations, users, auth, admin, stripe, funnel, activity
-    auth_helpers.py       # JWT helpers + email sending + activity tracking
-    models.py             # Lead, Location, User, Activity dataclasses
-    stripe_helpers.py     # Stripe webhook signature verification
+    app.py                   # Lambda handler — all API routes
+    routers/                 # documents, locations, users, auth, admin, stripe, funnel, activity
+    auth_helpers.py          # JWT helpers + email sending + activity tracking
+    models.py                # Document, Contact, Property, Location, User dataclasses
+    stripe_helpers.py        # Stripe webhook signature verification
     requirements.txt
   scraper/
-    app.py                # ECS entrypoint
-    scraper.py            # Selenium scraper
-    dynamo.py             # DynamoDB batch writer + location updater
+    app.py                   # ECS entrypoint
+    scraper.py               # Selenium scraper
+    dynamo.py                # DynamoDB batch writer + location updater
+    s3.py                    # S3 upload helpers
     Dockerfile
     requirements.txt
   trigger/
-    app.py                # Lambda — starts Fargate scrape task
+    app.py                   # Lambda — starts Fargate scrape task
     requirements.txt
   parse_document/
-    app.py                # Lambda — Bedrock document parsing
+    app.py                   # Lambda — Bedrock AI parsing → writes contacts + properties
+    prompt.py                # System/user prompts for the Bedrock model
 scripts/
-  seed_local.py           # Create tables + seed locations locally
-  local_api_server.py     # Dev HTTP server wrapping the Lambda handler
-  smoke_test.py           # End-to-end smoke tests against deployed API
+  seed_local.py              # Create tables + seed locations locally
+  local_api_server.py        # Dev HTTP server wrapping the Lambda handler
+  backfill_s3_uris.py        # Back-fill doc_s3_uri in AWS DynamoDB from S3 bucket
+  backfill_s3_uris_local.py  # Same, targeting DynamoDB Local
+  smoke_test.py              # End-to-end smoke tests against deployed API
 tests/
   test_api.py
   test_auth.py
@@ -514,9 +587,8 @@ tests/
   test_dynamo.py
   test_scraper.py
   test_s3.py
-template.yaml             # SAM / CloudFormation
-samconfig.toml            # Deploy configuration
-docker-compose.yml        # DynamoDB Local
+template.yaml               # SAM / CloudFormation
+samconfig.toml              # Deploy configuration
+docker-compose.yml          # DynamoDB Local
 Makefile
-ACTIVITY_TRACKING_PLAN.md # Comprehensive activity tracking documentation
 ```

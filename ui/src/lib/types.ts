@@ -16,6 +16,7 @@ export interface LocationResponse {
 
 export interface Lead {
   leadId?: string
+  documentId?: string
   docNumber: string
   recordedDate: string
   grantor: string
@@ -26,10 +27,55 @@ export interface Lead {
   deceasedName?: string
 }
 
+/** Response from GET /{location_path}/documents */
+export interface DocumentsResponse {
+  documents: Lead[]
+  location: Location
+  count: number
+  query: Record<string, string>
+  nextKey?: string
+}
+
+/** @deprecated use DocumentsResponse */
 export interface LeadsResponse {
   leads: Lead[]
   count: number
   nextKey?: string
+}
+
+export interface Contact {
+  contactId: string
+  documentId: string
+  role: string
+  name: string
+  dob?: string
+  dod?: string
+  address?: string
+  notes?: string
+  parsedAt?: string
+  parsedModel?: string
+}
+
+export interface Property {
+  propertyId: string
+  documentId: string
+  address?: string
+  legalDescription?: string
+  parcelId?: string
+  city?: string
+  state?: string
+  zip?: string
+  notes?: string
+  parsedAt?: string
+  parsedModel?: string
+}
+
+/** Response from GET /documents/{document_id} */
+export interface DocumentDetailResponse {
+  requestId: string
+  document: Lead
+  contacts: Contact[]
+  properties: Property[]
 }
 
 export interface User {

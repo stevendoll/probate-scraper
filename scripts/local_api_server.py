@@ -8,7 +8,10 @@ Usage:
 Defaults to port 3000. Connects to DynamoDB Local at http://localhost:8000.
 
 Supported routes:
-  GET    /real-estate/probate-leads/{location_path}/leads
+  GET    /real-estate/probate-leads/{location_path}/documents
+  GET    /real-estate/probate-leads/documents/{document_id}
+  GET    /real-estate/probate-leads/documents/{document_id}/contacts
+  GET    /real-estate/probate-leads/documents/{document_id}/properties
   GET    /real-estate/probate-leads/locations
   GET    /real-estate/probate-leads/locations/{location_code}
   GET    /real-estate/probate-leads/users
@@ -18,7 +21,7 @@ Supported routes:
   DELETE /real-estate/probate-leads/users/{user_id}
   POST   /real-estate/probate-leads/stripe/webhook
   POST   /real-estate/probate-leads/{location_path}/update   (ECS stubbed locally)
-  POST   /real-estate/probate-leads/leads/{lead_id}/parse-document
+  POST   /real-estate/probate-leads/documents/{document_id}/parse-document
            (calls real Bedrock + S3; requires DOCUMENTS_BUCKET env var and
             AWS credentials with bedrock:InvokeModel + s3:GetObject access)
 """
@@ -41,7 +44,9 @@ os.environ.setdefault("AWS_ENDPOINT_URL_DYNAMODB", "http://localhost:8000")
 # os.environ.setdefault("AWS_ACCESS_KEY_ID",       "local")
 # os.environ.setdefault("AWS_SECRET_ACCESS_KEY",   "local")
 os.environ.setdefault("AWS_DEFAULT_REGION",      "us-east-1")
-os.environ.setdefault("DYNAMO_TABLE_NAME",       "leads")
+os.environ.setdefault("DOCUMENTS_TABLE_NAME",    "documents")
+os.environ.setdefault("CONTACTS_TABLE_NAME",     "contacts")
+os.environ.setdefault("PROPERTIES_TABLE_NAME",   "properties")
 os.environ.setdefault("LOCATIONS_TABLE_NAME",    "locations")
 os.environ.setdefault("USERS_TABLE_NAME",        "users")
 os.environ.setdefault("GSI_NAME",                "recorded-date-index")
@@ -55,7 +60,7 @@ os.environ.setdefault("UI_BASE_URL",         "http://localhost:3001")
 os.environ.setdefault("POWERTOOLS_TRACE_DISABLED", "true")
 os.environ.setdefault("LOG_LEVEL",               "INFO")
 os.environ.setdefault("DOCUMENTS_BUCKET",         "")
-os.environ.setdefault("BEDROCK_MODEL_ID",         "us.anthropic.claude-3-5-haiku-20241022-v1:0")
+os.environ.setdefault("BEDROCK_MODEL_ID",         "us.amazon.nova-pro-v1:0")
 
 # Dummy ECS env vars so the TriggerFunction handler can be imported
 os.environ.setdefault("ECS_CLUSTER_ARN",     "arn:aws:ecs:us-east-1:000000000000:cluster/local")
@@ -108,8 +113,10 @@ _pdspec = importlib.util.spec_from_file_location("_parse_document_app", _parse_d
 _parse_doc_mod = importlib.util.module_from_spec(_pdspec)
 _pdspec.loader.exec_module(_parse_doc_mod)
 
-# Point parse-document's DynamoDB table at DynamoDB Local
-_parse_doc_mod._table = _parse_doc_mod._dynamodb.Table(os.environ["DYNAMO_TABLE_NAME"])
+# Point parse-document's DynamoDB tables at DynamoDB Local
+_parse_doc_mod._documents_table  = _parse_doc_mod._dynamodb.Table(os.environ["DOCUMENTS_TABLE_NAME"])
+_parse_doc_mod._contacts_table   = _parse_doc_mod._dynamodb.Table(os.environ["CONTACTS_TABLE_NAME"])
+_parse_doc_mod._properties_table = _parse_doc_mod._dynamodb.Table(os.environ["PROPERTIES_TABLE_NAME"])
 
 parse_document_handler = _parse_doc_mod.handler
 
@@ -145,11 +152,11 @@ class LambdaHandler(BaseHTTPRequestHandler):
         Map the request path to API Gateway-style path parameters.
         Returns a dict (possibly empty) or None.
         """
-        suffix = path[len(BASE_PATH):]   # e.g. "/collin-tx/leads"
+        suffix = path[len(BASE_PATH):]   # e.g. "/collin-tx/documents"
         parts  = [p for p in suffix.split("/") if p]
 
-        # /{location_path}/leads
-        if len(parts) == 2 and parts[1] == "leads":
+        # /{location_path}/documents
+        if len(parts) == 2 and parts[1] == "documents":
             return {"location_path": parts[0]}
 
         # /{location_path}/update
@@ -168,9 +175,15 @@ class LambdaHandler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "admin" and parts[1] == "users":
             return {"user_id": parts[2]}
 
-        # /leads/{lead_id}/parse-document
-        if len(parts) == 3 and parts[0] == "leads" and parts[2] == "parse-document":
-            return {"lead_id": parts[1]}
+        # /documents/{document_id}
+        if len(parts) == 2 and parts[0] == "documents":
+            return {"document_id": parts[1]}
+
+        # /documents/{document_id}/parse-document
+        # /documents/{document_id}/contacts
+        # /documents/{document_id}/properties
+        if len(parts) == 3 and parts[0] == "documents":
+            return {"document_id": parts[1]}
 
         return None
 
@@ -190,9 +203,9 @@ class LambdaHandler(BaseHTTPRequestHandler):
         qs     = {k: v[0] for k, v in qs_raw.items()}
         body   = self._read_body() if method in ("POST", "PATCH", "PUT") else None
 
-        # POST /leads/{lead_id}/parse-document → ParseDocumentFunction
+        # POST /documents/{document_id}/parse-document → ParseDocumentFunction
         if (method == "POST" and len(parts) == 3
-                and parts[0] == "leads" and parts[2] == "parse-document"):
+                and parts[0] == "documents" and parts[2] == "parse-document"):
             event  = self._build_event(method, parsed.path, qs, body, dict(self.headers))
             result = parse_document_handler(event, _LocalContext())
             all_headers = {**result.get("headers", {}), **result.get("multiValueHeaders", {})}
@@ -270,14 +283,16 @@ if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
     print(f"Local API server running at http://localhost:{port}")
     print(f"  DynamoDB → {os.environ['AWS_ENDPOINT_URL_DYNAMODB']}")
-    print(f"  Tables   → leads={os.environ['DYNAMO_TABLE_NAME']}")
+    print(f"  Tables   → documents={os.environ['DOCUMENTS_TABLE_NAME']}")
+    print(f"             contacts={os.environ['CONTACTS_TABLE_NAME']}")
+    print(f"             properties={os.environ['PROPERTIES_TABLE_NAME']}")
     print(f"             locations={os.environ['LOCATIONS_TABLE_NAME']}")
     print(f"             users={os.environ['USERS_TABLE_NAME']}")
     print(f"\n  Sample routes:")
     print(f"    GET  http://localhost:{port}{BASE_PATH}/locations")
-    print(f"    GET  http://localhost:{port}{BASE_PATH}/collin-tx/leads?from_date=2026-01-01")
+    print(f"    GET  http://localhost:{port}{BASE_PATH}/collin-tx/documents?from_date=2026-01-01")
     print(f"    POST http://localhost:{port}{BASE_PATH}/users")
     print(f"    POST http://localhost:{port}{BASE_PATH}/collin-tx/update   (ECS stubbed)")
-    print(f"    POST http://localhost:{port}{BASE_PATH}/leads/{{lead_id}}/parse-document")
+    print(f"    POST http://localhost:{port}{BASE_PATH}/documents/{{document_id}}/parse-document")
     print("  Ctrl+C to stop\n")
     HTTPServer(("", port), LambdaHandler).serve_forever()
