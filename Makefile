@@ -23,9 +23,10 @@ CF_DIST_ID   = $(shell aws cloudformation describe-stacks \
 
 LOCAL_DYNAMO_URL := http://localhost:8000
 LOCAL_ENV        := AWS_ENDPOINT_URL=$(LOCAL_DYNAMO_URL) AWS_DEFAULT_REGION=us-east-1 \
-                    DYNAMO_TABLE_NAME=leads \
+                    DOCUMENTS_TABLE_NAME=documents \
+                    CONTACTS_TABLE_NAME=contacts \
+                    PROPERTIES_TABLE_NAME=properties \
                     LOCATIONS_TABLE_NAME=locations \
-                    SUBSCRIBERS_TABLE_NAME=subscribers \
                     FROM_EMAIL=hello@collincountyleads.com
 
 # Scraper local-run defaults — override on the command line or via env:
@@ -46,7 +47,7 @@ help:
 	@echo "    local-db-start   Start DynamoDB Local (Docker)"
 	@echo "    local-db-stop    Stop DynamoDB Local"
 	@echo "    local-db-seed    Create tables + load CSV data + seed locations"
-	@echo "    local-db-shell   Scan leads table (quick sanity check)"
+	@echo "    local-db-shell   Scan documents table (quick sanity check)"
 	@echo "    local-api-start  Start API server locally (no Docker)"
 	@echo "    local-scraper-run  Run scraper against DynamoDB Local"
 	@echo "                       SCRAPER_USERNAME=x SCRAPER_PASSWORD='y' make local-scraper-run"
@@ -76,7 +77,7 @@ help:
 	@echo "    logs-api         Tail ApiFunction Lambda logs"
 	@echo "    get-api-key      Print the API Gateway key value"
 	@echo "    invoke-trigger   Invoke POST /{location_path}/update locally via sam local"
-	@echo "    invoke-api       Invoke GET /{location_path}/leads locally via sam local"
+	@echo "    invoke-api       Invoke GET /{location_path}/documents locally via sam local"
 	@echo ""
 
 # ── One-time setup ──────────────────────────────────────────────────────────
@@ -250,7 +251,7 @@ start-all:
 	echo ""; \
 	echo "Access URLs:"; \
 	echo "  - Database: http://localhost:8000"; \
-	echo "  - API: http://localhost:8000"; \
+	echo "  - API: http://localhost:3000"; \
 	echo "  - UI: http://localhost:3001"; \
 	echo ""; \
 	echo "To stop all services:"; \
@@ -312,13 +313,17 @@ local-db-seed:
 
 local-db-reset:
 	@echo "    local-db-reset   Drop and recreate all tables in DynamoDB Local"
-	-$(LOCAL_ENV) aws dynamodb delete-table --table-name leads \
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name documents \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name contacts \
+		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name properties \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name locations \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	-$(LOCAL_ENV) aws dynamodb delete-table --table-name users \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
-	-$(LOCAL_ENV) aws dynamodb delete-table --table-name subscribers \
+	-$(LOCAL_ENV) aws dynamodb delete-table --table-name events \
 		--endpoint-url $(LOCAL_DYNAMO_URL) > /dev/null 2>&1
 	@sleep 2
 	$(LOCAL_ENV) pipenv run python3 scripts/seed_local.py
@@ -334,7 +339,7 @@ seed-prod:
 
 local-db-shell:
 	$(LOCAL_ENV) aws dynamodb scan \
-		--table-name leads \
+		--table-name documents \
 		--endpoint-url $(LOCAL_DYNAMO_URL) \
 		--select COUNT
 
