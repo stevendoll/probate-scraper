@@ -163,43 +163,43 @@ def test_locations() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Leads
+# Documents
 # ---------------------------------------------------------------------------
 
-def test_leads() -> None:
-    print(f"\n{YELLOW}── Leads ──────────────────────────────────────────────────────────────{RESET}")
+def test_documents() -> None:
+    print(f"\n{YELLOW}── Documents ──────────────────────────────────────────────────────────{RESET}")
 
     today      = datetime.date.today().isoformat()
     from_date  = "2020-01-01"
 
-    r = get("/collin-tx/leads", params={"from_date": from_date, "to_date": today, "limit": "5"})
-    if check("GET /collin-tx/leads → 200", r.status_code == 200, _snippet(r)):
+    r = get("/collin-tx/documents", params={"from_date": from_date, "to_date": today, "limit": "5"})
+    if check("GET /collin-tx/documents → 200", r.status_code == 200, _snippet(r)):
         body = r.json()
-        check("response has 'leads' array",    "leads"    in body, str(body.keys()))
-        check("response has 'location' object", "location" in body)
-        check("response has 'count' field",     "count"    in body)
-        check("response has 'query' field",     "query"    in body)
-        leads = body.get("leads", [])
-        if leads:
-            lead = leads[0]
-            check("lead has docNumber",    "docNumber"    in lead)
-            check("lead has recordedDate", "recordedDate" in lead)
-            check("lead has locationCode", "locationCode" in lead)
+        check("response has 'documents' array",  "documents" in body, str(body.keys()))
+        check("response has 'location' object",  "location"  in body)
+        check("response has 'count' field",      "count"     in body)
+        check("response has 'query' field",      "query"     in body)
+        documents = body.get("documents", [])
+        if documents:
+            doc = documents[0]
+            check("document has docNumber",    "docNumber"    in doc)
+            check("document has recordedDate", "recordedDate" in doc)
+            check("document has locationCode", "locationCode" in doc)
 
     # limit is respected
-    r = get("/collin-tx/leads", params={"from_date": from_date, "to_date": today, "limit": "2"})
-    if check("GET /collin-tx/leads?limit=2 → 200", r.status_code == 200, _snippet(r)):
-        leads = r.json().get("leads", [])
-        check("at most 2 leads returned", len(leads) <= 2, f"got {len(leads)}")
+    r = get("/collin-tx/documents", params={"from_date": from_date, "to_date": today, "limit": "2"})
+    if check("GET /collin-tx/documents?limit=2 → 200", r.status_code == 200, _snippet(r)):
+        documents = r.json().get("documents", [])
+        check("at most 2 documents returned", len(documents) <= 2, f"got {len(documents)}")
 
     # unknown location → 404
-    r = get("/no-such-county/leads", params={"from_date": from_date})
-    check("GET /no-such-county/leads → 404", r.status_code == 404, _snippet(r))
+    r = get("/no-such-county/documents", params={"from_date": from_date})
+    check("GET /no-such-county/documents → 404", r.status_code == 404, _snippet(r))
 
-    # no date params → most recent leads (200)
-    r = get("/collin-tx/leads")
-    if check("GET /collin-tx/leads (no dates) → 200", r.status_code == 200, _snippet(r)):
-        check("no-date response has 'leads' array", "leads" in r.json())
+    # no date params → most recent documents (200)
+    r = get("/collin-tx/documents")
+    if check("GET /collin-tx/documents (no dates) → 200", r.status_code == 200, _snippet(r)):
+        check("no-date response has 'documents' array", "documents" in r.json())
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +372,7 @@ if __name__ == "__main__":
     print(f"{'='*70}")
 
     test_locations()
-    test_leads()
+    test_documents()
     test_users()
     test_stripe_webhook()
     test_auth_cors()
