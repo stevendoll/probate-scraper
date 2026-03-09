@@ -239,7 +239,7 @@ start-all:
 		echo "UI already running"; \
 	else \
 		echo "Starting UI..."; \
-		(cd ui && npm run dev) & \
+		(cd ui && [ -d node_modules ] || npm install && npm run dev) & \
 		UI_PID=$$!; \
 		echo "UI PID: $$UI_PID"; \
 	fi
