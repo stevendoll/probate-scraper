@@ -13,6 +13,7 @@ import Signup from '@/pages/Signup'
 import Unsubscribe from '@/pages/Unsubscribe'
 import Dashboard from '@/pages/Dashboard'
 import Account from '@/pages/Account'
+import DocumentDetail from '@/pages/DocumentDetail'
 import AdminUsers from '@/pages/admin/Users'
 import AdminUserDetail from '@/pages/admin/UserDetail'
 import AdminProspectSend from '@/pages/admin/ProspectSend'
@@ -113,6 +114,7 @@ export default function App() {
             <Route element={<UserLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/account" element={<Account />} />
+              <Route path="/documents/:documentId" element={<DocumentDetail />} />
             </Route>
           </Route>
 

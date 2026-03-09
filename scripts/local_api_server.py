@@ -9,6 +9,7 @@ Defaults to port 3000. Connects to DynamoDB Local at http://localhost:8000.
 
 Supported routes:
   GET    /real-estate/probate-leads/{location_path}/documents
+  GET    /real-estate/probate-leads/documents/{document_id}
   GET    /real-estate/probate-leads/documents/{document_id}/contacts
   GET    /real-estate/probate-leads/documents/{document_id}/properties
   GET    /real-estate/probate-leads/locations
@@ -173,6 +174,10 @@ class LambdaHandler(BaseHTTPRequestHandler):
         # /admin/users/{user_id}
         if len(parts) == 3 and parts[0] == "admin" and parts[1] == "users":
             return {"user_id": parts[2]}
+
+        # /documents/{document_id}
+        if len(parts) == 2 and parts[0] == "documents":
+            return {"document_id": parts[1]}
 
         # /documents/{document_id}/parse-document
         # /documents/{document_id}/contacts

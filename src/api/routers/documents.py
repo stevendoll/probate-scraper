@@ -1,6 +1,7 @@
 """
 Routes:
   GET  /real-estate/probate-leads/{location_path}/documents
+  GET  /real-estate/probate-leads/documents/{document_id}
   GET  /real-estate/probate-leads/documents/{document_id}/contacts
   GET  /real-estate/probate-leads/documents/{document_id}/properties
 
@@ -134,6 +135,52 @@ def get_documents_by_location(location_path: str):
     }
 
     return body
+
+
+@router.get("/real-estate/probate-leads/documents/<document_id>")
+def get_document(document_id: str):
+    """Return a single document with its contacts and properties."""
+    # 1. Fetch the document
+    try:
+        result = db.documents_table.get_item(Key={"document_id": document_id})
+    except Exception as exc:
+        logger.error("documents get_item failed: %s", exc)
+        return {"error": "Database query failed"}, 500
+
+    item = result.get("Item")
+    if not item:
+        return {"error": f"Document not found: {document_id!r}"}, 404
+
+    document = Document.from_dynamo(item).to_dict()
+
+    # 2. Fetch contacts
+    try:
+        contacts_result = db.contacts_table.query(
+            IndexName="document-contact-index",
+            KeyConditionExpression=Key("document_id").eq(document_id),
+        )
+        contacts = [Contact.from_dynamo(c).to_dict() for c in contacts_result.get("Items", [])]
+    except Exception as exc:
+        logger.error("contacts GSI query failed: %s", exc)
+        contacts = []
+
+    # 3. Fetch properties
+    try:
+        props_result = db.properties_table.query(
+            IndexName="document-property-index",
+            KeyConditionExpression=Key("document_id").eq(document_id),
+        )
+        properties = [Property.from_dynamo(p).to_dict() for p in props_result.get("Items", [])]
+    except Exception as exc:
+        logger.error("properties GSI query failed: %s", exc)
+        properties = []
+
+    return {
+        "requestId":  str(uuid.uuid4()),
+        "document":   document,
+        "contacts":   contacts,
+        "properties": properties,
+    }
 
 
 @router.get("/real-estate/probate-leads/documents/<document_id>/contacts")

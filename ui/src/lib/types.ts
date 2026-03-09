@@ -43,6 +43,41 @@ export interface LeadsResponse {
   nextKey?: string
 }
 
+export interface Contact {
+  contactId: string
+  documentId: string
+  role: string
+  name: string
+  dob?: string
+  dod?: string
+  address?: string
+  notes?: string
+  parsedAt?: string
+  parsedModel?: string
+}
+
+export interface Property {
+  propertyId: string
+  documentId: string
+  address?: string
+  legalDescription?: string
+  parcelId?: string
+  city?: string
+  state?: string
+  zip?: string
+  notes?: string
+  parsedAt?: string
+  parsedModel?: string
+}
+
+/** Response from GET /documents/{document_id} */
+export interface DocumentDetailResponse {
+  requestId: string
+  document: Lead
+  contacts: Contact[]
+  properties: Property[]
+}
+
 export interface User {
   userId: string
   email: string

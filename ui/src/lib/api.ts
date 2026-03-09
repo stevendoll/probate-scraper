@@ -8,11 +8,12 @@
 
 import type {
   AuthVerifyResponse,
-  ProspectSendResponse,
+  DocumentDetailResponse,
   DocumentsResponse,
   LeadsResponse,
   LocationResponse,
   LocationsResponse,
+  ProspectSendResponse,
   User,
   UserResponse,
   UsersResponse,
@@ -105,6 +106,11 @@ export function getLeads(
   params: { from_date?: string; to_date?: string; limit?: number; last_key?: string } = {},
 ): Promise<DocumentsResponse> {
   return getDocuments(locationPath, params)
+}
+
+/** Fetch a single document with its contacts and properties. */
+export function getDocument(documentId: string): Promise<DocumentDetailResponse> {
+  return apiFetch(`/documents/${documentId}`)
 }
 
 // ---------------------------------------------------------------------------
