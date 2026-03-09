@@ -2,12 +2,13 @@
 Unit tests for src/parse_document/app.py
 
 Covers:
-  - Happy path: S3 + Bedrock succeed → fields persisted, 200 returned
-  - Lead not found → 404
-  - Lead has no doc_s3_uri → 422
-  - S3 fetch fails → parse_error stored, 500 returned
-  - Bedrock call fails → parse_error stored, 500 returned
-  - DynamoDB update fails → 500 returned
+  - Happy path: S3 + Bedrock succeed → contacts/properties written, 200 returned
+  - Document not found → 404
+  - Document has no doc_s3_uri → 422
+  - S3 fetch fails → parse_error stored on documents table, 500 returned
+  - Bedrock call fails → parse_error stored on documents table, 500 returned
+  - DynamoDB write fails (contacts/properties) → 500 returned
+  - DynamoDB update fails (documents status) → 500 returned
   - Markdown-fenced JSON response is handled correctly
   - _s3_uri_to_bucket_key parses correctly
 """
@@ -16,7 +17,7 @@ import json
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 # ---------------------------------------------------------------------------
 # Path setup — add src/parse_document so 'prompt' can be found at import time
@@ -101,11 +102,12 @@ _GOOD_BEDROCK_PAYLOAD = {
 }
 
 
-def _make_lead(doc_s3_uri: str = "s3://mybucket/documents/CollinTx/20240001.pdf") -> dict:
+def _make_document(doc_s3_uri: str = "s3://mybucket/documents/CollinTx/20240001.pdf") -> dict:
     return {
-        "doc_number": "20240001",
-        "grantor":    "Smith, Jane A.",
-        "doc_s3_uri": doc_s3_uri,
+        "document_id": "550e8400-e29b-41d4-a716-446655440000",
+        "doc_number":  "20240001",
+        "grantor":     "Smith, Jane A.",
+        "doc_s3_uri":  doc_s3_uri,
     }
 
 
@@ -152,33 +154,37 @@ class TestParseDocument(unittest.TestCase):
 
     def setUp(self):
         """Replace the module-level AWS clients with fresh MagicMocks."""
-        self.mock_table   = MagicMock()
-        self.mock_s3      = MagicMock()
-        self.mock_bedrock = MagicMock()
+        self.mock_documents_table  = MagicMock()
+        self.mock_contacts_table   = MagicMock()
+        self.mock_properties_table = MagicMock()
+        self.mock_s3               = MagicMock()
+        self.mock_bedrock          = MagicMock()
 
-        parse_app._table    = self.mock_table
-        parse_app._s3       = self.mock_s3
-        parse_app._bedrock  = self.mock_bedrock
-        parse_app._model_id = "us.amazon.nova-pro-v1:0"
+        parse_app._documents_table  = self.mock_documents_table
+        parse_app._contacts_table   = self.mock_contacts_table
+        parse_app._properties_table = self.mock_properties_table
+        parse_app._s3               = self.mock_s3
+        parse_app._bedrock          = self.mock_bedrock
+        parse_app._model_id         = "us.amazon.nova-pro-v1:0"
 
-    # ── 404 — lead not found ────────────────────────────────────────────────
+    # ── 404 — document not found ─────────────────────────────────────────────
 
-    def test_lead_not_found_returns_404(self):
-        self.mock_table.get_item.return_value = {"Item": None}
+    def test_document_not_found_returns_404(self):
+        self.mock_documents_table.get_item.return_value = {"Item": None}
         body, status = parse_app.parse_document("99999999")
         self.assertEqual(status, 404)
         self.assertIn("not found", body["error"].lower())
 
-    def test_lead_missing_from_response_returns_404(self):
-        self.mock_table.get_item.return_value = {}
+    def test_document_missing_from_response_returns_404(self):
+        self.mock_documents_table.get_item.return_value = {}
         body, status = parse_app.parse_document("99999999")
         self.assertEqual(status, 404)
 
     # ── 422 — no doc_s3_uri ─────────────────────────────────────────────────
 
     def test_no_doc_s3_uri_returns_422(self):
-        lead = _make_lead(doc_s3_uri="")
-        self.mock_table.get_item.return_value = {"Item": lead}
+        doc = _make_document(doc_s3_uri="")
+        self.mock_documents_table.get_item.return_value = {"Item": doc}
         body, status = parse_app.parse_document("20240001")
         self.assertEqual(status, 422)
         self.assertIn("doc_s3_uri", body["error"])
@@ -186,7 +192,7 @@ class TestParseDocument(unittest.TestCase):
     # ── 500 — S3 fetch fails ────────────────────────────────────────────────
 
     def test_s3_failure_returns_500_and_stores_parse_error(self):
-        self.mock_table.get_item.return_value = {"Item": _make_lead()}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.side_effect = Exception("NoSuchKey")
 
         body, status = parse_app.parse_document("20240001")
@@ -194,16 +200,16 @@ class TestParseDocument(unittest.TestCase):
         self.assertEqual(status, 500)
         self.assertIn("S3 fetch failed", body["error"])
 
-        # parse_error must be persisted via update_item
-        self.mock_table.update_item.assert_called_once()
-        call_kwargs = self.mock_table.update_item.call_args.kwargs
+        # parse_error must be persisted on the documents table via update_item
+        self.mock_documents_table.update_item.assert_called_once()
+        call_kwargs = self.mock_documents_table.update_item.call_args.kwargs
         self.assertIn("NoSuchKey", call_kwargs["ExpressionAttributeValues"][":pe"])
 
     # ── 500 — Bedrock fails ─────────────────────────────────────────────────
 
     def test_bedrock_failure_returns_500_and_stores_parse_error(self):
-        self.mock_table.get_item.return_value = {"Item": _make_lead()}
-        self.mock_s3.get_object.return_value  = {
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
         self.mock_bedrock.converse.side_effect = Exception("ThrottlingException")
@@ -212,19 +218,34 @@ class TestParseDocument(unittest.TestCase):
 
         self.assertEqual(status, 500)
         self.assertIn("Bedrock call failed", body["error"])
-        self.mock_table.update_item.assert_called_once()
-        call_kwargs = self.mock_table.update_item.call_args.kwargs
+        self.mock_documents_table.update_item.assert_called_once()
+        call_kwargs = self.mock_documents_table.update_item.call_args.kwargs
         self.assertIn("ThrottlingException", call_kwargs["ExpressionAttributeValues"][":pe"])
 
-    # ── 500 — DynamoDB update fails ─────────────────────────────────────────
+    # ── 500 — DynamoDB write fails (contacts/properties) ────────────────────
 
-    def test_dynamodb_update_failure_returns_500(self):
-        self.mock_table.get_item.return_value = {"Item": _make_lead()}
-        self.mock_s3.get_object.return_value  = {
+    def test_dynamodb_write_failure_returns_500(self):
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
         self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
-        self.mock_table.update_item.side_effect = Exception("ProvisionedThroughputExceeded")
+        self.mock_contacts_table.put_item.side_effect = Exception("ProvisionedThroughputExceeded")
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 500)
+        self.assertIn("DynamoDB write failed", body["error"])
+
+    # ── 500 — DynamoDB update fails (documents status stamp) ─────────────────
+
+    def test_dynamodb_update_failure_returns_500(self):
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+        self.mock_documents_table.update_item.side_effect = Exception("ProvisionedThroughputExceeded")
 
         body, status = parse_app.parse_document("20240001")
 
@@ -233,15 +254,8 @@ class TestParseDocument(unittest.TestCase):
 
     # ── 200 — happy path ────────────────────────────────────────────────────
 
-    def test_happy_path_returns_200_with_parsed_fields(self):
-        lead = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},                           # first call (fetch lead)
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,  # second call (re-fetch after update)
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+    def test_happy_path_returns_200_with_counts(self):
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
@@ -250,24 +264,14 @@ class TestParseDocument(unittest.TestCase):
         body, status = parse_app.parse_document("20240001")
 
         self.assertEqual(status, 200)
-        self.assertEqual(body["deceasedName"], "Jane A. Smith")
-        self.assertEqual(body["deceasedDob"],  "1942-03-15")
-        self.assertEqual(body["deceasedDod"],  "2025-11-01")
-        self.assertEqual(body["deceasedLastAddress"], "123 Main St, Plano, TX 75001")
-        self.assertEqual(len(body["people"]),       3)
-        self.assertEqual(len(body["realProperty"]), 2)
-        self.assertIn("Jane A. Smith", body["summary"])
-        self.assertEqual(body["parseError"], "")
+        self.assertEqual(body["docNumber"],         "20240001")
+        self.assertEqual(body["parseError"],        "")
+        # 1 deceased + 3 people = 4 contacts; 2 real_property entries
+        self.assertEqual(body["contactsWritten"],   4)
+        self.assertEqual(body["propertiesWritten"], 2)
 
-    def test_happy_path_persists_correct_update_expression(self):
-        lead = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+    def test_happy_path_writes_contacts_to_contacts_table(self):
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
@@ -275,26 +279,32 @@ class TestParseDocument(unittest.TestCase):
 
         parse_app.parse_document("20240001")
 
-        self.mock_table.update_item.assert_called_once()
-        call_kwargs = self.mock_table.update_item.call_args.kwargs
+        # 4 put_item calls: 1 deceased + 3 people
+        self.assertEqual(self.mock_contacts_table.put_item.call_count, 4)
+        self.mock_properties_table.put_item.assert_called()
+        self.assertEqual(self.mock_properties_table.put_item.call_count, 2)
+
+    def test_happy_path_stamps_documents_table(self):
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        self.mock_documents_table.update_item.assert_called_once()
+        call_kwargs = self.mock_documents_table.update_item.call_args.kwargs
         ev = call_kwargs["ExpressionAttributeValues"]
-        self.assertEqual(ev[":dn"], "Jane A. Smith")
-        self.assertEqual(ev[":pe"], "")   # no error on happy path
-        self.assertEqual(len(ev[":pp"]), 3)
-        self.assertEqual(len(ev[":rp"]), 2)
+        self.assertEqual(ev[":pe"], "")  # no error on happy path
+        self.assertIn(":pa", ev)         # parsed_at set
+        self.assertIn(":pm", ev)         # parsed_model set
 
     # ── Markdown-fenced response ─────────────────────────────────────────────
 
     def test_fenced_json_response_is_parsed_correctly(self):
         fenced = f"```json\n{json.dumps(_GOOD_BEDROCK_PAYLOAD)}\n```"
-        lead   = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
@@ -302,19 +312,12 @@ class TestParseDocument(unittest.TestCase):
 
         body, status = parse_app.parse_document("20240001")
         self.assertEqual(status, 200)
-        self.assertEqual(body["deceasedName"], "Jane A. Smith")
+        self.assertEqual(body["contactsWritten"], 4)
 
     def test_preamble_prose_before_json_is_handled(self):
         """Model sometimes adds prose before the JSON — slice from first { to last }."""
         preamble = f"Here is the extracted information:\n{json.dumps(_GOOD_BEDROCK_PAYLOAD)}"
-        lead     = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
@@ -322,18 +325,11 @@ class TestParseDocument(unittest.TestCase):
 
         body, status = parse_app.parse_document("20240001")
         self.assertEqual(status, 200)
-        self.assertEqual(body["deceasedName"], "Jane A. Smith")
+        self.assertEqual(body["contactsWritten"], 4)
 
     def test_plain_fenced_block_no_language_tag(self):
         fenced = f"```\n{json.dumps(_GOOD_BEDROCK_PAYLOAD)}\n```"
-        lead   = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
@@ -341,19 +337,13 @@ class TestParseDocument(unittest.TestCase):
 
         body, status = parse_app.parse_document("20240001")
         self.assertEqual(status, 200)
-        self.assertEqual(body["deceasedName"], "Jane A. Smith")
+        self.assertEqual(body["contactsWritten"], 4)
 
     # ── S3 URI is forwarded correctly to boto3 ──────────────────────────────
 
     def test_s3_get_object_called_with_correct_bucket_and_key(self):
-        lead = _make_lead("s3://mybucket/documents/CollinTx/20240001.pdf")
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+        doc = _make_document("s3://mybucket/documents/CollinTx/20240001.pdf")
+        self.mock_documents_table.get_item.return_value = {"Item": doc}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
@@ -370,14 +360,7 @@ class TestParseDocument(unittest.TestCase):
 
     def test_pdf_bytes_forwarded_to_bedrock(self):
         pdf_content = b"%PDF-1.4 fake content"
-        lead = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **_GOOD_BEDROCK_PAYLOAD,
-                      "parsed_at": "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error": ""}},
-        ]
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=pdf_content))
         }
@@ -393,7 +376,7 @@ class TestParseDocument(unittest.TestCase):
     # ── Null fields from Bedrock are handled gracefully ──────────────────────
 
     def test_null_optional_fields_handled(self):
-        # Bedrock returns None for optional fields
+        # Bedrock returns None for optional fields and empty lists
         sparse_bedrock = {
             "deceased_name":         "Unknown Decedent",
             "deceased_dob":          None,
@@ -403,35 +386,18 @@ class TestParseDocument(unittest.TestCase):
             "real_property":         [],
             "summary":               "A probate filing with minimal information.",
         }
-        # _persist_parsed_fields coerces None → ""; the re-fetched DynamoDB item
-        # reflects the persisted (coerced) values, not the raw Bedrock payload.
-        stored = {
-            "deceased_name":         "Unknown Decedent",
-            "deceased_dob":          "",
-            "deceased_dod":          "",
-            "deceased_last_address": "",
-            "people":                [],
-            "real_property":         [],
-            "summary":               "A probate filing with minimal information.",
-        }
-        lead = _make_lead()
-        self.mock_table.get_item.side_effect = [
-            {"Item": lead},
-            {"Item": {**lead, **stored,
-                      "parsed_at":    "2026-02-26T00:00:00+00:00",
-                      "parsed_model": parse_app._model_id,
-                      "parse_error":  ""}},
-        ]
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
         }
         self.mock_bedrock.converse.return_value = _bedrock_response(sparse_bedrock)
 
         body, status = parse_app.parse_document("20240001")
+
         self.assertEqual(status, 200)
-        self.assertEqual(body["deceasedDob"], "")   # None coerced → "" by persist helper
-        self.assertEqual(body["people"],      [])
-        self.assertEqual(body["realProperty"], [])
+        # 1 deceased contact, no people, no properties
+        self.assertEqual(body["contactsWritten"],   1)
+        self.assertEqual(body["propertiesWritten"], 0)
 
 
 if __name__ == "__main__":

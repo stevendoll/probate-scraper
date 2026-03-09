@@ -2,7 +2,9 @@
 Probate Leads API — Lambda handler.
 
 Routes (all under /real-estate/probate-leads/):
-  GET  /{location_path}/leads               — leads for a location (date-range query)
+  GET  /{location_path}/documents           — documents for a location (date-range query)
+  GET  /documents/{document_id}/contacts    — contacts for a document
+  GET  /documents/{document_id}/properties  — properties for a document
   GET  /locations                           — list all locations
   GET  /locations/{location_code}           — get a single location
   GET  /users                               — list all users
@@ -25,15 +27,16 @@ Routes (all under /real-estate/probate-leads/):
   POST /auth/unsubscribe                    — unsubscribe via prospect JWT (no API key)
   POST /events                              — track prospect-initiated events (prospect JWT)
   GET  /events                              — query events for a user (admin Bearer token, ?user_id=&limit=)
-  POST /stripe/checkout                     — create Stripe Checkout Session (no API key)
 
 Environment variables:
-  DYNAMO_TABLE_NAME       — leads table
+  DOCUMENTS_TABLE_NAME    — documents table
+  CONTACTS_TABLE_NAME     — contacts table
+  PROPERTIES_TABLE_NAME   — properties table
   LOCATIONS_TABLE_NAME    — locations table
   USERS_TABLE_NAME        — users table
   EVENTS_TABLE_NAME       — events table
-  GSI_NAME                — legacy leads GSI (recorded-date-index)
-  LOCATION_DATE_GSI       — new leads GSI (location-date-index)
+  GSI_NAME                — legacy documents GSI (recorded-date-index)
+  LOCATION_DATE_GSI       — primary documents GSI (location-date-index)
   USER_EVENT_GSI          — events GSI (user-event-index)
   STRIPE_SECRET_KEY       — Stripe secret key
   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
@@ -49,8 +52,8 @@ from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.event_handler.api_gateway import CORSConfig
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-import db  # noqa: F401 — imported so tests can patch db.table etc.
-from models import Lead, Location, User
+import db  # noqa: F401 — imported so tests can patch db.documents_table etc.
+from models import Document, Location, User
 from utils import (
     decode_key as _decode_key,
     encode_key as _encode_key,
@@ -58,7 +61,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import leads, locations, users, stripe, auth, admin, prospect, event
+from routers import documents, locations, users, stripe, auth, admin, prospect, event
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -72,7 +75,7 @@ api    = APIGatewayRestResolver(cors=CORSConfig(
 # Include routers
 # ---------------------------------------------------------------------------
 
-api.include_router(leads.router)
+api.include_router(documents.router)
 api.include_router(locations.router)
 api.include_router(users.router)
 api.include_router(stripe.router)
@@ -85,8 +88,8 @@ api.include_router(event.router)
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)
 # ---------------------------------------------------------------------------
 
-def _transform_lead(item: dict) -> dict:
-    return Lead.from_dynamo(item).to_dict()
+def _transform_document(item: dict) -> dict:
+    return Document.from_dynamo(item).to_dict()
 
 
 def _transform_location(item: dict) -> dict:

@@ -25,7 +25,7 @@ from auth_helpers import (
 )
 from data_helpers import parse_email_input
 from email_helpers import send_prospect_email
-from models import Lead, User
+from models import Document, User
 from utils import now_iso
 
 logger = Logger(service="probate-api")
@@ -70,9 +70,9 @@ def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") 
 
 
 def _fetch_sample_leads(count: int = 10) -> list:
-    """Fetch sample leads for a funnel email (CollinTx only)."""
+    """Fetch sample documents for a funnel email (CollinTx only)."""
     try:
-        result = db.table.query(
+        result = db.documents_table.query(
             IndexName=db.location_date_gsi,
             KeyConditionExpression=Key("location_code").eq("CollinTx"),
             ScanIndexForward=False,
@@ -111,7 +111,7 @@ def request_login():
         try:
             user = _create_inbound_user(clean_email, first_name, last_name)
             leads_raw  = _fetch_sample_leads(10)
-            leads_dicts = [Lead.from_dynamo(item).to_dict() for item in leads_raw]
+            leads_dicts = [Document.from_dynamo(item).to_dict() for item in leads_raw]
             prospect_token = create_prospect_token(user["user_id"], clean_email, user["offered_price"])
             send_prospect_email(
                 clean_email, prospect_token, leads_dicts, user["offered_price"],
@@ -269,7 +269,7 @@ def get_my_leads():
             else:
                 kce = Key("location_code").eq(location_code)
 
-            result = db.table.query(
+            result = db.documents_table.query(
                 IndexName=db.location_date_gsi,
                 KeyConditionExpression=kce,
                 ScanIndexForward=False,
@@ -279,7 +279,7 @@ def get_my_leads():
         except Exception as exc:
             logger.error("leads query for %s failed: %s", location_code, exc)
 
-    leads = [Lead.from_dynamo(item).to_dict() for item in all_leads]
+    leads = [Document.from_dynamo(item).to_dict() for item in all_leads]
     return {
         "requestId": str(uuid.uuid4()),
         "leads":     leads,

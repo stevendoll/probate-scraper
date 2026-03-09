@@ -1,18 +1,18 @@
-"""Mock probate lead records for use in tests."""
+"""Mock probate document records for use in tests."""
 
 import uuid
 
-# Must match _LEAD_NS in src/scraper/dynamo.py
-_LEAD_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+# Must match _DOC_NS in src/scraper/dynamo.py
+_DOC_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 
-def _lead_id(doc_number: str) -> str:
-    return str(uuid.uuid5(_LEAD_NS, doc_number))
+def _document_id(doc_number: str) -> str:
+    return str(uuid.uuid5(_DOC_NS, doc_number))
 
 
 MOCK_LEADS = [
     {
-        "lead_id":           _lead_id("2026000009280"),
+        "document_id":       _document_id("2026000009280"),
         "doc_number":        "2026000009280",
         "grantor":           "CHERRY ERIKA WOOD DECEASED ESTATE",
         "grantee":           "PUBLIC",
@@ -30,7 +30,7 @@ MOCK_LEADS = [
         "pdf_url":           "https://collin.tx.publicsearch.us/doc/2026000009280",
     },
     {
-        "lead_id":           _lead_id("2026000009450"),
+        "document_id":       _document_id("2026000009450"),
         "doc_number":        "2026000009450",
         "grantor":           "GOYAL MADAN DECEASED ESTATE",
         "grantee":           "PUBLIC",
@@ -48,7 +48,7 @@ MOCK_LEADS = [
         "pdf_url":           "https://collin.tx.publicsearch.us/doc/2026000009450",
     },
     {
-        "lead_id":           _lead_id("2026000008491"),
+        "document_id":       _document_id("2026000008491"),
         "doc_number":        "2026000008491",
         "grantor":           "KING L M JR DECEASED ESTATE",
         "grantee":           "PUBLIC",
@@ -66,7 +66,7 @@ MOCK_LEADS = [
         "pdf_url":           "https://collin.tx.publicsearch.us/doc/2026000008491",
     },
     {
-        "lead_id":           _lead_id("2026000007100"),
+        "document_id":       _document_id("2026000007100"),
         "doc_number":        "2026000007100",
         "grantor":           "PATEL ANITA DECEASED ESTATE",
         "grantee":           "PUBLIC",
@@ -84,7 +84,7 @@ MOCK_LEADS = [
         "pdf_url":           "",
     },
     {
-        "lead_id":           _lead_id("2026000006200"),
+        "document_id":       _document_id("2026000006200"),
         "doc_number":        "2026000006200",
         "grantor":           "SMITH JOHN DECEASED ESTATE",
         "grantee":           "PUBLIC",
@@ -104,9 +104,9 @@ MOCK_LEADS = [
 ]
 
 # DynamoDB LastEvaluatedKey shape for location-date-index GSI queries.
-# Includes the table PK (lead_id) + both GSI keys (location_code, recorded_date).
+# Includes the table PK (document_id) + both GSI keys (location_code, recorded_date).
 PAGINATION_KEY = {
-    "lead_id":       _lead_id("2026000008491"),
+    "document_id":   _document_id("2026000008491"),
     "recorded_date": "2026-01-21",
     "location_code": "CollinTx",
 }

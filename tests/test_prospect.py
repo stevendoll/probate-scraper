@@ -303,9 +303,9 @@ class TestAdminProspectSend(unittest.TestCase):
         self.mock_users_table    = MagicMock()
         self.mock_leads_table    = MagicMock()
         self.mock_locations_table = MagicMock()
-        db.users_table     = self.mock_users_table
-        db.table           = self.mock_leads_table
-        db.locations_table = self.mock_locations_table
+        db.users_table      = self.mock_users_table
+        db.documents_table  = self.mock_leads_table
+        db.locations_table  = self.mock_locations_table
 
         # Default: no existing user by email
         self.mock_users_table.query.return_value  = {"Items": []}

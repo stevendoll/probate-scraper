@@ -1,7 +1,7 @@
 """
 reset_production_db.py — delete all data from production tables and seed initial data.
 
-Resets all tables: leads, locations, users, activities
+Resets all tables: documents, contacts, properties, locations, users, events
 Seeds initial data: 1 location (CollinTx), 1 admin user (admin@collincountyleads.com)
 
 Production:
@@ -160,9 +160,11 @@ def main():
     # Tables to reset (in safe order - no foreign key dependencies)
     tables_to_reset = [
         "events",        # Event tracking
-        "users",         # User accounts  
-        "leads",         # Scraped leads
-        "locations",      # Location metadata
+        "users",         # User accounts
+        "contacts",      # Parsed contacts
+        "properties",    # Parsed properties
+        "documents",     # Scraped documents
+        "locations",     # Location metadata
     ]
     
     success_count = 0

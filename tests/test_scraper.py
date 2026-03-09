@@ -978,6 +978,19 @@ class TestLogin(unittest.TestCase):
 
 class TestScrapeAll(unittest.TestCase):
 
+    def setUp(self):
+        # _extract_text_rows reads DOM text without clicking; with a MagicMock
+        # driver it would return [] and cause an early return.  Patch it to
+        # return a minimal phase-1 list so tests can exercise the rest of scrape_all.
+        self._patcher_extract_rows = patch(
+            "scraper._extract_text_rows",
+            return_value=[{"doc_number": "1", "pdf_url": None}],
+        )
+        self._patcher_extract_rows.start()
+
+    def tearDown(self):
+        self._patcher_extract_rows.stop()
+
     @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
     @patch("scraper.extract_page_data")
@@ -987,9 +1000,10 @@ class TestScrapeAll(unittest.TestCase):
         driver = MagicMock()
         mock_init.return_value = driver
         mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             scrape_all("run-001", "CollinTx")
 
         # load_page called exactly once (first page only)
@@ -1009,9 +1023,10 @@ class TestScrapeAll(unittest.TestCase):
         driver = MagicMock()
         mock_init.return_value = driver
         mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             scrape_all("run-login", "CollinTx")
 
         mock_login.assert_called_once_with(driver)
@@ -1028,12 +1043,13 @@ class TestScrapeAll(unittest.TestCase):
         mock_init.return_value = driver
         record = {"doc_number": "X", "pdf_url": None}
         mock_extract.return_value = [record]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             scrape_all("run-002", "CollinTx")
 
-        written_records = mock_dynamo.write_records.call_args[0][0]
+        written_records = mock_dynamo.write_documents.call_args[0][0]
         self.assertEqual(written_records[0]["page_number"], 1)
         self.assertEqual(written_records[0]["offset"], 0)
 
@@ -1042,7 +1058,7 @@ class TestScrapeAll(unittest.TestCase):
     @patch("scraper.initialize_driver")
     def test_returns_zero_when_page_fails_to_load(self, mock_init, mock_load, mock_login):
         mock_init.return_value = MagicMock()
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             result = scrape_all("run-003", "CollinTx")
         self.assertEqual(result, 0)
 
@@ -1055,10 +1071,11 @@ class TestScrapeAll(unittest.TestCase):
         self, mock_init, mock_load, mock_extract, mock_dynamo, mock_login
     ):
         mock_init.return_value = MagicMock()
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             result = scrape_all("run-004", "CollinTx")
         self.assertEqual(result, 0)
-        mock_dynamo.write_records.assert_not_called()
+        mock_dynamo.write_documents.assert_not_called()
 
     @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
@@ -1073,11 +1090,11 @@ class TestScrapeAll(unittest.TestCase):
         driver = MagicMock()
         mock_init.return_value = driver
         already = {"20260001", "20260002"}
-        mock_dynamo.get_recently_downloaded_doc_numbers.return_value = already
+        mock_dynamo.get_existing_doc_numbers.return_value = already
         mock_extract.return_value = [{"doc_number": "1", "pdf_url": None}]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.write_documents.return_value = 1
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             scrape_all("run-maxdl", "CollinTx")
 
         _, kwargs = mock_extract.call_args
@@ -1094,9 +1111,10 @@ class TestScrapeAll(unittest.TestCase):
         """WebDriver must be closed even if extract_page_data raises."""
         driver = MagicMock()
         mock_init.return_value = driver
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
         mock_extract.side_effect = RuntimeError("unexpected")
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             with self.assertRaises(RuntimeError):
                 scrape_all("run-005", "CollinTx")
 
@@ -1117,10 +1135,11 @@ class TestScrapeAll(unittest.TestCase):
         mock_extract.return_value = [
             {"doc_number": "20240001234", "pdf_url": None, "doc_local_path": "/tmp/file.pdf"},
         ]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
         mock_rename.return_value = "/tmp/20240001234.pdf"
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             scrape_all("run-rename-01", "CollinTx")
 
         mock_rename.assert_called_once()
@@ -1142,9 +1161,10 @@ class TestScrapeAll(unittest.TestCase):
         mock_extract.return_value = [
             {"doc_number": "N/A", "pdf_url": None, "doc_local_path": "/tmp/N-A.pdf"},
         ]
-        mock_dynamo.write_records.return_value = 0
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 0
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads"}):
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents"}):
             scrape_all("run-rename-02", "CollinTx")
 
         mock_rename.assert_not_called()
@@ -1161,9 +1181,19 @@ class TestScrapeAllWithS3(unittest.TestCase):
     """
 
     def setUp(self):
+        # _extract_text_rows reads DOM text without clicking; patch to return a
+        # minimal phase-1 list so tests can exercise the rest of scrape_all.
+        self._patcher_extract_rows = patch(
+            "scraper._extract_text_rows",
+            return_value=[{"doc_number": "1", "pdf_url": None}],
+        )
+        self._patcher_extract_rows.start()
         # Reset the module-level s3_helper mock before every test so call
         # counts don't bleed between tests.
         scraper.s3_helper.reset_mock()
+
+    def tearDown(self):
+        self._patcher_extract_rows.stop()
 
     @patch("scraper.login", return_value=True)
     @patch("scraper.dynamo")
@@ -1180,10 +1210,11 @@ class TestScrapeAllWithS3(unittest.TestCase):
             {"doc_number": "20240001", "pdf_url": "https://site.com/doc/20240001", "doc_local_path": ""},
             {"doc_number": "20240002", "pdf_url": "https://site.com/doc/20240002", "doc_local_path": ""},
         ]
-        mock_dynamo.write_records.return_value = 2
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 2
         scraper.s3_helper.fetch_and_upload.return_value = "s3://bucket/documents/CollinTx/20240001.pdf"
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             scrape_all("run-s3-01", "CollinTx")
 
@@ -1209,10 +1240,11 @@ class TestScrapeAllWithS3(unittest.TestCase):
                 "doc_local_path": "/tmp/20240001.pdf",
             },
         ]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
         scraper.s3_helper.upload_local_file.return_value = "s3://bucket/documents/CollinTx/20240001.pdf"
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             scrape_all("run-s3-localfile", "CollinTx")
 
@@ -1233,9 +1265,10 @@ class TestScrapeAllWithS3(unittest.TestCase):
         mock_extract.return_value = [
             {"doc_number": "DOC1", "pdf_url": "https://site.com/doc/DOC1", "doc_local_path": ""},
         ]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
 
-        env = {"DYNAMO_TABLE_NAME": "leads"}
+        env = {"DOCUMENTS_TABLE_NAME": "documents"}
         with patch.dict(os.environ, env, clear=False):
             os.environ.pop("DOCUMENTS_BUCKET", None)
             scrape_all("run-s3-02", "CollinTx")
@@ -1257,9 +1290,10 @@ class TestScrapeAllWithS3(unittest.TestCase):
         mock_extract.return_value = [
             {"doc_number": "20240001", "pdf_url": None, "doc_local_path": ""},
         ]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             scrape_all("run-s3-03", "CollinTx")
 
@@ -1279,14 +1313,15 @@ class TestScrapeAllWithS3(unittest.TestCase):
         mock_init.return_value = driver
         record = {"doc_number": "20240099", "pdf_url": "https://site.com/doc/20240099", "doc_local_path": ""}
         mock_extract.return_value = [record]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
         scraper.s3_helper.fetch_and_upload.return_value = "s3://my-bucket/documents/CollinTx/20240099.pdf"
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             scrape_all("run-s3-04", "CollinTx")
 
-        written = mock_dynamo.write_records.call_args[0][0]
+        written = mock_dynamo.write_documents.call_args[0][0]
         self.assertEqual(written[0]["doc_s3_uri"],
                          "s3://my-bucket/documents/CollinTx/20240099.pdf")
 
@@ -1305,10 +1340,11 @@ class TestScrapeAllWithS3(unittest.TestCase):
         mock_extract.return_value = [
             {"doc_number": "20240001", "pdf_url": "https://site.com/doc/20240001", "doc_local_path": ""},
         ]
-        mock_dynamo.write_records.return_value = 1
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 1
         scraper.s3_helper.fetch_and_upload.return_value = "s3://b/k.pdf"
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             scrape_all("run-s3-05", "CollinTx")
 
@@ -1329,9 +1365,10 @@ class TestScrapeAllWithS3(unittest.TestCase):
         mock_extract.return_value = [
             {"doc_number": "N/A", "pdf_url": "https://site.com/doc/1", "doc_local_path": "/tmp/N-A.pdf"},
         ]
-        mock_dynamo.write_records.return_value = 0
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 0
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             scrape_all("run-s3-noint", "CollinTx")
 
@@ -1353,16 +1390,17 @@ class TestScrapeAllWithS3(unittest.TestCase):
             {"doc_number": "20240001", "pdf_url": "https://site.com/doc/20240001", "doc_local_path": ""},
             {"doc_number": "20240002", "pdf_url": "https://site.com/doc/20240002", "doc_local_path": ""},
         ]
-        mock_dynamo.write_records.return_value = 2
+        mock_dynamo.get_existing_doc_numbers.return_value = set()
+        mock_dynamo.write_documents.return_value = 2
         scraper.s3_helper.fetch_and_upload.return_value = None  # all uploads fail
 
-        with patch.dict(os.environ, {"DYNAMO_TABLE_NAME": "leads",
+        with patch.dict(os.environ, {"DOCUMENTS_TABLE_NAME": "documents",
                                      "DOCUMENTS_BUCKET": "my-bucket"}):
             result = scrape_all("run-s3-06", "CollinTx")
 
         # Scrape still completes and writes to DynamoDB
         self.assertEqual(result, 2)
-        mock_dynamo.write_records.assert_called_once()
+        mock_dynamo.write_documents.assert_called_once()
 
 
 if __name__ == "__main__":

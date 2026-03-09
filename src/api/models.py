@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
-# Timestamp helper (used by Lead.to_dict)
+# Timestamp helper (used by Document.to_dict)
 # ---------------------------------------------------------------------------
 
 def _normalize_timestamp(ts: str) -> str:
@@ -28,101 +28,170 @@ def _normalize_timestamp(ts: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Lead
+# Document (formerly Lead)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Lead:
-    lead_id:               str  = ""
-    doc_number:            str  = ""
-    grantor:               str  = ""
-    grantee:               str  = ""
-    doc_type:              str  = ""
-    recorded_date:         str  = ""
-    book_volume_page:      str  = ""
-    legal_description:     str  = ""
-    record_number:         int  = 0
-    page_number:           int  = 0
-    extracted_at:          str  = ""
-    processed_at:          str  = ""
-    scrape_run_id:         str  = ""
-    location_code:         str  = ""
-    offset:                int  = 0
-    pdf_url:               str  = ""
-    doc_s3_uri:            str  = ""
-    # --- Parsed fields (populated by ParseDocumentFunction) ------------------
-    parsed_at:             str  = ""
-    parsed_model:          str  = ""
-    deceased_name:         str  = ""
-    deceased_dob:          str  = ""
-    deceased_dod:          str  = ""
-    deceased_last_address: str  = ""
-    people:                list = field(default_factory=list)
-    real_property:         list = field(default_factory=list)
-    summary:               str  = ""
-    parse_error:           str  = ""
+class Document:
+    document_id:       str = ""
+    doc_number:        str = ""
+    grantor:           str = ""
+    grantee:           str = ""
+    doc_type:          str = ""
+    recorded_date:     str = ""
+    book_volume_page:  str = ""
+    legal_description: str = ""
+    record_number:     int = 0
+    page_number:       int = 0
+    extracted_at:      str = ""
+    processed_at:      str = ""
+    scrape_run_id:     str = ""
+    location_code:     str = ""
+    offset:            int = 0
+    pdf_url:           str = ""
+    doc_s3_uri:        str = ""
+    doc_local_path:    str = ""
 
     @classmethod
-    def from_dynamo(cls, item: dict) -> "Lead":
+    def from_dynamo(cls, item: dict) -> "Document":
         return cls(
-            lead_id=               item.get("lead_id", ""),
-            doc_number=            item.get("doc_number", ""),
-            grantor=               item.get("grantor", ""),
-            grantee=               item.get("grantee", ""),
-            doc_type=              item.get("doc_type", ""),
-            recorded_date=         item.get("recorded_date", ""),
-            book_volume_page=      item.get("book_volume_page", ""),
-            legal_description=     item.get("legal_description", ""),
-            record_number=         int(item.get("record_number", 0) or 0),
-            page_number=           int(item.get("page_number", 0) or 0),
-            extracted_at=          str(item.get("extracted_at", "")),
-            processed_at=          str(item.get("processed_at", "")),
-            scrape_run_id=         item.get("scrape_run_id", ""),
-            location_code=         item.get("location_code", ""),
-            offset=                int(item.get("offset", 0) or 0),
-            pdf_url=               item.get("pdf_url", ""),
-            doc_s3_uri=            item.get("doc_s3_uri", ""),
-            parsed_at=             item.get("parsed_at", ""),
-            parsed_model=          item.get("parsed_model", ""),
-            deceased_name=         item.get("deceased_name", ""),
-            deceased_dob=          item.get("deceased_dob", ""),
-            deceased_dod=          item.get("deceased_dod", ""),
-            deceased_last_address= item.get("deceased_last_address", ""),
-            people=                list(item.get("people", []) or []),
-            real_property=         list(item.get("real_property", []) or []),
-            summary=               item.get("summary", ""),
-            parse_error=           item.get("parse_error", ""),
+            document_id=       item.get("document_id", ""),
+            doc_number=        item.get("doc_number", ""),
+            grantor=           item.get("grantor", ""),
+            grantee=           item.get("grantee", ""),
+            doc_type=          item.get("doc_type", ""),
+            recorded_date=     item.get("recorded_date", ""),
+            book_volume_page=  item.get("book_volume_page", ""),
+            legal_description= item.get("legal_description", ""),
+            record_number=     int(item.get("record_number", 0) or 0),
+            page_number=       int(item.get("page_number", 0) or 0),
+            extracted_at=      str(item.get("extracted_at", "")),
+            processed_at=      str(item.get("processed_at", "")),
+            scrape_run_id=     item.get("scrape_run_id", ""),
+            location_code=     item.get("location_code", ""),
+            offset=            int(item.get("offset", 0) or 0),
+            pdf_url=           item.get("pdf_url", ""),
+            doc_s3_uri=        item.get("doc_s3_uri", ""),
+            doc_local_path=    item.get("doc_local_path", ""),
         )
 
     def to_dict(self) -> dict:
         return {
-            "leadId":              self.lead_id,
-            "docNumber":           self.doc_number,
-            "grantor":             self.grantor,
-            "grantee":             self.grantee,
-            "docType":             self.doc_type,
-            "recordedDate":        self.recorded_date,
-            "bookVolumePage":      self.book_volume_page,
-            "legalDescription":    self.legal_description,
-            "recordNumber":        self.record_number,
-            "pageNumber":          self.page_number,
-            "extractedAt":         _normalize_timestamp(self.extracted_at),
-            "processedAt":         _normalize_timestamp(self.processed_at),
-            "scrapeRunId":         self.scrape_run_id,
-            "locationCode":        self.location_code,
-            "offset":              self.offset,
-            "pdfUrl":              self.pdf_url,
-            "docS3Uri":            self.doc_s3_uri,
-            "parsedAt":            _normalize_timestamp(self.parsed_at),
-            "parsedModel":         self.parsed_model,
-            "deceasedName":        self.deceased_name,
-            "deceasedDob":         self.deceased_dob,
-            "deceasedDod":         self.deceased_dod,
-            "deceasedLastAddress": self.deceased_last_address,
-            "people":              self.people,
-            "realProperty":        self.real_property,
-            "summary":             self.summary,
-            "parseError":          self.parse_error,
+            "documentId":       self.document_id,
+            "docNumber":        self.doc_number,
+            "grantor":          self.grantor,
+            "grantee":          self.grantee,
+            "docType":          self.doc_type,
+            "recordedDate":     self.recorded_date,
+            "bookVolumePage":   self.book_volume_page,
+            "legalDescription": self.legal_description,
+            "recordNumber":     self.record_number,
+            "pageNumber":       self.page_number,
+            "extractedAt":      _normalize_timestamp(self.extracted_at),
+            "processedAt":      _normalize_timestamp(self.processed_at),
+            "scrapeRunId":      self.scrape_run_id,
+            "locationCode":     self.location_code,
+            "offset":           self.offset,
+            "pdfUrl":           self.pdf_url,
+            "docS3Uri":         self.doc_s3_uri,
+            "docLocalPath":     self.doc_local_path,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Contact (people parsed from documents)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Contact:
+    contact_id:   str = ""
+    document_id:  str = ""
+    role:         str = ""   # deceased / executor / family / other
+    name:         str = ""
+    dob:          str = ""
+    dod:          str = ""
+    address:      str = ""
+    notes:        str = ""
+    parsed_at:    str = ""
+    parsed_model: str = ""
+
+    @classmethod
+    def from_dynamo(cls, item: dict) -> "Contact":
+        return cls(
+            contact_id=   item.get("contact_id", ""),
+            document_id=  item.get("document_id", ""),
+            role=         item.get("role", ""),
+            name=         item.get("name", ""),
+            dob=          item.get("dob", ""),
+            dod=          item.get("dod", ""),
+            address=      item.get("address", ""),
+            notes=        item.get("notes", ""),
+            parsed_at=    item.get("parsed_at", ""),
+            parsed_model= item.get("parsed_model", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "contactId":   self.contact_id,
+            "documentId":  self.document_id,
+            "role":        self.role,
+            "name":        self.name,
+            "dob":         self.dob,
+            "dod":         self.dod,
+            "address":     self.address,
+            "notes":       self.notes,
+            "parsedAt":    self.parsed_at,
+            "parsedModel": self.parsed_model,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Property (real estate assets in the estate)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Property:
+    property_id:       str = ""
+    document_id:       str = ""
+    address:           str = ""
+    legal_description: str = ""
+    parcel_id:         str = ""
+    city:              str = ""
+    state:             str = ""
+    zip:               str = ""
+    notes:             str = ""
+    parsed_at:         str = ""
+    parsed_model:      str = ""
+
+    @classmethod
+    def from_dynamo(cls, item: dict) -> "Property":
+        return cls(
+            property_id=       item.get("property_id", ""),
+            document_id=       item.get("document_id", ""),
+            address=           item.get("address", ""),
+            legal_description= item.get("legal_description", ""),
+            parcel_id=         item.get("parcel_id", ""),
+            city=              item.get("city", ""),
+            state=             item.get("state", ""),
+            zip=               item.get("zip", ""),
+            notes=             item.get("notes", ""),
+            parsed_at=         item.get("parsed_at", ""),
+            parsed_model=      item.get("parsed_model", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "propertyId":       self.property_id,
+            "documentId":       self.document_id,
+            "address":          self.address,
+            "legalDescription": self.legal_description,
+            "parcelId":         self.parcel_id,
+            "city":             self.city,
+            "state":            self.state,
+            "zip":              self.zip,
+            "notes":            self.notes,
+            "parsedAt":         self.parsed_at,
+            "parsedModel":      self.parsed_model,
         }
 
 
@@ -159,7 +228,7 @@ class Location:
 
 
 # ---------------------------------------------------------------------------
-# User
+# Event
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -205,6 +274,10 @@ class Event:
             "metadata":      self.metadata,
         }
 
+
+# ---------------------------------------------------------------------------
+# User
+# ---------------------------------------------------------------------------
 
 @dataclass
 class User:

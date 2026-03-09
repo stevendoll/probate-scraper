@@ -8,9 +8,11 @@ Defaults to data/2026-01-29-probate-records.csv if no argument given.
 Reads AWS_ENDPOINT_URL from environment (default: http://localhost:8000).
 
 Tables created:
-  leads        — scraped probate records (formerly probate-leads-collin-tx)
+  documents    — scraped probate records (PK: document_id)
+  contacts     — people parsed from documents (PK: contact_id)
+  properties   — real-estate assets parsed from documents (PK: property_id)
   locations    — supported counties/jurisdictions
-  users  — authenticated user accounts
+  users        — authenticated user accounts
 """
 
 import csv
@@ -20,19 +22,20 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Must match _LEAD_NS in src/scraper/dynamo.py
-_LEAD_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+# Must match _DOC_NS in src/scraper/dynamo.py
+_DOC_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 import boto3
 from boto3.dynamodb.types import TypeSerializer
 
 ENDPOINT   = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:8000")
-GSI_NAME   = "recorded-date-index"
 
-LEADS_TABLE_NAME     = os.environ.get("DYNAMO_TABLE_NAME",      "leads")
-LOCATIONS_TABLE_NAME = os.environ.get("LOCATIONS_TABLE_NAME",   "locations")
-USERS_TABLE_NAME     = os.environ.get("USERS_TABLE_NAME",       "users")
-EVENTS_TABLE_NAME    = os.environ.get("EVENTS_TABLE_NAME",      "events")
+DOCUMENTS_TABLE_NAME  = os.environ.get("DOCUMENTS_TABLE_NAME",  "documents")
+CONTACTS_TABLE_NAME   = os.environ.get("CONTACTS_TABLE_NAME",   "contacts")
+PROPERTIES_TABLE_NAME = os.environ.get("PROPERTIES_TABLE_NAME", "properties")
+LOCATIONS_TABLE_NAME  = os.environ.get("LOCATIONS_TABLE_NAME",  "locations")
+USERS_TABLE_NAME      = os.environ.get("USERS_TABLE_NAME",      "users")
+EVENTS_TABLE_NAME     = os.environ.get("EVENTS_TABLE_NAME",     "events")
 
 # Dummy credentials required by DynamoDB Local (values don't matter)
 session = boto3.Session(
@@ -65,19 +68,19 @@ def _wait_active(table_name: str):
 # Table creation
 # ---------------------------------------------------------------------------
 
-def create_leads_table():
-    print(f"Creating table '{LEADS_TABLE_NAME}' at {ENDPOINT} ...")
+def create_documents_table():
+    print(f"Creating table '{DOCUMENTS_TABLE_NAME}' at {ENDPOINT} ...")
     ddb.create_table(
-        TableName=LEADS_TABLE_NAME,
+        TableName=DOCUMENTS_TABLE_NAME,
         BillingMode="PAY_PER_REQUEST",
         AttributeDefinitions=[
-            {"AttributeName": "lead_id",       "AttributeType": "S"},
+            {"AttributeName": "document_id",   "AttributeType": "S"},
             {"AttributeName": "doc_type",      "AttributeType": "S"},
             {"AttributeName": "recorded_date", "AttributeType": "S"},
             {"AttributeName": "location_code", "AttributeType": "S"},
         ],
         KeySchema=[
-            {"AttributeName": "lead_id", "KeyType": "HASH"},
+            {"AttributeName": "document_id", "KeyType": "HASH"},
         ],
         GlobalSecondaryIndexes=[
             {
@@ -98,8 +101,60 @@ def create_leads_table():
             },
         ],
     )
-    _wait_active(LEADS_TABLE_NAME)
-    print(f"  '{LEADS_TABLE_NAME}' ready.")
+    _wait_active(DOCUMENTS_TABLE_NAME)
+    print(f"  '{DOCUMENTS_TABLE_NAME}' ready.")
+
+
+def create_contacts_table():
+    print(f"Creating table '{CONTACTS_TABLE_NAME}' at {ENDPOINT} ...")
+    ddb.create_table(
+        TableName=CONTACTS_TABLE_NAME,
+        BillingMode="PAY_PER_REQUEST",
+        AttributeDefinitions=[
+            {"AttributeName": "contact_id",  "AttributeType": "S"},
+            {"AttributeName": "document_id", "AttributeType": "S"},
+        ],
+        KeySchema=[
+            {"AttributeName": "contact_id", "KeyType": "HASH"},
+        ],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "document-contact-index",
+                "KeySchema": [
+                    {"AttributeName": "document_id", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+    )
+    _wait_active(CONTACTS_TABLE_NAME)
+    print(f"  '{CONTACTS_TABLE_NAME}' ready.")
+
+
+def create_properties_table():
+    print(f"Creating table '{PROPERTIES_TABLE_NAME}' at {ENDPOINT} ...")
+    ddb.create_table(
+        TableName=PROPERTIES_TABLE_NAME,
+        BillingMode="PAY_PER_REQUEST",
+        AttributeDefinitions=[
+            {"AttributeName": "property_id", "AttributeType": "S"},
+            {"AttributeName": "document_id", "AttributeType": "S"},
+        ],
+        KeySchema=[
+            {"AttributeName": "property_id", "KeyType": "HASH"},
+        ],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "document-property-index",
+                "KeySchema": [
+                    {"AttributeName": "document_id", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+    )
+    _wait_active(PROPERTIES_TABLE_NAME)
+    print(f"  '{PROPERTIES_TABLE_NAME}' ready.")
 
 
 def create_locations_table():
@@ -243,11 +298,11 @@ def seed_users():
 
 
 # ---------------------------------------------------------------------------
-# Seed — leads from CSV
+# Seed — documents from CSV
 # ---------------------------------------------------------------------------
 
-def seed_leads_csv(csv_path: Path):
-    print(f"Loading leads from {csv_path} ...")
+def seed_documents_csv(csv_path: Path):
+    print(f"Loading documents from {csv_path} ...")
     with csv_path.open(newline="") as f:
         rows = list(csv.DictReader(f))
 
@@ -258,8 +313,11 @@ def seed_leads_csv(csv_path: Path):
 
     for row in rows:
         doc_number = row.get("doc_number", "UNKNOWN")
+        if not doc_number or doc_number == "N/A":
+            continue
+
         item = {
-            "lead_id":           str(uuid.uuid5(_LEAD_NS, str(doc_number))),
+            "document_id":       str(uuid.uuid5(_DOC_NS, str(doc_number))),
             "doc_number":        doc_number,
             "grantor":           row.get("grantor", "N/A"),
             "grantee":           row.get("grantee", "N/A"),
@@ -276,8 +334,6 @@ def seed_leads_csv(csv_path: Path):
             "processed_at":      now,
             "scrape_run_id":     "seed-local",
         }
-        if not doc_number or doc_number == "N/A":
-            continue
 
         dynamo_item = {k: serializer.serialize(v) for k, v in item.items() if v}
         put_requests.append({"PutRequest": {"Item": dynamo_item}})
@@ -285,11 +341,11 @@ def seed_leads_csv(csv_path: Path):
     total = 0
     for i in range(0, len(put_requests), 25):
         chunk = put_requests[i : i + 25]
-        resp = ddb.batch_write_item(RequestItems={LEADS_TABLE_NAME: chunk})
-        unprocessed = resp.get("UnprocessedItems", {}).get(LEADS_TABLE_NAME, [])
+        resp = ddb.batch_write_item(RequestItems={DOCUMENTS_TABLE_NAME: chunk})
+        unprocessed = resp.get("UnprocessedItems", {}).get(DOCUMENTS_TABLE_NAME, [])
         total += len(chunk) - len(unprocessed)
 
-    print(f"  {total} leads written to '{LEADS_TABLE_NAME}'")
+    print(f"  {total} documents written to '{DOCUMENTS_TABLE_NAME}'")
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +353,14 @@ def seed_leads_csv(csv_path: Path):
 # ---------------------------------------------------------------------------
 
 def verify():
-    for name in (LEADS_TABLE_NAME, LOCATIONS_TABLE_NAME, USERS_TABLE_NAME, EVENTS_TABLE_NAME):
+    for name in (
+        DOCUMENTS_TABLE_NAME,
+        CONTACTS_TABLE_NAME,
+        PROPERTIES_TABLE_NAME,
+        LOCATIONS_TABLE_NAME,
+        USERS_TABLE_NAME,
+        EVENTS_TABLE_NAME,
+    ):
         resp = ddb.scan(TableName=name, Select="COUNT")
         print(f"  {name}: {resp['Count']} item(s)")
 
@@ -310,16 +373,28 @@ if __name__ == "__main__":
     csv_file = Path(sys.argv[1]) if len(sys.argv) > 1 else \
                Path(__file__).parent.parent / "data" / "2026-01-29-probate-records.csv"
 
-    # ── Leads table
-    if table_exists(LEADS_TABLE_NAME):
-        print(f"Table '{LEADS_TABLE_NAME}' already exists — skipping creation")
+    # ── Documents table
+    if table_exists(DOCUMENTS_TABLE_NAME):
+        print(f"Table '{DOCUMENTS_TABLE_NAME}' already exists — skipping creation")
     else:
-        create_leads_table()
+        create_documents_table()
 
     if csv_file.exists():
-        seed_leads_csv(csv_file)
+        seed_documents_csv(csv_file)
     else:
-        print(f"CSV not found ({csv_file}) — skipping leads seed")
+        print(f"CSV not found ({csv_file}) — skipping documents seed")
+
+    # ── Contacts table
+    if table_exists(CONTACTS_TABLE_NAME):
+        print(f"Table '{CONTACTS_TABLE_NAME}' already exists — skipping creation")
+    else:
+        create_contacts_table()
+
+    # ── Properties table
+    if table_exists(PROPERTIES_TABLE_NAME):
+        print(f"Table '{PROPERTIES_TABLE_NAME}' already exists — skipping creation")
+    else:
+        create_properties_table()
 
     # ── Locations table
     if table_exists(LOCATIONS_TABLE_NAME):
@@ -345,7 +420,9 @@ if __name__ == "__main__":
     verify()
 
     print("\nDone. Connect with:")
-    print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {LEADS_TABLE_NAME} --endpoint-url {ENDPOINT}")
+    print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {DOCUMENTS_TABLE_NAME} --endpoint-url {ENDPOINT}")
+    print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {CONTACTS_TABLE_NAME} --endpoint-url {ENDPOINT}")
+    print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {PROPERTIES_TABLE_NAME} --endpoint-url {ENDPOINT}")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {LOCATIONS_TABLE_NAME} --endpoint-url {ENDPOINT}")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {USERS_TABLE_NAME} --endpoint-url {ENDPOINT}")
     print(f"  AWS_ENDPOINT_URL={ENDPOINT} aws dynamodb scan --table-name {EVENTS_TABLE_NAME} --endpoint-url {ENDPOINT}")

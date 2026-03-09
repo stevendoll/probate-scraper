@@ -21,7 +21,7 @@ from auth_helpers import (
 )
 from data_helpers import parse_email_input
 from email_helpers import send_prospect_email
-from models import Lead, User
+from models import Document, User
 from utils import now_iso
 
 logger = Logger(service="probate-api")
@@ -50,8 +50,8 @@ def _require_admin(event: dict) -> dict | None:
     return payload
 
 
-def _fetch_recent_leads(lead_count: int) -> list:
-    """Return up to lead_count recent leads across all known locations.
+def _fetch_recent_documents(lead_count: int) -> list:
+    """Return up to lead_count recent documents across all known locations.
 
     Queries the location-date-index GSI for each location, merges results,
     sorts by recorded_date descending, and returns the top lead_count items.
@@ -66,7 +66,7 @@ def _fetch_recent_leads(lead_count: int) -> list:
     all_items: list = []
     for location_code in location_codes:
         try:
-            result = db.table.query(
+            result = db.documents_table.query(
                 IndexName=db.location_date_gsi,
                 KeyConditionExpression=Key("location_code").eq(location_code),
                 ScanIndexForward=False,
@@ -74,7 +74,7 @@ def _fetch_recent_leads(lead_count: int) -> list:
             )
             all_items.extend(result.get("Items", []))
         except Exception as exc:
-            logger.error("leads query for %s failed: %s", location_code, exc)
+            logger.error("documents query for %s failed: %s", location_code, exc)
 
     all_items.sort(key=lambda x: x.get("recorded_date", ""), reverse=True)
     return all_items[:lead_count]
@@ -109,8 +109,8 @@ def admin_prospect_send():
     lead_count = int(body.get("lead_count") or 10)
     lead_count = max(1, min(lead_count, 50))
 
-    leads_raw   = _fetch_recent_leads(lead_count)
-    leads_dicts = [Lead.from_dynamo(item).to_dict() for item in leads_raw]
+    leads_raw   = _fetch_recent_documents(lead_count)
+    leads_dicts = [Document.from_dynamo(item).to_dict() for item in leads_raw]
 
     # Count existing prospect users to continue the round-robin correctly
     try:

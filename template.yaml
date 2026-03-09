@@ -150,7 +150,9 @@ Globals:
     Architectures: [x86_64]
     Environment:
       Variables:
-        DYNAMO_TABLE_NAME: !Ref LeadsTable
+        DOCUMENTS_TABLE_NAME: !Ref DocumentsTable
+        CONTACTS_TABLE_NAME: !Ref ContactsTable
+        PROPERTIES_TABLE_NAME: !Ref PropertiesTable
         LOCATIONS_TABLE_NAME: !Ref LocationsTable
         USERS_TABLE_NAME: !Ref UsersTable
         EVENTS_TABLE_NAME: events
@@ -193,18 +195,19 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-  # ── DynamoDB — Leads ──────────────────────────────────────────────────────
-  # NOTE: renamed leads → leads-v2 to change the PK from doc_number → lead_id.
-  # CloudFormation requires a name change when replacing a custom-named table.
-  # Migrate data before deploying if the live table has records you need.
+  # ── DynamoDB — Documents ──────────────────────────────────────────────────
+  # Stores one row per scraped probate document (PK: document_id, a UUID5).
+  # DeletionPolicy: Retain protects production data if the stack is deleted or
+  # the resource is replaced.
 
-  LeadsTable:
+  DocumentsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
     Properties:
-      TableName: leads-v2
+      TableName: documents
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: lead_id
+        - AttributeName: document_id
           AttributeType: S
         - AttributeName: doc_type
           AttributeType: S
@@ -213,7 +216,7 @@ Resources:
         - AttributeName: location_code
           AttributeType: S
       KeySchema:
-        - AttributeName: lead_id
+        - AttributeName: document_id
           KeyType: HASH
       GlobalSecondaryIndexes:
         # Legacy GSI — kept for backward compatibility
@@ -225,13 +228,63 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-        # New GSI — query leads by location efficiently
+        # Query documents by location efficiently
         - IndexName: location-date-index
           KeySchema:
             - AttributeName: location_code
               KeyType: HASH
             - AttributeName: recorded_date
               KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB — Contacts ───────────────────────────────────────────────────
+  # Stores one row per person parsed from a document (deceased, executor, heirs, etc.).
+
+  ContactsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: contacts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: contact_id
+          AttributeType: S
+        - AttributeName: document_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: contact_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: document-contact-index
+          KeySchema:
+            - AttributeName: document_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB — Properties ─────────────────────────────────────────────────
+  # Stores one row per real-estate asset parsed from a document.
+
+  PropertiesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: properties
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: property_id
+          AttributeType: S
+        - AttributeName: document_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: property_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: document-property-index
+          KeySchema:
+            - AttributeName: document_id
+              KeyType: HASH
           Projection:
             ProjectionType: ALL
 
@@ -430,13 +483,14 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:BatchWriteItem
+                  - dynamodb:BatchGetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
-                Resource: !GetAtt LeadsTable.Arn
+                Resource: !GetAtt DocumentsTable.Arn
               - Effect: Allow
                 Action:
                   - dynamodb:Query
-                Resource: !Sub "${LeadsTable.Arn}/index/*"
+                Resource: !Sub "${DocumentsTable.Arn}/index/*"
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -482,8 +536,8 @@ Resources:
           Image: !Ref ScraperImageUri
           Essential: true
           Environment:
-            - Name: DYNAMO_TABLE_NAME
-              Value: !Ref LeadsTable
+            - Name: DOCUMENTS_TABLE_NAME
+              Value: !Ref DocumentsTable
             - Name: LOCATIONS_TABLE_NAME
               Value: !Ref LocationsTable
             - Name: AWS_DEFAULT_REGION
@@ -552,7 +606,7 @@ Resources:
       MemorySize: 256
       Timeout: 10
       Policies:
-        # Leads — read only
+        # Documents — read only
         - Statement:
             - Effect: Allow
               Action:
@@ -560,8 +614,28 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:Scan
               Resource:
-                - !GetAtt LeadsTable.Arn
-                - !Sub "${LeadsTable.Arn}/index/*"
+                - !GetAtt DocumentsTable.Arn
+                - !Sub "${DocumentsTable.Arn}/index/*"
+        # Contacts — read only
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt ContactsTable.Arn
+                - !Sub "${ContactsTable.Arn}/index/*"
+        # Properties — read only
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt PropertiesTable.Arn
+                - !Sub "${PropertiesTable.Arn}/index/*"
         # Locations — read only
         - Statement:
             - Effect: Allow
@@ -601,12 +675,26 @@ Resources:
                 - ses:SendEmail
               Resource: "*"
       Events:
-        # Leads — dynamic by location_path
-        GetLeads:
+        # Documents — by location_path
+        GetDocuments:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/{location_path}/leads
+            Path: /real-estate/probate-leads/{location_path}/documents
+            Method: GET
+        # Contacts for a document
+        GetDocumentContacts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts
+            Method: GET
+        # Properties for a document
+        GetDocumentProperties:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties
             Method: GET
         # Locations
         ListLocations:
@@ -766,11 +854,27 @@ Resources:
         # A {proxy+} catch-all cannot be used here because API Gateway prohibits
         # sibling variable path parameters ({proxy+} vs {location_path}).
         # The Lambda's CORSConfig returns 200 + CORS headers for all OPTIONS.
-        OptionsGetLeads:
+        OptionsGetDocuments:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/{location_path}/leads
+            Path: /real-estate/probate-leads/{location_path}/documents
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsDocumentContacts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsDocumentProperties:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
@@ -955,10 +1059,10 @@ Resources:
             Path: /real-estate/probate-leads/{location_path}/update
             Method: POST
 
-  # ── Lambda — POST /leads/{lead_id}/parse-document ─────────────────────────
+  # ── Lambda — POST /documents/{document_id}/parse-document ─────────────────
   # Separate function with a longer timeout (Bedrock can take 10-30 s per PDF).
-  # Needs: s3:GetObject on DocumentsBucket, bedrock:InvokeModel,
-  #        dynamodb:GetItem + dynamodb:UpdateItem on LeadsTable.
+  # Reads the document from DocumentsTable, fetches the PDF from S3, calls
+  # Bedrock, then writes contacts/properties and stamps parsed_at on the doc.
 
   ParseDocumentFunction:
     Type: AWS::Serverless::Function
@@ -972,14 +1076,29 @@ Resources:
         Variables:
           DOCUMENTS_BUCKET: !Ref DocumentsBucket
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          DOCUMENTS_TABLE_NAME: !Ref DocumentsTable
+          CONTACTS_TABLE_NAME: !Ref ContactsTable
+          PROPERTIES_TABLE_NAME: !Ref PropertiesTable
       Policies:
-        # Leads — read + update parsed fields
+        # Documents — read + stamp parsed_at
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
-              Resource: !GetAtt LeadsTable.Arn
+              Resource: !GetAtt DocumentsTable.Arn
+        # Contacts — write parsed contacts
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt ContactsTable.Arn
+        # Properties — write parsed properties
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt PropertiesTable.Arn
         # S3 — read PDFs from the documents bucket
         - Statement:
             - Effect: Allow
@@ -1001,7 +1120,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/leads/{lead_id}/parse-document
+            Path: /real-estate/probate-leads/documents/{document_id}/parse-document
             Method: POST
 
   # ── EventBridge — daily scheduled scrape ─────────────────────────────────
@@ -1162,13 +1281,21 @@ Outputs:
     Description: Scraper task definition ARN
     Value: !Ref ScraperTaskDefinition
 
-  LeadsTableName:
-    Description: Leads DynamoDB table name
-    Value: !Ref LeadsTable
+  DocumentsTableName:
+    Description: Documents DynamoDB table name
+    Value: !Ref DocumentsTable
 
-  LeadsTableArn:
-    Description: Leads DynamoDB table ARN
-    Value: !GetAtt LeadsTable.Arn
+  DocumentsTableArn:
+    Description: Documents DynamoDB table ARN
+    Value: !GetAtt DocumentsTable.Arn
+
+  ContactsTableName:
+    Description: Contacts DynamoDB table name
+    Value: !Ref ContactsTable
+
+  PropertiesTableName:
+    Description: Properties DynamoDB table name
+    Value: !Ref PropertiesTable
 
   LocationsTableName:
     Description: Locations DynamoDB table name

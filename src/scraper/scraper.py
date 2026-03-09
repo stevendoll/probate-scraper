@@ -760,31 +760,15 @@ def get_pdf_url(
     return get_pdf_url_by_clicking(driver, row, download_dir)
 
 
-def extract_page_data(
-    driver,
-    download_dir: str = "",
-    already_downloaded: "frozenset | set" = frozenset(),
-    max_downloads: int = MAX_DOC_DOWNLOADS,
-):
+def _extract_text_rows(driver) -> list:
     """
-    Extract all record rows from the current page.
-    Returns a list of dicts with fields including pdf_url and doc_local_path.
-    Skips the first two table rows (header + empty spacer).
-    Continues past individual row errors rather than aborting the whole page.
+    Phase 1 only: extract text fields and inline links from all result rows.
+    No clicking — safe to call before any Phase 2 interaction.
 
-    Args:
-        download_dir:       Directory for Chrome-managed downloads.  Empty
-                            string disables the download button entirely.
-        already_downloaded: Set of doc_number strings that already have a
-                            doc_s3_uri in S3 — their detail pages are NOT
-                            opened, avoiding redundant Selenium interaction.
-        max_downloads:      Maximum number of documents to download per run.
-                            Rows beyond this limit, or rows whose recorded_date
-                            is older than MAX_DOC_AGE_DAYS, are still scraped
-                            for text fields but no detail panel is opened.
+    Returns a list of dicts with keys: index, row, grantor, grantee, doc_type,
+    recorded_date, doc_number, book_volume_page, legal_description, inline_url.
     """
-    records = []
-    get_total_results(driver)  # logged for observability; result unused here
+    get_total_results(driver)  # logged for observability
 
     tables = driver.find_elements(By.TAG_NAME, "table")
     for table in tables:
@@ -793,12 +777,8 @@ def extract_page_data(
             continue
 
         data_rows = rows[2:]
-        log.info("Processing table with %d data rows", len(data_rows))
+        log.info("Phase 1: extracting text from %d data rows", len(data_rows))
 
-        # ── Phase 1: extract text + inline links from ALL rows before any click.
-        # Clicking a row to open the detail panel causes React to re-render the
-        # table, staling every captured WebElement reference.  Reading text first
-        # means all 50 rows are scraped while their DOM nodes are still live.
         extracted = []
         for i, row in enumerate(data_rows, start=1):
             try:
@@ -817,6 +797,84 @@ def extract_page_data(
             except Exception as exc:
                 log.warning("Row %d text extraction error: %s", i, exc)
 
+        if extracted:
+            return extracted  # stop at the first table that yielded data
+
+    return []
+
+
+def extract_page_data(
+    driver,
+    download_dir: str = "",
+    already_downloaded: "frozenset | set" = frozenset(),
+    max_downloads: int = MAX_DOC_DOWNLOADS,
+    _phase1_extracted: "list | None" = None,
+):
+    """
+    Extract all record rows from the current page.
+    Returns a list of dicts with fields including pdf_url and doc_local_path.
+    Skips the first two table rows (header + empty spacer).
+    Continues past individual row errors rather than aborting the whole page.
+
+    Args:
+        download_dir:       Directory for Chrome-managed downloads.  Empty
+                            string disables the download button entirely.
+        already_downloaded: Set of doc_number strings that already exist in the
+                            documents table — their detail pages are NOT opened,
+                            avoiding redundant Selenium interaction.
+        max_downloads:      Maximum number of documents to download per run.
+                            Rows beyond this limit, or rows whose recorded_date
+                            is older than MAX_DOC_AGE_DAYS, are still scraped
+                            for text fields but no detail panel is opened.
+        _phase1_extracted:  Pre-computed Phase 1 data from _extract_text_rows().
+                            When provided, skips Phase 1 and uses this data
+                            directly.  Used by scrape_all() to insert the
+                            get_existing_doc_numbers() check between phases.
+    """
+    records = []
+
+    # When Phase 1 data is pre-computed (by scrape_all), use it directly.
+    # Otherwise fall back to the legacy single-call path (used by tests).
+    if _phase1_extracted is not None:
+        # Wrap in a fake "table loop" to reuse the Phase 2+3 code below.
+        all_extracted_sets = [_phase1_extracted]
+    else:
+        get_total_results(driver)  # logged for observability; result unused here
+        all_extracted_sets = []
+        tables = driver.find_elements(By.TAG_NAME, "table")
+        for table in tables:
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            if len(rows) <= 2:
+                continue
+            data_rows = rows[2:]
+            log.info("Processing table with %d data rows", len(data_rows))
+
+            # ── Phase 1: extract text + inline links from ALL rows before any click.
+            # Clicking a row to open the detail panel causes React to re-render the
+            # table, staling every captured WebElement reference.  Reading text first
+            # means all 50 rows are scraped while their DOM nodes are still live.
+            extracted = []
+            for i, row in enumerate(data_rows, start=1):
+                try:
+                    extracted.append({
+                        "index":             i,
+                        "row":               row,
+                        "grantor":           _cell_text(row, 'td.col-3[column="[object Object]"] span', 'td.col-3 span'),
+                        "grantee":           _cell_text(row, 'td.col-4[column="[object Object]"] span', 'td.col-4 span'),
+                        "doc_type":          _cell_text(row, 'td.col-5[column="[object Object]"] span em', 'td.col-5 span em', 'td.col-5 span'),
+                        "recorded_date":     _cell_text(row, 'td.col-6[column="[object Object]"] span', 'td.col-6 span'),
+                        "doc_number":        _cell_text(row, 'td.col-7[column="[object Object]"] span', 'td.col-7 span'),
+                        "book_volume_page":  _cell_text(row, 'td.col-8[column="[object Object]"] span', 'td.col-8 span'),
+                        "legal_description": _cell_text(row, 'td.col-9 span', 'td.col-9'),
+                        "inline_url":        get_pdf_url_from_row(row),
+                    })
+                except Exception as exc:
+                    log.warning("Row %d text extraction error: %s", i, exc)
+            if extracted:
+                all_extracted_sets.append(extracted)
+                break  # stop at first table with data
+
+    for extracted in all_extracted_sets:
         # ── Phase 2: click for download on eligible rows (after all text captured).
         # The first eligible row that needs clicking is opened from the results
         # page.  Subsequent eligible rows are reached by clicking the site's
@@ -921,7 +979,7 @@ def extract_page_data(
             })
 
         if records:
-            break  # stop at the first table that yielded data
+            break  # stop at the first table that yielded data (legacy path only)
 
     log.info("Extracted %d records from page", len(records))
     return records
@@ -934,21 +992,18 @@ def extract_page_data(
 def scrape_all(scrape_run_id: str, location_code: str):
     """
     Log in, scrape the first page of results, upload documents to S3 (when
-    DOCUMENTS_BUCKET is set), and write records to DynamoDB.
+    DOCUMENTS_BUCKET is set), and write new documents to DynamoDB.
+
+    Documents that already exist in the documents table are skipped entirely —
+    no detail page click, no download, no write.  This prevents redundant
+    web interactions on re-scrape runs.
 
     S3 upload prefers a locally-downloaded file (doc_local_path); falls back to
     fetching the pdf_url with Selenium session cookies forwarded.
     """
-    table_name        = os.environ["DYNAMO_TABLE_NAME"]
-    bucket            = os.environ.get("DOCUMENTS_BUCKET", "")
-    download_dir      = os.environ.get("DOWNLOAD_DIR", DOWNLOAD_DIR)
-    location_date_gsi = os.environ.get("LOCATION_DATE_GSI", "location-date-index")
-
-    # Pre-fetch which doc_numbers already have a document in S3 so we can
-    # skip their detail pages entirely (avoids redundant Selenium interaction).
-    already_downloaded = dynamo.get_recently_downloaded_doc_numbers(
-        table_name, location_code, location_date_gsi, days=MAX_DOC_AGE_DAYS
-    )
+    table_name   = os.environ.get("DOCUMENTS_TABLE_NAME", "documents")
+    bucket       = os.environ.get("DOCUMENTS_BUCKET", "")
+    download_dir = os.environ.get("DOWNLOAD_DIR", DOWNLOAD_DIR)
 
     driver = initialize_driver()
     try:
@@ -959,8 +1014,22 @@ def scrape_all(scrape_run_id: str, location_code: str):
             log.error("Failed to load first page — aborting")
             return 0
 
+        # Phase 1: extract text from all rows without clicking anything.
+        phase1 = _extract_text_rows(driver)
+        if not phase1:
+            log.warning("No records found on first page")
+            return 0
+
+        # Determine which doc_numbers already exist in the documents table.
+        # This prevents Phase 2 from opening detail pages for docs we already have.
+        doc_numbers = [r["doc_number"] for r in phase1]
+        existing_doc_numbers = dynamo.get_existing_doc_numbers(table_name, doc_numbers)
+
+        # Phase 2+3: click for downloads on new docs, assemble final record dicts.
         page_records = extract_page_data(
-            driver, download_dir, already_downloaded=already_downloaded,
+            driver, download_dir,
+            already_downloaded=existing_doc_numbers,
+            _phase1_extracted=phase1,
         )
         if not page_records:
             log.warning("No records found on first page")
@@ -1005,8 +1074,14 @@ def scrape_all(scrape_run_id: str, location_code: str):
             else:
                 rec["doc_s3_uri"] = None
 
-        written = dynamo.write_records(
-            page_records, table_name, scrape_run_id, location_code
+        # Only write records for doc_numbers not already in the documents table.
+        new_records = [
+            r for r in page_records
+            if r.get("doc_number") not in existing_doc_numbers
+        ]
+
+        written = dynamo.write_documents(
+            new_records, table_name, scrape_run_id, location_code
         )
         log.info("Scrape finished: %d records written (location=%s)", written, location_code)
         return written
