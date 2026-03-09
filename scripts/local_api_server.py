@@ -59,7 +59,7 @@ os.environ.setdefault("UI_BASE_URL",         "http://localhost:3001")
 os.environ.setdefault("POWERTOOLS_TRACE_DISABLED", "true")
 os.environ.setdefault("LOG_LEVEL",               "INFO")
 os.environ.setdefault("DOCUMENTS_BUCKET",         "")
-os.environ.setdefault("BEDROCK_MODEL_ID",         "us.anthropic.claude-3-5-haiku-20241022-v1:0")
+os.environ.setdefault("BEDROCK_MODEL_ID",         "us.amazon.nova-pro-v1:0")
 
 # Dummy ECS env vars so the TriggerFunction handler can be imported
 os.environ.setdefault("ECS_CLUSTER_ARN",     "arn:aws:ecs:us-east-1:000000000000:cluster/local")
