@@ -2,28 +2,33 @@
 ParseDocumentFunction — Lambda handler.
 
 Route (registered in template.yaml):
-  POST /real-estate/probate-leads/leads/{lead_id}/parse-document
+  POST /real-estate/probate-leads/documents/{document_id}/parse-document
 
 Flow:
-  1. Look up the lead by doc_number (lead_id) in DynamoDB.
+  1. Look up the document by document_id in the documents table.
   2. Verify it has a doc_s3_uri pointing to the stored PDF.
   3. Fetch the PDF bytes from S3.
-  4. Send the PDF to Amazon Bedrock (Claude 3 Haiku) via the Converse API
+  4. Send the PDF to Amazon Bedrock (Nova Pro) via the Converse API
      together with a structured-extraction prompt.
   5. Parse the JSON response from Bedrock.
-  6. Persist the extracted fields back to the leads table via UpdateItem.
-  7. Return the updated lead as JSON.
+  6. Write contact records to the contacts table.
+  7. Write property records to the properties table.
+  8. Stamp parsed_at + parse_error on the documents table.
+  9. Return a summary response.
 
 Environment variables:
-  DYNAMO_TABLE_NAME   — leads table (default: leads)
-  DOCUMENTS_BUCKET    — S3 bucket where PDFs are stored
-  BEDROCK_MODEL_ID    — Bedrock model ID (default: anthropic.claude-3-haiku-20240307-v1:0)
-  AWS_DEFAULT_REGION  — AWS region (injected by Lambda runtime)
+  DOCUMENTS_TABLE_NAME  — documents table (default: documents)
+  CONTACTS_TABLE_NAME   — contacts table (default: contacts)
+  PROPERTIES_TABLE_NAME — properties table (default: properties)
+  DOCUMENTS_BUCKET      — S3 bucket where PDFs are stored
+  BEDROCK_MODEL_ID      — Bedrock model ID (default: us.amazon.nova-pro-v1:0)
+  AWS_DEFAULT_REGION    — AWS region (injected by Lambda runtime)
 """
 
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -41,18 +46,22 @@ api    = APIGatewayRestResolver()
 # AWS clients (module-level so they are reused across warm invocations)
 # ---------------------------------------------------------------------------
 
-_region       = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-_table_name   = os.environ.get("DYNAMO_TABLE_NAME", "leads")
-_bucket_name  = os.environ.get("DOCUMENTS_BUCKET", "")
-_model_id     = os.environ.get(
+_region               = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+_documents_table_name = os.environ.get("DOCUMENTS_TABLE_NAME", "documents")
+_contacts_table_name  = os.environ.get("CONTACTS_TABLE_NAME", "contacts")
+_properties_table_name = os.environ.get("PROPERTIES_TABLE_NAME", "properties")
+_bucket_name          = os.environ.get("DOCUMENTS_BUCKET", "")
+_model_id             = os.environ.get(
     "BEDROCK_MODEL_ID",
-    "anthropic.claude-3-haiku-20240307-v1:0",
+    "us.amazon.nova-pro-v1:0",
 )
 
-_dynamodb = boto3.resource("dynamodb", region_name=_region)
-_table    = _dynamodb.Table(_table_name)
-_s3       = boto3.client("s3", region_name=_region)
-_bedrock  = boto3.client("bedrock-runtime", region_name=_region)
+_dynamodb          = boto3.resource("dynamodb", region_name=_region)
+_documents_table   = _dynamodb.Table(_documents_table_name)
+_contacts_table    = _dynamodb.Table(_contacts_table_name)
+_properties_table  = _dynamodb.Table(_properties_table_name)
+_s3                = boto3.client("s3", region_name=_region)
+_bedrock           = boto3.client("bedrock-runtime", region_name=_region)
 
 
 # ---------------------------------------------------------------------------
@@ -144,31 +153,96 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
     raise ValueError(f"No valid JSON in model response: {raw_text[:300]!r}")
 
 
-def _persist_parsed_fields(lead_id: str, parsed: dict, model_id: str, error: str = "") -> None:
+def _write_contacts(document_id: str, parsed: dict, model_id: str, parsed_at: str) -> int:
     """
-    Write the extracted fields (and metadata) back to the leads table.
-    Uses UpdateItem so we only touch the parsed columns.
+    Write one Contact record per person extracted from the document.
+    Includes the deceased person (from deceased_* fields) + people list.
+    Returns the number of contacts written.
     """
-    now = _now_iso()
-    _table.update_item(
-        Key={"lead_id": lead_id},
-        UpdateExpression=(
-            "SET parsed_at = :pa, parsed_model = :pm, parse_error = :pe,"
-            " deceased_name = :dn, deceased_dob = :db, deceased_dod = :dd,"
-            " deceased_last_address = :da, people = :pp,"
-            " real_property = :rp, summary = :su"
-        ),
+    written = 0
+
+    # Deceased contact
+    deceased_name = parsed.get("deceased_name") or ""
+    if deceased_name:
+        _contacts_table.put_item(Item={
+            "contact_id":   str(uuid.uuid4()),
+            "document_id":  document_id,
+            "role":         "deceased",
+            "name":         deceased_name,
+            "dob":          parsed.get("deceased_dob") or "",
+            "dod":          parsed.get("deceased_dod") or "",
+            "address":      parsed.get("deceased_last_address") or "",
+            "notes":        "",
+            "parsed_at":    parsed_at,
+            "parsed_model": model_id,
+        })
+        written += 1
+
+    # People list (executor, heirs, attorney, etc.)
+    for person in (parsed.get("people") or []):
+        if not isinstance(person, dict):
+            continue
+        name = person.get("name") or ""
+        if not name:
+            continue
+        role = (person.get("role") or "other").lower()
+        _contacts_table.put_item(Item={
+            "contact_id":   str(uuid.uuid4()),
+            "document_id":  document_id,
+            "role":         role,
+            "name":         name,
+            "dob":          "",
+            "dod":          "",
+            "address":      "",
+            "notes":        "",
+            "parsed_at":    parsed_at,
+            "parsed_model": model_id,
+        })
+        written += 1
+
+    return written
+
+
+def _write_properties(document_id: str, parsed: dict, model_id: str, parsed_at: str) -> int:
+    """
+    Write one Property record per real-property entry extracted from the document.
+    Returns the number of properties written.
+    """
+    written = 0
+    for prop in (parsed.get("real_property") or []):
+        address = prop if isinstance(prop, str) else ""
+        _properties_table.put_item(Item={
+            "property_id":       str(uuid.uuid4()),
+            "document_id":       document_id,
+            "address":           address,
+            "legal_description": "",
+            "parcel_id":         "",
+            "city":              "",
+            "state":             "",
+            "zip":               "",
+            "notes":             "",
+            "parsed_at":         parsed_at,
+            "parsed_model":      model_id,
+        })
+        written += 1
+
+    return written
+
+
+def _update_document_status(
+    document_id: str, model_id: str, parsed_at: str, error: str = ""
+) -> None:
+    """
+    Stamp parsed_at, parsed_model, and parse_error on the documents table.
+    Uses UpdateItem so only the status columns are touched.
+    """
+    _documents_table.update_item(
+        Key={"document_id": document_id},
+        UpdateExpression="SET parsed_at = :pa, parsed_model = :pm, parse_error = :pe",
         ExpressionAttributeValues={
-            ":pa": now,
+            ":pa": parsed_at,
             ":pm": model_id,
             ":pe": error,
-            ":dn": parsed.get("deceased_name") or "",
-            ":db": parsed.get("deceased_dob")  or "",
-            ":dd": parsed.get("deceased_dod")  or "",
-            ":da": parsed.get("deceased_last_address") or "",
-            ":pp": parsed.get("people")        or [],
-            ":rp": parsed.get("real_property") or [],
-            ":su": parsed.get("summary")       or "",
         },
     )
 
@@ -177,22 +251,24 @@ def _persist_parsed_fields(lead_id: str, parsed: dict, model_id: str, error: str
 # Route
 # ---------------------------------------------------------------------------
 
-@api.post("/real-estate/probate-leads/leads/<lead_id>/parse-document")
-def parse_document(lead_id: str):
-    # 1. Fetch the lead
-    result = _table.get_item(Key={"lead_id": lead_id})
+@api.post("/real-estate/probate-leads/documents/<document_id>/parse-document")
+def parse_document(document_id: str):
+    # 1. Fetch the document
+    result = _documents_table.get_item(Key={"document_id": document_id})
     item   = result.get("Item")
     if not item:
-        return {"error": f"Lead not found: {lead_id!r}"}, 404
+        return {"error": f"Document not found: {document_id!r}"}, 404
 
     doc_s3_uri = item.get("doc_s3_uri", "")
     if not doc_s3_uri:
         return {
             "error": (
-                f"Lead {lead_id!r} has no doc_s3_uri. "
+                f"Document {document_id!r} has no doc_s3_uri. "
                 "The document must be scraped and uploaded to S3 first."
             )
         }, 422
+
+    now = _now_iso()
 
     # 2. Fetch the PDF from S3
     try:
@@ -200,7 +276,7 @@ def parse_document(lead_id: str):
     except Exception as exc:
         logger.error("S3 fetch failed: %s", exc)
         err_msg = f"S3 fetch failed: {exc}"
-        _persist_parsed_fields(lead_id, {}, _model_id, error=err_msg)
+        _update_document_status(document_id, _model_id, now, error=err_msg)
         return {"error": err_msg}, 500
 
     # 3. Call Bedrock
@@ -209,33 +285,35 @@ def parse_document(lead_id: str):
     except Exception as exc:
         logger.error("Bedrock call failed: %s", exc)
         err_msg = f"Bedrock call failed: {exc}"
-        _persist_parsed_fields(lead_id, {}, _model_id, error=err_msg)
+        _update_document_status(document_id, _model_id, now, error=err_msg)
         return {"error": err_msg}, 500
 
-    # 4. Persist parsed fields
+    # 4. Write contacts and properties
+    contacts_written = 0
+    properties_written = 0
     try:
-        _persist_parsed_fields(lead_id, parsed, _model_id)
+        contacts_written   = _write_contacts(document_id, parsed, _model_id, now)
+        properties_written = _write_properties(document_id, parsed, _model_id, now)
+    except Exception as exc:
+        logger.error("DynamoDB write failed: %s", exc)
+        _update_document_status(document_id, _model_id, now, error=str(exc))
+        return {"error": f"DynamoDB write failed: {exc}"}, 500
+
+    # 5. Stamp status on the documents table
+    try:
+        _update_document_status(document_id, _model_id, now)
     except Exception as exc:
         logger.error("DynamoDB update failed: %s", exc)
         return {"error": f"DynamoDB update failed: {exc}"}, 500
 
-    # 5. Return the updated lead
-    updated = _table.get_item(Key={"lead_id": lead_id}).get("Item", item)
-
     return {
-        "leadId":              updated.get("lead_id", ""),
-        "docNumber":           updated.get("doc_number", ""),
-        "docS3Uri":            updated.get("doc_s3_uri", ""),
-        "parsedAt":            updated.get("parsed_at", ""),
-        "parsedModel":         updated.get("parsed_model", ""),
-        "deceasedName":        updated.get("deceased_name", ""),
-        "deceasedDob":         updated.get("deceased_dob", ""),
-        "deceasedDod":         updated.get("deceased_dod", ""),
-        "deceasedLastAddress": updated.get("deceased_last_address", ""),
-        "people":              updated.get("people", []),
-        "realProperty":        updated.get("real_property", []),
-        "summary":             updated.get("summary", ""),
-        "parseError":          updated.get("parse_error", ""),
+        "documentId":        document_id,
+        "docNumber":         item.get("doc_number", ""),
+        "docS3Uri":          doc_s3_uri,
+        "parsedAt":          now,
+        "parseError":        "",
+        "contactsWritten":   contacts_written,
+        "propertiesWritten": properties_written,
     }, 200
 
 

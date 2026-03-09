@@ -5,7 +5,7 @@ Runs as a plain Python script (not a Lambda handler).
 ECS marks the task as SUCCEEDED on exit code 0, FAILED on non-zero.
 
 Environment variables:
-  DYNAMO_TABLE_NAME     — DynamoDB leads table (required)
+  DOCUMENTS_TABLE_NAME  — DynamoDB documents table (required)
   CHROME_BIN            — Chromium binary path (set in Dockerfile)
   CHROMEDRIVER_PATH     — ChromeDriver binary path (set in Dockerfile)
   LOCATIONS_TABLE_NAME  — DynamoDB locations table (default: locations)
@@ -30,9 +30,9 @@ log = logging.getLogger(__name__)
 
 def main():
     # Validate required env vars before starting Chrome
-    table_name = os.environ.get("DYNAMO_TABLE_NAME")
+    table_name = os.environ.get("DOCUMENTS_TABLE_NAME")
     if not table_name:
-        log.error("DYNAMO_TABLE_NAME is not set — cannot write results")
+        log.error("DOCUMENTS_TABLE_NAME is not set — cannot write results")
         sys.exit(1)
 
     location_code = os.environ.get("LOCATION_CODE", "CollinTx")

@@ -1,5 +1,5 @@
 """
-Unit tests for src/api/app.py — GET /{location_path}/leads route.
+Unit tests for src/api/app.py — GET /{location_path}/documents route.
 
 Run with:
     pipenv run python -m pytest tests/test_api.py -v
@@ -22,7 +22,7 @@ os.environ.update(
         "AWS_ACCESS_KEY_ID":         "local",
         "AWS_SECRET_ACCESS_KEY":     "local",
         "AWS_DEFAULT_REGION":        "us-east-1",
-        "DYNAMO_TABLE_NAME":         "leads",
+        "DOCUMENTS_TABLE_NAME":       "documents",
         "LOCATIONS_TABLE_NAME":      "locations",
         "USERS_TABLE_NAME":          "users",
         "GSI_NAME":                  "recorded-date-index",
@@ -76,10 +76,10 @@ LOCATION_PATH = "collin-tx"
 
 
 def _call(qs=None):
-    """Invoke the Lambda handler for GET /{location_path}/leads."""
+    """Invoke the Lambda handler for GET /{location_path}/documents."""
     event = {
         "httpMethod": "GET",
-        "path": f"/real-estate/probate-leads/{LOCATION_PATH}/leads",
+        "path": f"/real-estate/probate-leads/{LOCATION_PATH}/documents",
         "pathParameters": {"location_path": LOCATION_PATH},
         "headers": {"x-api-key": "test-key"},
         "queryStringParameters": qs or None,
@@ -106,7 +106,7 @@ class TestHandlerDateRangeQuery(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
 
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
@@ -126,12 +126,12 @@ class TestHandlerDateRangeQuery(unittest.TestCase):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
         self.assertEqual(_body(resp)["count"], 3)
 
-    def test_returns_leads_array(self):
+    def test_returns_documents_array(self):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
-        leads = _body(resp)["leads"]
-        self.assertEqual(len(leads), 3)
-        self.assertEqual(leads[0]["leadId"],    MOCK_LEADS[0]["lead_id"])
-        self.assertEqual(leads[0]["docNumber"], MOCK_LEADS[0]["doc_number"])
+        documents = _body(resp)["documents"]
+        self.assertEqual(len(documents), 3)
+        self.assertEqual(documents[0]["documentId"], MOCK_LEADS[0]["document_id"])
+        self.assertEqual(documents[0]["docNumber"], MOCK_LEADS[0]["doc_number"])
 
     def test_response_includes_location(self):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
@@ -161,16 +161,16 @@ class TestHandlerDateRangeQuery(unittest.TestCase):
     def test_timestamps_normalized(self):
         import re
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
-        leads = _body(resp)["leads"]
+        documents = _body(resp)["documents"]
         ts_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"
-        for lead in leads:
+        for lead in documents:
             self.assertRegex(lead["extractedAt"], ts_pattern)
             self.assertRegex(lead["processedAt"], ts_pattern)
 
-    def test_lead_includes_location_code(self):
+    def test_document_includes_location_code(self):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
-        leads = _body(resp)["leads"]
-        for lead in leads:
+        documents = _body(resp)["documents"]
+        for lead in documents:
             self.assertEqual(lead["locationCode"], "CollinTx")
 
 
@@ -185,7 +185,7 @@ class TestHandlerLocationNotFound(unittest.TestCase):
     def test_returns_404(self):
         event = {
             "httpMethod": "GET",
-            "path": "/real-estate/probate-leads/unknown-county/leads",
+            "path": "/real-estate/probate-leads/unknown-county/documents",
             "pathParameters": {"location_path": "unknown-county"},
             "headers": {"x-api-key": "test-key"},
             "queryStringParameters": None,
@@ -203,7 +203,7 @@ class TestHandlerToDateOnly(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": MOCK_LEADS[:2]}
@@ -228,7 +228,7 @@ class TestHandlerNoDates(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": MOCK_LEADS}
@@ -260,7 +260,7 @@ class TestHandlerLimit(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": []}
@@ -292,7 +292,7 @@ class TestHandlerDateValidation(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
 
@@ -318,7 +318,7 @@ class TestHandlerPagination(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
 
@@ -338,7 +338,7 @@ class TestHandlerPagination(unittest.TestCase):
         resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
         next_key = _body(resp)["nextKey"]
         decoded = json.loads(base64.b64decode(next_key.encode()).decode())
-        self.assertEqual(decoded["lead_id"], PAGINATION_KEY["lead_id"])
+        self.assertEqual(decoded["document_id"], PAGINATION_KEY["document_id"])
 
     def test_last_key_passed_to_dynamo(self):
         self.mock_table.query.return_value = {"Items": MOCK_LEADS[2:]}
@@ -346,7 +346,7 @@ class TestHandlerPagination(unittest.TestCase):
         _call({"from_date": "2026-01-01", "to_date": "2026-02-20", "last_key": encoded})
         kwargs = self.mock_table.query.call_args[1]
         self.assertIn("ExclusiveStartKey", kwargs)
-        self.assertEqual(kwargs["ExclusiveStartKey"]["lead_id"], PAGINATION_KEY["lead_id"])
+        self.assertEqual(kwargs["ExclusiveStartKey"]["document_id"], PAGINATION_KEY["document_id"])
 
     def test_invalid_last_key_returns_400(self):
         resp = _call(
@@ -362,7 +362,7 @@ class TestHandlerDocType(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         self.mock_table.query.return_value     = {"Items": []}
@@ -382,7 +382,7 @@ class TestHandlerErrors(unittest.TestCase):
     def setUp(self):
         self.mock_table     = MagicMock()
         self.mock_loc_table = MagicMock()
-        db.table           = self.mock_table
+        db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
 
@@ -398,7 +398,7 @@ class TestHandlerErrors(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 200)
         body = _body(resp)
         self.assertEqual(body["count"], 0)
-        self.assertEqual(body["leads"], [])
+        self.assertEqual(body["documents"], [])
         self.assertIsNone(body["nextKey"])
 
 
@@ -430,7 +430,7 @@ class TestHelpers(unittest.TestCase):
     def test_decode_key_invalid_returns_none(self):
         self.assertIsNone(app._decode_key("not-valid-base64!!!"))
 
-    def test_transform_lead_camel_case(self):
+    def test_transform_document_camel_case(self):
         item = {
             "doc_number": "123",
             "recorded_date": "2026-01-01",
@@ -438,7 +438,7 @@ class TestHelpers(unittest.TestCase):
             "extracted_at": "2026-01-01T00:00:00",
             "processed_at": "2026-01-01T00:00:00",
         }
-        result = app._transform_lead(item)
+        result = app._transform_document(item)
         self.assertIn("docNumber", result)
         self.assertIn("recordedDate", result)
         self.assertIn("locationCode", result)
@@ -460,7 +460,7 @@ class TestHelpers(unittest.TestCase):
         """Resolver returns a well-formed Lambda proxy response."""
         mock_table     = MagicMock()
         mock_loc_table = MagicMock()
-        db.table           = mock_table
+        db.documents_table = mock_table
         db.locations_table = mock_loc_table
         mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
         mock_table.query.return_value     = {"Items": []}

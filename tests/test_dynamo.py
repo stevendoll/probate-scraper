@@ -3,10 +3,10 @@ Unit tests for src/scraper/dynamo.py
 
 Covers:
   - normalize_date()
-  - write_records() integer doc_number filter
-  - write_records() DynamoDB batch chunking and retry
+  - write_documents() integer doc_number filter
+  - write_documents() DynamoDB batch chunking and retry
   - update_location_retrieved_at()
-  - get_recently_downloaded_doc_numbers()
+  - get_existing_doc_numbers()
 """
 
 import sys
@@ -63,20 +63,20 @@ def _make_record(doc_number: str) -> dict:
     }
 
 
-class TestWriteRecordsIntegerFilter(unittest.TestCase):
-    """write_records must only write records whose doc_number is a digit string."""
+class TestWriteDocumentsIntegerFilter(unittest.TestCase):
+    """write_documents must only write records whose doc_number is a digit string."""
 
     def _run_write(self, records):
-        """Call write_records with a mocked DynamoDB client; return captured put requests."""
+        """Call write_documents with a mocked DynamoDB client; return captured put requests."""
         captured = []
 
         def fake_batch_write(RequestItems):
-            for req in RequestItems.get("leads", []):
+            for req in RequestItems.get("documents", []):
                 captured.append(req)
             return {"UnprocessedItems": {}}
 
         with patch.object(dynamo._dynamodb, "batch_write_item", side_effect=fake_batch_write):
-            dynamo.write_records(records, "leads", "run-test", "CollinTx")
+            dynamo.write_documents(records, "documents", "run-test", "CollinTx")
 
         return captured
 
@@ -117,26 +117,26 @@ class TestWriteRecordsIntegerFilter(unittest.TestCase):
         self.assertEqual(len(written), 3)
 
     def test_empty_records_list_returns_zero(self):
-        result = dynamo.write_records([], "leads", "run-empty", "CollinTx")
+        result = dynamo.write_documents([], "documents", "run-empty", "CollinTx")
         self.assertEqual(result, 0)
 
 
 # ---------------------------------------------------------------------------
-# write_records — batch chunking
+# write_documents — batch chunking
 # ---------------------------------------------------------------------------
 
-class TestWriteRecordsBatching(unittest.TestCase):
+class TestWriteDocumentsBatching(unittest.TestCase):
 
     def test_batches_in_chunks_of_25(self):
         records = [_make_record(str(i)) for i in range(60)]
         batch_calls = []
 
         def fake_batch_write(RequestItems):
-            batch_calls.append(len(RequestItems.get("leads", [])))
+            batch_calls.append(len(RequestItems.get("documents", [])))
             return {"UnprocessedItems": {}}
 
         with patch.object(dynamo._dynamodb, "batch_write_item", side_effect=fake_batch_write):
-            dynamo.write_records(records, "leads", "run-batch", "CollinTx")
+            dynamo.write_documents(records, "documents", "run-batch", "CollinTx")
 
         self.assertEqual(batch_calls, [25, 25, 10])
 
@@ -148,104 +148,96 @@ class TestWriteRecordsBatching(unittest.TestCase):
             call_count[0] += 1
             if call_count[0] == 1:
                 # Return one item as unprocessed on the first call
-                return {"UnprocessedItems": {"leads": [{"PutRequest": {"Item": {}}}]}}
+                return {"UnprocessedItems": {"documents": [{"PutRequest": {"Item": {}}}]}}
             return {"UnprocessedItems": {}}
 
         with patch.object(dynamo._dynamodb, "batch_write_item", side_effect=fake_batch_write):
-            dynamo.write_records(records, "leads", "run-retry", "CollinTx")
+            dynamo.write_documents(records, "documents", "run-retry", "CollinTx")
 
         self.assertEqual(call_count[0], 2)
 
 
 # ---------------------------------------------------------------------------
-# get_recently_downloaded_doc_numbers
+# get_existing_doc_numbers
 # ---------------------------------------------------------------------------
 
-class TestGetRecentlyDownloadedDocNumbers(unittest.TestCase):
+import uuid as _uuid
+_DOC_NS = _uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
-    def _make_ddb_item(self, doc_number: str, s3_uri: str = "") -> dict:
-        item = {"doc_number": {"S": doc_number}}
-        if s3_uri:
-            item["doc_s3_uri"] = {"S": s3_uri}
-        return item
 
-    def test_returns_doc_numbers_with_nonempty_s3_uri(self):
-        items = [
-            self._make_ddb_item("20260001", "s3://bucket/a.pdf"),
-            self._make_ddb_item("20260002", "s3://bucket/b.pdf"),
-        ]
-        mock_resp = {"Items": items, "Count": 2}
+def _doc_id(doc_number: str) -> str:
+    return str(_uuid.uuid5(_DOC_NS, doc_number))
 
-        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp):
-            result = dynamo.get_recently_downloaded_doc_numbers(
-                "leads", "CollinTx", "location-date-index"
-            )
+
+class TestGetExistingDocNumbers(unittest.TestCase):
+
+    def test_returns_doc_numbers_that_exist_in_table(self):
+        """Items returned by batch_get_item → doc_numbers are in the result set."""
+        doc_numbers = ["20260001", "20260002"]
+        mock_resp = {
+            "Responses": {
+                "documents": [
+                    {"document_id": {"S": _doc_id("20260001")}},
+                    {"document_id": {"S": _doc_id("20260002")}},
+                ]
+            }
+        }
+        with patch.object(dynamo._dynamodb, "batch_get_item", return_value=mock_resp):
+            result = dynamo.get_existing_doc_numbers("documents", doc_numbers)
 
         self.assertEqual(result, {"20260001", "20260002"})
 
-    def test_excludes_items_without_s3_uri(self):
-        items = [
-            self._make_ddb_item("20260001", "s3://bucket/a.pdf"),
-            self._make_ddb_item("20260002", ""),  # empty s3_uri
-            self._make_ddb_item("20260003"),       # missing s3_uri key
-        ]
-        mock_resp = {"Items": items, "Count": 3}
+    def test_filters_out_non_integer_doc_numbers(self):
+        """Non-digit doc_numbers must be excluded from the batch_get_item call."""
+        doc_numbers = ["20260001", "N/A", "UNKNOWN", "20260002"]
+        mock_resp = {"Responses": {"documents": []}}
+        with patch.object(dynamo._dynamodb, "batch_get_item", return_value=mock_resp) as mock_bgi:
+            dynamo.get_existing_doc_numbers("documents", doc_numbers)
 
-        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp):
-            result = dynamo.get_recently_downloaded_doc_numbers(
-                "leads", "CollinTx", "location-date-index"
-            )
-
-        self.assertEqual(result, {"20260001"})
+        # Only integer doc_numbers produce document_ids
+        keys_sent = mock_bgi.call_args[1]["RequestItems"]["documents"]["Keys"]
+        sent_doc_ids = {k["document_id"]["S"] for k in keys_sent}
+        self.assertIn(_doc_id("20260001"), sent_doc_ids)
+        self.assertIn(_doc_id("20260002"), sent_doc_ids)
+        self.assertNotIn(_doc_id("N/A"),      sent_doc_ids)
+        self.assertNotIn(_doc_id("UNKNOWN"),  sent_doc_ids)
 
     def test_returns_empty_set_when_no_items(self):
-        mock_resp = {"Items": [], "Count": 0}
-
-        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp):
-            result = dynamo.get_recently_downloaded_doc_numbers(
-                "leads", "CollinTx", "location-date-index"
-            )
+        mock_resp = {"Responses": {"documents": []}}
+        with patch.object(dynamo._dynamodb, "batch_get_item", return_value=mock_resp):
+            result = dynamo.get_existing_doc_numbers("documents", ["20260001"])
 
         self.assertEqual(result, set())
 
-    def test_paginates_until_no_last_evaluated_key(self):
-        page1 = {
-            "Items": [self._make_ddb_item("20260001", "s3://b/a.pdf")],
-            "LastEvaluatedKey": {"doc_number": {"S": "20260001"}},
-        }
-        page2 = {
-            "Items": [self._make_ddb_item("20260002", "s3://b/b.pdf")],
-        }
-        with patch.object(dynamo._dynamodb, "query", side_effect=[page1, page2]):
-            result = dynamo.get_recently_downloaded_doc_numbers(
-                "leads", "CollinTx", "location-date-index"
-            )
-
-        self.assertEqual(result, {"20260001", "20260002"})
-
-    def test_query_exception_returns_empty_set(self):
-        with patch.object(dynamo._dynamodb, "query", side_effect=Exception("DDB down")):
-            result = dynamo.get_recently_downloaded_doc_numbers(
-                "leads", "CollinTx", "location-date-index"
-            )
-
+    def test_returns_empty_set_for_empty_input(self):
+        result = dynamo.get_existing_doc_numbers("documents", [])
         self.assertEqual(result, set())
 
-    def test_uses_correct_gsi_and_key_conditions(self):
-        mock_resp = {"Items": []}
-        with patch.object(dynamo._dynamodb, "query", return_value=mock_resp) as mock_q:
-            dynamo.get_recently_downloaded_doc_numbers(
-                "leads", "CollinTx", "location-date-index", days=30
-            )
+    def test_returns_empty_set_for_non_integer_only_input(self):
+        result = dynamo.get_existing_doc_numbers("documents", ["N/A", "UNKNOWN"])
+        self.assertEqual(result, set())
 
-        call_kwargs = mock_q.call_args[1]
-        self.assertEqual(call_kwargs["TableName"], "leads")
-        self.assertEqual(call_kwargs["IndexName"], "location-date-index")
-        self.assertIn(":loc", call_kwargs["ExpressionAttributeValues"])
-        self.assertEqual(
-            call_kwargs["ExpressionAttributeValues"][":loc"], {"S": "CollinTx"}
-        )
-        self.assertIn("location_code = :loc", call_kwargs["KeyConditionExpression"])
+    def test_batches_in_chunks_of_100(self):
+        """batch_get_item is called in chunks of 100 keys."""
+        doc_numbers = [str(i) for i in range(150)]
+        call_counts = []
+
+        def fake_bgi(RequestItems):
+            keys = RequestItems["documents"]["Keys"]
+            call_counts.append(len(keys))
+            return {"Responses": {"documents": []}}
+
+        with patch.object(dynamo._dynamodb, "batch_get_item", side_effect=fake_bgi):
+            dynamo.get_existing_doc_numbers("documents", doc_numbers)
+
+        self.assertEqual(call_counts, [100, 50])
+
+    def test_exception_is_handled_gracefully(self):
+        """Exceptions in batch_get_item should not raise; return partial/empty result."""
+        with patch.object(dynamo._dynamodb, "batch_get_item", side_effect=Exception("DDB down")):
+            result = dynamo.get_existing_doc_numbers("documents", ["20260001"])
+
+        self.assertEqual(result, set())
 
 
 if __name__ == "__main__":

@@ -4,10 +4,13 @@ DynamoDB helpers for the probate scraper.
 Responsibilities:
   - normalize_date(): convert "1/23/2026" → "2026-01-23" so the GSI sort key
     is lexicographically equivalent to chronological order.
-  - write_records(): batch-write a list of record dicts to DynamoDB using
+  - write_documents(): batch-write a list of record dicts to DynamoDB using
     batch_write_item in chunks of 25 (the DDB hard limit per batch).
-    Uses PutRequest with a deterministic uuid5 lead_id derived from doc_number,
-    so duplicate doc_number values are silently overwritten (natural upsert semantics).
+    Uses PutRequest with a deterministic uuid5 document_id derived from doc_number.
+    Documents are only written once — existing entries are skipped entirely
+    to prevent redundant web clicks and re-downloads.
+  - get_existing_doc_numbers(): uses batch_get_item on the documents table PK
+    to determine which doc_numbers are already stored, before Phase 2 clicking.
   - update_location_retrieved_at(): stamp the locations table with the time
     the last successful scrape completed for a given location.
 """
@@ -15,7 +18,7 @@ Responsibilities:
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import boto3
 from boto3.dynamodb.types import TypeSerializer
@@ -23,9 +26,11 @@ from boto3.dynamodb.types import TypeSerializer
 log = logging.getLogger(__name__)
 
 # Fixed namespace for deterministic UUID5 generation.
-# Using the same namespace everywhere ensures that re-scraping the same
-# doc_number always produces the same lead_id, preserving upsert semantics.
-_LEAD_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+# Using the same namespace everywhere ensures that the same doc_number always
+# produces the same document_id.  Value is identical to the legacy _LEAD_NS
+# so that existing data in the documents table (migrated from leads-v2) keeps
+# the same primary key.
+_DOC_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 _serializer = TypeSerializer()
 _dynamodb = boto3.client("dynamodb", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
@@ -60,16 +65,17 @@ def normalize_date(date_str: str) -> str:
 # Batch writer
 # ---------------------------------------------------------------------------
 
-def _to_dynamo_item(record: dict, scrape_run_id: str, location_code: str) -> dict:
+def _to_document_item(record: dict, scrape_run_id: str, location_code: str) -> dict:
     """
     Convert a scraper record dict into a DynamoDB-typed attribute map.
     Applies date normalisation and appends scrape metadata.
+    Only scraped fields are included — no parsed/enriched data.
     """
     doc_number = record.get("doc_number", "UNKNOWN")
     item = {
         # Primary key — deterministic UUID derived from doc_number so that
-        # re-scraping the same document always overwrites the existing record.
-        "lead_id":           str(uuid.uuid5(_LEAD_NS, str(doc_number))),
+        # the same document always maps to the same document_id.
+        "document_id":       str(uuid.uuid5(_DOC_NS, str(doc_number))),
         # Core fields
         "doc_number":        doc_number,
         "grantor":           record.get("grantor", "N/A"),
@@ -100,7 +106,7 @@ def _to_dynamo_item(record: dict, scrape_run_id: str, location_code: str) -> dic
     return {k: _serializer.serialize(v) for k, v in item.items() if v is not None}
 
 
-def write_records(
+def write_documents(
     records: list,
     table_name: str,
     scrape_run_id: str,
@@ -108,15 +114,19 @@ def write_records(
 ) -> int:
     """
     Write *records* to *table_name* in DynamoDB, tagging each with *location_code*.
+    Only records with integer doc_numbers are written.
     Processes in chunks of 25 (DDB batch_write_item limit).
     Retries unprocessed items once per chunk.
     Returns total number of items successfully written.
+
+    Note: callers should pre-filter using get_existing_doc_numbers() before
+    calling this function to avoid re-writing documents that already exist.
     """
     if not records:
         return 0
 
     put_requests = [
-        {"PutRequest": {"Item": _to_dynamo_item(r, scrape_run_id, location_code)}}
+        {"PutRequest": {"Item": _to_document_item(r, scrape_run_id, location_code)}}
         for r in records
         if str(r.get("doc_number", "")).strip().isdigit()
     ]
@@ -146,63 +156,60 @@ def write_records(
             log.error("batch_write_item error for chunk %d: %s", i // chunk_size, exc)
 
     log.info(
-        "Wrote %d/%d records to %s (location=%s)",
+        "Wrote %d/%d documents to %s (location=%s)",
         total_written, len(put_requests), table_name, location_code,
     )
     return total_written
 
 
 # ---------------------------------------------------------------------------
-# Recently-downloaded doc lookup
+# Existing document lookup (skip-if-exists)
 # ---------------------------------------------------------------------------
 
-def get_recently_downloaded_doc_numbers(
+def get_existing_doc_numbers(
     table_name: str,
-    location_code: str,
-    location_date_gsi: str,
-    days: int = 30,
+    doc_numbers: list,
 ) -> set:
     """
-    Query the location-date-index GSI for leads recorded within *days* days
-    that already have a non-empty doc_s3_uri stored in S3.
+    Use batch_get_item to check which doc_numbers already exist in the documents table.
+    Returns a set of doc_number strings that are already stored.
 
-    Returns a set of doc_number strings.  Used by the scraper to skip
-    re-downloading documents that are already archived.
+    Called before Phase 2 (clicking/downloading) to avoid redundant web interactions.
+    Uses the table PK (document_id) directly — no GSI query needed.
+    batch_get_item limit is 100 keys per call; handled automatically.
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    result = set()
-    try:
-        kwargs = dict(
-            TableName=table_name,
-            IndexName=location_date_gsi,
-            KeyConditionExpression="location_code = :loc AND recorded_date >= :cutoff",
-            FilterExpression="doc_s3_uri <> :empty",
-            ExpressionAttributeValues={
-                ":loc":    {"S": location_code},
-                ":cutoff": {"S": cutoff},
-                ":empty":  {"S": ""},
-            },
-            ProjectionExpression="doc_number, doc_s3_uri",
-        )
-        while True:
-            response = _dynamodb.query(**kwargs)
-            for item in response.get("Items", []):
-                doc_num = item.get("doc_number", {}).get("S", "")
-                s3_uri  = item.get("doc_s3_uri",  {}).get("S", "")
-                if doc_num and s3_uri:
-                    result.add(doc_num)
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            kwargs["ExclusiveStartKey"] = last_key
-    except Exception as exc:
-        log.warning("get_recently_downloaded_doc_numbers error: %s", exc)
+    eligible = [str(dn) for dn in doc_numbers if str(dn).strip().isdigit()]
+    if not eligible:
+        return set()
+
+    # Map document_id → doc_number so we can return doc_numbers
+    doc_id_to_num = {str(uuid.uuid5(_DOC_NS, dn)): dn for dn in eligible}
+    existing = set()
+    keys = [{"document_id": {"S": did}} for did in doc_id_to_num]
+
+    for i in range(0, len(keys), 100):
+        chunk = keys[i : i + 100]
+        try:
+            response = _dynamodb.batch_get_item(
+                RequestItems={
+                    table_name: {
+                        "Keys": chunk,
+                        "ProjectionExpression": "document_id",
+                    }
+                }
+            )
+            for item in response.get("Responses", {}).get(table_name, []):
+                did = item.get("document_id", {}).get("S", "")
+                if did in doc_id_to_num:
+                    existing.add(doc_id_to_num[did])
+        except Exception as exc:
+            log.warning("get_existing_doc_numbers error: %s", exc)
 
     log.info(
-        "Found %d already-downloaded docs for %s (cutoff=%s)",
-        len(result), location_code, cutoff,
+        "Found %d/%d doc_numbers already in documents table",
+        len(existing), len(eligible),
     )
-    return result
+    return existing
 
 
 # ---------------------------------------------------------------------------

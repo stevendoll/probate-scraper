@@ -290,7 +290,7 @@ class TestRequestLogin(unittest.TestCase):
         self.mock_table.query.return_value = {"Items": []}
         
         # Mock Lead.from_dynamo to avoid serialization issues
-        with patch("routers.auth.Lead") as mock_lead, \
+        with patch("routers.auth.Document") as mock_lead, \
              patch("routers.auth.send_prospect_email") as mock_funnel, \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
             
@@ -313,7 +313,7 @@ class TestRequestLogin(unittest.TestCase):
         """Should parse 'John Doe <john@email.com>' format."""
         self.mock_table.query.return_value = {"Items": []}
         
-        with patch("routers.auth.Lead") as mock_lead, \
+        with patch("routers.auth.Document") as mock_lead, \
              patch("routers.auth._create_inbound_user") as mock_create, \
              patch("routers.auth.send_prospect_email"), \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
@@ -328,7 +328,7 @@ class TestRequestLogin(unittest.TestCase):
         """Verify inbound user is created with correct attributes."""
         self.mock_table.query.return_value = {"Items": []}
         
-        with patch("routers.auth.Lead") as mock_lead, \
+        with patch("routers.auth.Document") as mock_lead, \
              patch("routers.auth.send_prospect_email"), \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
             
@@ -356,7 +356,7 @@ class TestRequestLogin(unittest.TestCase):
             "offered_price": 19,
         }
         
-        with patch("routers.auth.Lead") as mock_lead, \
+        with patch("routers.auth.Document") as mock_lead, \
              patch("routers.auth._create_inbound_user", return_value=mock_user), \
              patch("routers.auth.send_prospect_email") as mock_funnel, \
              patch("routers.auth._fetch_sample_leads", return_value=[{"grantor": "Test"}]):
@@ -518,8 +518,8 @@ class TestGetMyLeads(unittest.TestCase):
     def setUp(self):
         self.mock_user_table  = MagicMock()
         self.mock_leads_table = MagicMock()
-        db.users_table = self.mock_user_table
-        db.table       = self.mock_leads_table
+        db.users_table       = self.mock_user_table
+        db.documents_table   = self.mock_leads_table
         self.mock_leads_table.query.return_value = {"Items": []}
 
     def _access_token(self, user_id="user-uuid-001", role="user"):
