@@ -195,12 +195,12 @@ export default function DocumentDetail() {
           <Field label="Recorded date"    value={doc.recordedDate} />
           <Field label="Grantor"          value={doc.grantor} />
           <Field label="Grantee"          value={doc.grantee} />
-          <Field label="Document type"    value={(doc as Record<string, string>).docType} />
+          <Field label="Document type"    value={doc.docType} />
           <Field label="County"           value={doc.locationCode} />
-          <Field label="Book/Vol/Page"    value={(doc as Record<string, string>).bookVolumePage} />
-          <Field label="Record number"    value={(doc as Record<string, string>).recordNumber} />
-          <Field label="Page number"      value={(doc as Record<string, string>).pageNumber} />
-          <Field label="Legal description" value={(doc as Record<string, string>).legalDescription} />
+          <Field label="Book/Vol/Page"    value={doc.bookVolumePage} />
+          <Field label="Record number"    value={doc.recordNumber} />
+          <Field label="Page number"      value={doc.pageNumber} />
+          <Field label="Legal description" value={doc.legalDescription} />
           {doc.pdfUrl && (
             <div className="flex gap-2 text-sm pt-1">
               <span className="w-40 shrink-0 text-muted-foreground">PDF</span>
@@ -214,8 +214,8 @@ export default function DocumentDetail() {
               </a>
             </div>
           )}
-          <Field label="Extracted at"  value={(doc as Record<string, string>).extractedAt} />
-          <Field label="Processed at"  value={(doc as Record<string, string>).processedAt} />
+          <Field label="Extracted at"  value={doc.extractedAt} />
+          <Field label="Processed at"  value={doc.processedAt} />
         </CardContent>
       </Card>
 

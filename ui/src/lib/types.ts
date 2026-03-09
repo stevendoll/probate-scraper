@@ -22,6 +22,18 @@ export interface Lead {
   grantor: string
   grantee: string
   locationCode: string
+  // Full document fields (present when fetched via GET /documents/{id})
+  docType?: string
+  bookVolumePage?: string
+  legalDescription?: string
+  recordNumber?: string
+  pageNumber?: string
+  extractedAt?: string
+  processedAt?: string
+  scrapeRunId?: string
+  offset?: string
+  docS3Uri?: string
+  docLocalPath?: string
   pdfUrl?: string
   parsedAt?: string
   deceasedName?: string
