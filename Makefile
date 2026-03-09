@@ -235,6 +235,10 @@ start-all:
 		echo "API PID: $$API_PID"; \
 		sleep 5; \
 	fi
+	@if [ ! -f ui/.env.local ]; then \
+		echo "Creating ui/.env.local from example (VITE_API_KEY=local)..."; \
+		sed 's/your-api-key-here/local/' ui/.env.local.example > ui/.env.local; \
+	fi
 	@if curl -s http://localhost:3001 > /dev/null 2>&1; then \
 		echo "UI already running"; \
 	else \

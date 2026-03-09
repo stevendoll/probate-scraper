@@ -9,6 +9,7 @@
 import type {
   AuthVerifyResponse,
   ProspectSendResponse,
+  DocumentsResponse,
   LeadsResponse,
   LocationResponse,
   LocationsResponse,
@@ -88,14 +89,22 @@ export function getLocation(locationCode: string): Promise<LocationResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// Leads
+// Documents
 // ---------------------------------------------------------------------------
 
+export function getDocuments(
+  locationPath: string,
+  params: { from_date?: string; to_date?: string; limit?: number; last_key?: string } = {},
+): Promise<DocumentsResponse> {
+  return apiFetch(`/${locationPath}/documents`, { params })
+}
+
+/** @deprecated use getDocuments */
 export function getLeads(
   locationPath: string,
   params: { from_date?: string; to_date?: string; limit?: number; last_key?: string } = {},
-): Promise<LeadsResponse> {
-  return apiFetch(`/${locationPath}/leads`, { params })
+): Promise<DocumentsResponse> {
+  return getDocuments(locationPath, params)
 }
 
 // ---------------------------------------------------------------------------

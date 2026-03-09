@@ -16,6 +16,7 @@ export interface LocationResponse {
 
 export interface Lead {
   leadId?: string
+  documentId?: string
   docNumber: string
   recordedDate: string
   grantor: string
@@ -26,6 +27,16 @@ export interface Lead {
   deceasedName?: string
 }
 
+/** Response from GET /{location_path}/documents */
+export interface DocumentsResponse {
+  documents: Lead[]
+  location: Location
+  count: number
+  query: Record<string, string>
+  nextKey?: string
+}
+
+/** @deprecated use DocumentsResponse */
 export interface LeadsResponse {
   leads: Lead[]
   count: number
