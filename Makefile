@@ -3,7 +3,8 @@ ACCOUNT_ID   := 600775874112
 REGION       := us-east-1
 ECR_REPO     := probate-scraper/scraper
 ECR_URI      := $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/$(ECR_REPO)
-STACK_NAME   := probate-scraper-collin-tx
+STACK_NAME        := probate-scraper-collin-tx
+DOCUMENTS_BUCKET  ?= probate-scraper-collin-tx-documentsbucket-atqg0aimr8md
 
 # UI deployment — resolved from CloudFormation Outputs after sam deploy
 UI_BUCKET    = $(shell aws cloudformation describe-stacks \
@@ -50,7 +51,7 @@ help:
 	@echo "    local-db-seed    Create tables + load CSV data + seed locations"
 	@echo "    local-db-shell   Scan documents table (quick sanity check)"
 	@echo "    local-api-start  Start API server locally (no Docker)"
-	@echo "    local-scraper-run  Run scraper against DynamoDB Local"
+	@echo "    local-scraper-run  Run scraper against DynamoDB Local + upload PDFs to S3"
 	@echo "                       SCRAPER_USERNAME=x SCRAPER_PASSWORD='y' make local-scraper-run"
 	@echo "    backfill-s3-uris     Back-fill doc_s3_uri in AWS DynamoDB from S3 bucket"
 	@echo "                         DOCUMENTS_BUCKET=<bucket> make backfill-s3-uris [DRY_RUN=1]"
@@ -274,6 +275,7 @@ local-scraper-run:
 	CHROMEDRIVER_PATH="$(CHROMEDRIVER_PATH)" \
 	CHROME_BIN="$(CHROME_BIN)" \
 	DOWNLOAD_DIR="$(DOWNLOAD_DIR)" \
+	DOCUMENTS_BUCKET="$${DOCUMENTS_BUCKET:-$(DOCUMENTS_BUCKET)}" \
 	SCRAPER_USERNAME="$${SCRAPER_USERNAME:-$(SCRAPER_USERNAME)}" \
 	SCRAPER_PASSWORD="$${SCRAPER_PASSWORD:-$(SCRAPER_PASSWORD)}" \
 	pipenv run python src/scraper/app.py
