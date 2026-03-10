@@ -571,14 +571,13 @@ Resources:
           Throttle:
             RateLimit: 10
             BurstLimit: 20
-      # API Gateway handles OPTIONS preflight natively — no Lambda invocation
-      # needed.  This replaces the previous per-route OptionsXxx events which
-      # were consuming the 20,480-byte Lambda resource-policy limit.
-      Cors:
-        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Api-Key,Authorization,Stripe-Signature'"
-        AllowOrigin: "'*'"
-        MaxAge: 600
+      # CORS is handled by Lambda Powertools CORSConfig in app.py, which
+      # automatically returns 200 + headers for OPTIONS preflight requests.
+      # Explicit OptionsXxx events below are used only for the auth routes
+      # that need ApiKeyRequired:false (browsers never send x-api-key in
+      # OPTIONS preflights). The API Gateway native Cors: block is intentionally
+      # omitted — it generates mock OPTIONS integrations that inherit
+      # ApiKeyRequired:true and conflict with our explicit OPTIONS events.
 
   # ── API Gateway custom domain (api.collincountyleads.com) ─────────────────
   # Edge-optimized: API Gateway manages a CloudFront distribution internally.
