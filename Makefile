@@ -148,7 +148,19 @@ deploy: sam-build
 		echo "ERROR: SSM parameter /probate-scraper/jwt-secret not found. Run: make create-jwt-secret"; \
 		exit 1; \
 	fi; \
-	sam deploy --import-existing-resources --parameter-overrides "JwtSecret=$$JWT_SECRET"
+	if ! aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+		--region $(REGION) >/dev/null 2>&1; then \
+		echo "Stack does not exist — dropping any retained tables..."; \
+		for TABLE in documents contacts properties events; do \
+			if aws dynamodb describe-table --table-name $$TABLE \
+				--region $(REGION) >/dev/null 2>&1; then \
+				echo "Deleting table: $$TABLE"; \
+				aws dynamodb delete-table --table-name $$TABLE --region $(REGION); \
+				aws dynamodb wait table-not-exists --table-name $$TABLE --region $(REGION); \
+			fi; \
+		done; \
+	fi; \
+	sam deploy --parameter-overrides "JwtSecret=$$JWT_SECRET"
 	$(MAKE) deploy-ui
 
 deploy-ui:
