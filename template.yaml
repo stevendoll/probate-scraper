@@ -682,6 +682,13 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/{location_path}/documents
             Method: GET
+        # Single document (with contacts + properties)
+        GetDocument:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}
+            Method: GET
         # Contacts for a document
         GetDocumentContacts:
           Type: Api
@@ -859,6 +866,14 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/{location_path}/documents
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsGetDocument:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
