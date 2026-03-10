@@ -8,10 +8,6 @@ Routes:
   GET    /real-estate/probate-leads/documents/{document_id}/properties
   PATCH  /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
   DELETE /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
-
-Queries the location-date-index GSI and returns paginated probate documents
-for the requested county.  Contact and property sub-resources are served from
-the contacts and properties tables via their document-* GSIs.
 """
 
 import json
@@ -234,7 +230,6 @@ def get_document_properties(document_id: str):
 # Contacts — PATCH / DELETE
 # ---------------------------------------------------------------------------
 
-# Mutable contact fields that callers are allowed to update.
 _CONTACT_MUTABLE = {"role", "name", "email", "dob", "dod", "address", "notes"}
 
 
@@ -250,7 +245,6 @@ def update_contact(document_id: str, contact_id: str):
     if not updates:
         return {"error": f"No updatable fields provided. Allowed: {sorted(_CONTACT_MUTABLE)}"}, 400
 
-    # Verify the contact exists and belongs to this document
     try:
         existing = db.contacts_table.get_item(Key={"contact_id": contact_id}).get("Item")
     except Exception as exc:
@@ -311,7 +305,6 @@ def delete_contact(document_id: str, contact_id: str):
 # Properties — PATCH / DELETE
 # ---------------------------------------------------------------------------
 
-# Mutable property fields that callers are allowed to update.
 _PROPERTY_MUTABLE = {"address", "legal_description", "parcel_id", "city", "state", "zip", "notes"}
 
 
@@ -327,7 +320,6 @@ def update_property(document_id: str, property_id: str):
     if not updates:
         return {"error": f"No updatable fields provided. Allowed: {sorted(_PROPERTY_MUTABLE)}"}, 400
 
-    # Verify the property exists and belongs to this document
     try:
         existing = db.properties_table.get_item(Key={"property_id": property_id}).get("Item")
     except Exception as exc:
