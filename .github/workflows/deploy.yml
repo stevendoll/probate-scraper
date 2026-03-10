@@ -9,7 +9,7 @@ env:
   AWS_REGION: us-east-1
   ACCOUNT_ID: "600775874112"
   ECR_REPO: probate-scraper/scraper
-  STACK_NAME: probate-scraper-collin-tx
+  STACK_NAME: probate-scraper
 
 jobs:
   # ── Unit tests (must pass before deploy) ───────────────────────────────────

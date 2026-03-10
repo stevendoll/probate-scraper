@@ -11,7 +11,7 @@ version = 0.1
 
 [default]
 [default.global.parameters]
-stack_name = "probate-scraper-collin-tx"
+stack_name = "probate-scraper"
 
 [default.build.parameters]
 cached = true
@@ -22,7 +22,7 @@ region                = "us-east-1"
 capabilities          = "CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
 confirm_changeset     = false
 resolve_s3            = true
-s3_prefix             = "probate-scraper-collin-tx"
+s3_prefix             = "probate-scraper"
 
 # ── Update these before deploying ─────────────────────────────────────────
 parameter_overrides = """
