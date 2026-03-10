@@ -139,13 +139,25 @@ jobs:
       - name: SAM build
         run: sam build --parallel
 
-      # If the stack doesn't exist but DynamoDB tables were retained from a
-      # previous stack deletion, drop them so sam deploy can recreate them.
-      - name: Drop retained tables for fresh stack creation
+      # If the stack is in ROLLBACK_COMPLETE it must be deleted before sam deploy.
+      # If the stack doesn't exist at all, drop any retained DynamoDB tables so
+      # CloudFormation can recreate them cleanly.
+      - name: Prepare stack for fresh deployment
         run: |
-          if ! aws cloudformation describe-stacks --stack-name $STACK_NAME \
-               --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
-            echo "Stack does not exist — dropping any retained tables..."
+          STATUS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          echo "Stack status: $STATUS"
+
+          if [ "$STATUS" = "ROLLBACK_COMPLETE" ] || [ "$STATUS" = "DOES_NOT_EXIST" ]; then
+            if [ "$STATUS" = "ROLLBACK_COMPLETE" ]; then
+              echo "Stack is in ROLLBACK_COMPLETE — deleting before redeploy..."
+              aws cloudformation delete-stack --stack-name $STACK_NAME --region ${{ env.AWS_REGION }}
+              aws cloudformation wait stack-delete-complete --stack-name $STACK_NAME --region ${{ env.AWS_REGION }}
+              echo "Stack deleted."
+            fi
+
+            echo "Dropping any retained DynamoDB tables..."
             for TABLE in documents contacts properties events; do
               if aws dynamodb describe-table --table-name $TABLE \
                    --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
@@ -156,7 +168,7 @@ jobs:
               fi
             done
           else
-            echo "Stack exists — skipping table cleanup."
+            echo "Stack is healthy ($STATUS) — skipping cleanup."
           fi
 
       - name: SAM deploy
