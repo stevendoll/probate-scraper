@@ -571,6 +571,14 @@ Resources:
           Throttle:
             RateLimit: 10
             BurstLimit: 20
+      # API Gateway handles OPTIONS preflight natively — no Lambda invocation
+      # needed.  This replaces the previous per-route OptionsXxx events which
+      # were consuming the 20,480-byte Lambda resource-policy limit.
+      Cors:
+        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Api-Key,Authorization,Stripe-Signature'"
+        AllowOrigin: "'*'"
+        MaxAge: 600
 
   # ── API Gateway custom domain (api.collincountyleads.com) ─────────────────
   # Edge-optimized: API Gateway manages a CloudFront distribution internally.
@@ -882,155 +890,6 @@ Resources:
             Auth:
               ApiKeyRequired: false
         # ── CORS preflight OPTIONS ─────────────────────────────────────────
-        # Browsers never include x-api-key in preflight requests, so every path
-        # needs an explicit OPTIONS event with ApiKeyRequired: false.
-        # A {proxy+} catch-all cannot be used here because API Gateway prohibits
-        # sibling variable path parameters ({proxy+} vs {location_path}).
-        # The Lambda's CORSConfig returns 200 + CORS headers for all OPTIONS.
-        OptionsGetDocuments:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/{location_path}/documents
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsGetDocument:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/documents/{document_id}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsDocumentContacts:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/documents/{document_id}/contacts
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsDocumentProperties:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/documents/{document_id}/properties
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsContact:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsProperty:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsListLocations:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/locations
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsGetLocation:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/locations/{location_code}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsUsers:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/users
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsUser:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/users/{user_id}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsStripeWebhook:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/stripe/webhook
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAuthRequestLogin:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/auth/request-login
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAuthVerify:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/auth/verify
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAuthMe:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/auth/me
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAuthLeads:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/auth/leads
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAdminUsers:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/users
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAdminUser:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/users/{user_id}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAdminProspectSend:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/admin/prospect/send
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
         # Events — POST (prospect JWT) + GET (admin Bearer token)
         PostEvents:
           Type: Api
@@ -1046,30 +905,6 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/events
             Method: GET
-            Auth:
-              ApiKeyRequired: false
-        OptionsEvents:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/events
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsAuthUnsubscribe:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/auth/unsubscribe
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
-        OptionsStripeCheckout:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ProbateApi
-            Path: /real-estate/probate-leads/stripe/checkout
-            Method: OPTIONS
             Auth:
               ApiKeyRequired: false
 
