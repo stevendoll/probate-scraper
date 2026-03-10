@@ -180,6 +180,7 @@ jobs:
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
+            --import-existing-resources \
             --parameter-overrides "${OVERRIDES[@]}"
 
       # ── Retrieve stack outputs ─────────────────────────────────────────────
