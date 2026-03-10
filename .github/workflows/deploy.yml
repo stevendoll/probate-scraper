@@ -139,6 +139,26 @@ jobs:
       - name: SAM build
         run: sam build --parallel
 
+      # If the stack doesn't exist but DynamoDB tables were retained from a
+      # previous stack deletion, drop them so sam deploy can recreate them.
+      - name: Drop retained tables for fresh stack creation
+        run: |
+          if ! aws cloudformation describe-stacks --stack-name $STACK_NAME \
+               --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            echo "Stack does not exist — dropping any retained tables..."
+            for TABLE in documents contacts properties events; do
+              if aws dynamodb describe-table --table-name $TABLE \
+                   --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+                echo "Deleting table: $TABLE"
+                aws dynamodb delete-table --table-name $TABLE --region ${{ env.AWS_REGION }}
+                aws dynamodb wait table-not-exists --table-name $TABLE --region ${{ env.AWS_REGION }}
+                echo "Deleted: $TABLE"
+              fi
+            done
+          else
+            echo "Stack exists — skipping table cleanup."
+          fi
+
       - name: SAM deploy
         env:
           VPC_ID: ${{ steps.vpc.outputs.vpc_id }}
@@ -172,15 +192,14 @@ jobs:
             "ApiDomainName=api.collincountyleads.com"
             "UiBaseUrl=https://collincountyleads.com"
           )
-          [ -n "$STRIPE_SECRET_KEY" ]    && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
+          [ -n "$STRIPE_SECRET_KEY" ]     && OVERRIDES+=("StripeSecretKey=$STRIPE_SECRET_KEY")
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
-          [ -n "$USERNAME_COLLINTX" ]    && OVERRIDES+=("ScraperUsername=$USERNAME_COLLINTX")
-          [ -n "$PASSWORD_COLLINTX" ]    && OVERRIDES+=("ScraperPassword=$PASSWORD_COLLINTX")
+          [ -n "$USERNAME_COLLINTX" ]     && OVERRIDES+=("ScraperUsername=$USERNAME_COLLINTX")
+          [ -n "$PASSWORD_COLLINTX" ]     && OVERRIDES+=("ScraperPassword=$PASSWORD_COLLINTX")
 
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --import-existing-resources \
             --parameter-overrides "${OVERRIDES[@]}"
 
       # ── Retrieve stack outputs ─────────────────────────────────────────────
