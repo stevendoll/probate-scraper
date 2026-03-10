@@ -148,7 +148,7 @@ deploy: sam-build
 		echo "ERROR: SSM parameter /probate-scraper/jwt-secret not found. Run: make create-jwt-secret"; \
 		exit 1; \
 	fi; \
-	sam deploy --parameter-overrides "JwtSecret=$$JWT_SECRET"
+	sam deploy --import-existing-resources --parameter-overrides "JwtSecret=$$JWT_SECRET"
 	$(MAKE) deploy-ui
 
 deploy-ui:
