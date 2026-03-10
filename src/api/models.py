@@ -106,14 +106,16 @@ class Document:
 class Contact:
     contact_id:   str = ""
     document_id:  str = ""
-    role:         str = ""   # deceased / executor / family / other
+    role:         str = ""   # deceased / executor / beneficiary / heir / attorney / other
     name:         str = ""
+    email:        str = ""
     dob:          str = ""
     dod:          str = ""
     address:      str = ""
     notes:        str = ""
     parsed_at:    str = ""
     parsed_model: str = ""
+    raw_response: str = ""   # raw JSON string returned by Bedrock
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "Contact":
@@ -122,12 +124,14 @@ class Contact:
             document_id=  item.get("document_id", ""),
             role=         item.get("role", ""),
             name=         item.get("name", ""),
+            email=        item.get("email", ""),
             dob=          item.get("dob", ""),
             dod=          item.get("dod", ""),
             address=      item.get("address", ""),
             notes=        item.get("notes", ""),
             parsed_at=    item.get("parsed_at", ""),
             parsed_model= item.get("parsed_model", ""),
+            raw_response= item.get("raw_response", ""),
         )
 
     def to_dict(self) -> dict:
@@ -136,12 +140,14 @@ class Contact:
             "documentId":  self.document_id,
             "role":        self.role,
             "name":        self.name,
+            "email":       self.email,
             "dob":         self.dob,
             "dod":         self.dod,
             "address":     self.address,
             "notes":       self.notes,
             "parsedAt":    self.parsed_at,
             "parsedModel": self.parsed_model,
+            "rawResponse": self.raw_response,
         }
 
 
@@ -162,6 +168,7 @@ class Property:
     notes:             str = ""
     parsed_at:         str = ""
     parsed_model:      str = ""
+    raw_response:      str = ""   # raw JSON string returned by Bedrock
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "Property":
@@ -177,6 +184,7 @@ class Property:
             notes=             item.get("notes", ""),
             parsed_at=         item.get("parsed_at", ""),
             parsed_model=      item.get("parsed_model", ""),
+            raw_response=      item.get("raw_response", ""),
         )
 
     def to_dict(self) -> dict:
@@ -192,6 +200,7 @@ class Property:
             "notes":            self.notes,
             "parsedAt":         self.parsed_at,
             "parsedModel":      self.parsed_model,
+            "rawResponse":      self.raw_response,
         }
 
 

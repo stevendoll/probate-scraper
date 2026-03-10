@@ -20,7 +20,11 @@ Return ONLY this JSON shape (use null for any field you cannot find):
   "deceased_dod":          "<date of death, YYYY-MM-DD if possible, else as written, or null>",
   "deceased_last_address": "<last known street address of the deceased, or null>",
   "people": [
-    {"name": "<full name>", "role": "<role or relationship, e.g. Executor, Heir, Attorney>"}
+    {
+      "name":  "<full name>",
+      "role":  "<one of: executor, heir, beneficiary, spouse, attorney, guardian, trustee, other>",
+      "email": "<email address if present in the document, else null>"
+    }
   ],
   "real_property": [
     "<address or legal description of each piece of real property in the estate>"
@@ -29,8 +33,15 @@ Return ONLY this JSON shape (use null for any field you cannot find):
 }
 
 Rules:
-- Include every named person with their role/relationship.
-- For people with multiple roles list each role separately, or combine as \"Executor / Heir\".
+- INCLUDE: executor, heirs, beneficiaries named in the will or filing, spouse,
+  children, trustees, guardians, and attorneys representing the estate or heirs.
+- EXCLUDE: county clerks, probate judges, court officials, and court staff.
+  These are court personnel, not parties to the estate, and must be omitted.
+- If a person is named both as a beneficiary and as executor, include them once
+  with role "executor / beneficiary".
+- Prioritise extracting ALL beneficiaries and heirs named anywhere in the
+  document, including those listed in an attached will or exhibit.
+- Use the most specific role you can determine from the text.
 - If no real property is mentioned, return an empty array for real_property.
 - The summary must be 150 words or fewer and suitable for a non-lawyer audience.
 - Do not invent information that is not in the document.
