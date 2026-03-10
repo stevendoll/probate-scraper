@@ -89,9 +89,9 @@ def _fetch_pdf_bytes(s3_uri: str) -> bytes:
     return response["Body"].read()
 
 
-def _call_bedrock(pdf_bytes: bytes) -> dict:
+def _call_bedrock(pdf_bytes: bytes) -> tuple[dict, str]:
     """
-    Send the PDF to Bedrock via the Converse API and return the parsed JSON dict.
+    Send the PDF to Bedrock via the Converse API and return ``(parsed_dict, raw_text)``.
 
     Uses a document block with Amazon Nova Pro, which supports document blocks
     natively via its cross-region inference profile.  Anthropic Claude models
@@ -100,6 +100,8 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
 
     The model is expected to return a single JSON object — no markdown fences.
     If the response contains a fenced code block we strip the fences first.
+    The raw model output is returned alongside the parsed dict so callers can
+    store it for debugging / reprocessing.
     """
     response = _bedrock.converse(
         modelId=_model_id,
@@ -129,7 +131,7 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
 
     # 1. Try parsing as-is (ideal: model returned pure JSON)
     try:
-        return json.loads(raw_text)
+        return json.loads(raw_text), raw_text
     except json.JSONDecodeError:
         pass
 
@@ -137,7 +139,7 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", raw_text, re.DOTALL)
     if fenced:
         try:
-            return json.loads(fenced.group(1).strip())
+            return json.loads(fenced.group(1).strip()), raw_text
         except json.JSONDecodeError:
             pass
 
@@ -146,14 +148,16 @@ def _call_bedrock(pdf_bytes: bytes) -> dict:
     end   = raw_text.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(raw_text[start : end + 1])
+            return json.loads(raw_text[start : end + 1]), raw_text
         except json.JSONDecodeError:
             pass
 
     raise ValueError(f"No valid JSON in model response: {raw_text[:300]!r}")
 
 
-def _write_contacts(document_id: str, parsed: dict, model_id: str, parsed_at: str) -> int:
+def _write_contacts(
+    document_id: str, parsed: dict, model_id: str, parsed_at: str, raw_response: str
+) -> int:
     """
     Write one Contact record per person extracted from the document.
     Includes the deceased person (from deceased_* fields) + people list.
@@ -169,41 +173,48 @@ def _write_contacts(document_id: str, parsed: dict, model_id: str, parsed_at: st
             "document_id":  document_id,
             "role":         "deceased",
             "name":         deceased_name,
+            "email":        "",
             "dob":          parsed.get("deceased_dob") or "",
             "dod":          parsed.get("deceased_dod") or "",
             "address":      parsed.get("deceased_last_address") or "",
             "notes":        "",
             "parsed_at":    parsed_at,
             "parsed_model": model_id,
+            "raw_response": raw_response,
         })
         written += 1
 
-    # People list (executor, heirs, attorney, etc.)
+    # People list (executor, beneficiaries, heirs, attorney, etc.)
     for person in (parsed.get("people") or []):
         if not isinstance(person, dict):
             continue
         name = person.get("name") or ""
         if not name:
             continue
-        role = (person.get("role") or "other").lower()
+        role  = (person.get("role") or "other").lower()
+        email = person.get("email") or ""
         _contacts_table.put_item(Item={
             "contact_id":   str(uuid.uuid4()),
             "document_id":  document_id,
             "role":         role,
             "name":         name,
+            "email":        email,
             "dob":          "",
             "dod":          "",
             "address":      "",
             "notes":        "",
             "parsed_at":    parsed_at,
             "parsed_model": model_id,
+            "raw_response": raw_response,
         })
         written += 1
 
     return written
 
 
-def _write_properties(document_id: str, parsed: dict, model_id: str, parsed_at: str) -> int:
+def _write_properties(
+    document_id: str, parsed: dict, model_id: str, parsed_at: str, raw_response: str
+) -> int:
     """
     Write one Property record per real-property entry extracted from the document.
     Returns the number of properties written.
@@ -223,6 +234,7 @@ def _write_properties(document_id: str, parsed: dict, model_id: str, parsed_at: 
             "notes":             "",
             "parsed_at":         parsed_at,
             "parsed_model":      model_id,
+            "raw_response":      raw_response,
         })
         written += 1
 
@@ -281,7 +293,7 @@ def parse_document(document_id: str):
 
     # 3. Call Bedrock
     try:
-        parsed = _call_bedrock(pdf_bytes)
+        parsed, raw_response = _call_bedrock(pdf_bytes)
     except Exception as exc:
         logger.error("Bedrock call failed: %s", exc)
         err_msg = f"Bedrock call failed: {exc}"
@@ -292,8 +304,8 @@ def parse_document(document_id: str):
     contacts_written = 0
     properties_written = 0
     try:
-        contacts_written   = _write_contacts(document_id, parsed, _model_id, now)
-        properties_written = _write_properties(document_id, parsed, _model_id, now)
+        contacts_written   = _write_contacts(document_id, parsed, _model_id, now, raw_response)
+        properties_written = _write_properties(document_id, parsed, _model_id, now, raw_response)
     except Exception as exc:
         logger.error("DynamoDB write failed: %s", exc)
         _update_document_status(document_id, _model_id, now, error=str(exc))

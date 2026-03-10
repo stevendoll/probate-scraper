@@ -8,11 +8,13 @@
 
 import type {
   AuthVerifyResponse,
+  Contact,
   DocumentDetailResponse,
   DocumentsResponse,
   LeadsResponse,
   LocationResponse,
   LocationsResponse,
+  Property,
   ProspectSendResponse,
   User,
   UserResponse,
@@ -111,6 +113,56 @@ export function getLeads(
 /** Fetch a single document with its contacts and properties. */
 export function getDocument(documentId: string): Promise<DocumentDetailResponse> {
   return apiFetch(`/documents/${documentId}`)
+}
+
+/** Update mutable fields on a contact (role, name, email, dob, dod, address, notes). */
+export async function updateContact(
+  documentId: string,
+  contactId: string,
+  updates: Partial<Pick<Contact, 'role' | 'name' | 'email' | 'dob' | 'dod' | 'address' | 'notes'>>,
+): Promise<{ contact: Contact }> {
+  // API uses snake_case keys matching the DynamoDB attribute names
+  return apiFetch(`/documents/${documentId}/contacts/${contactId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  })
+}
+
+/** Delete a contact record. */
+export async function deleteContact(
+  documentId: string,
+  contactId: string,
+): Promise<{ deleted: string }> {
+  return apiFetch(`/documents/${documentId}/contacts/${contactId}`, { method: 'DELETE' })
+}
+
+/** Update mutable fields on a property (address, legal_description, parcel_id, city, state, zip, notes). */
+export async function updateProperty(
+  documentId: string,
+  propertyId: string,
+  updates: Partial<Pick<Property, 'address' | 'legalDescription' | 'parcelId' | 'city' | 'state' | 'zip' | 'notes'>>,
+): Promise<{ property: Property }> {
+  // Map camelCase keys to the snake_case the API expects
+  const body: Record<string, string | undefined> = {}
+  if ('address'          in updates) body.address           = updates.address
+  if ('legalDescription' in updates) body.legal_description = updates.legalDescription
+  if ('parcelId'         in updates) body.parcel_id         = updates.parcelId
+  if ('city'             in updates) body.city              = updates.city
+  if ('state'            in updates) body.state             = updates.state
+  if ('zip'              in updates) body.zip               = updates.zip
+  if ('notes'            in updates) body.notes             = updates.notes
+  return apiFetch(`/documents/${documentId}/properties/${propertyId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+/** Delete a property record. */
+export async function deleteProperty(
+  documentId: string,
+  propertyId: string,
+): Promise<{ deleted: string }> {
+  return apiFetch(`/documents/${documentId}/properties/${propertyId}`, { method: 'DELETE' })
 }
 
 // ---------------------------------------------------------------------------

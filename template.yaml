@@ -696,6 +696,19 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/contacts
             Method: GET
+        # Update / delete a single contact
+        UpdateContact:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+            Method: PATCH
+        DeleteContact:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+            Method: DELETE
         # Properties for a document
         GetDocumentProperties:
           Type: Api
@@ -703,6 +716,19 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/properties
             Method: GET
+        # Update / delete a single property
+        UpdateProperty:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
+            Method: PATCH
+        DeleteProperty:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
+            Method: DELETE
         # Locations
         ListLocations:
           Type: Api
@@ -890,6 +916,22 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/properties
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsContact:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+        OptionsProperty:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false

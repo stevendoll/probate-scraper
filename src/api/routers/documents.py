@@ -1,15 +1,20 @@
 """
 Routes:
-  GET  /real-estate/probate-leads/{location_path}/documents
-  GET  /real-estate/probate-leads/documents/{document_id}
-  GET  /real-estate/probate-leads/documents/{document_id}/contacts
-  GET  /real-estate/probate-leads/documents/{document_id}/properties
+  GET    /real-estate/probate-leads/{location_path}/documents
+  GET    /real-estate/probate-leads/documents/{document_id}
+  GET    /real-estate/probate-leads/documents/{document_id}/contacts
+  PATCH  /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+  DELETE /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+  GET    /real-estate/probate-leads/documents/{document_id}/properties
+  PATCH  /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
+  DELETE /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
 
 Queries the location-date-index GSI and returns paginated probate documents
 for the requested county.  Contact and property sub-resources are served from
 the contacts and properties tables via their document-* GSIs.
 """
 
+import json
 import uuid
 
 from aws_lambda_powertools import Logger
@@ -223,3 +228,157 @@ def get_document_properties(document_id: str):
         "properties": properties,
         "count":      len(properties),
     }
+
+
+# ---------------------------------------------------------------------------
+# Contacts — PATCH / DELETE
+# ---------------------------------------------------------------------------
+
+# Mutable contact fields that callers are allowed to update.
+_CONTACT_MUTABLE = {"role", "name", "email", "dob", "dod", "address", "notes"}
+
+
+@router.patch("/real-estate/probate-leads/documents/<document_id>/contacts/<contact_id>")
+def update_contact(document_id: str, contact_id: str):
+    """Partially update a contact record. Only mutable fields are accepted."""
+    try:
+        body = json.loads(router.current_event.body or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {"error": "Request body must be valid JSON"}, 400
+
+    updates = {k: v for k, v in body.items() if k in _CONTACT_MUTABLE}
+    if not updates:
+        return {"error": f"No updatable fields provided. Allowed: {sorted(_CONTACT_MUTABLE)}"}, 400
+
+    # Verify the contact exists and belongs to this document
+    try:
+        existing = db.contacts_table.get_item(Key={"contact_id": contact_id}).get("Item")
+    except Exception as exc:
+        logger.error("contacts get_item failed: %s", exc)
+        return {"error": "Database query failed"}, 500
+
+    if not existing:
+        return {"error": f"Contact not found: {contact_id!r}"}, 404
+    if existing.get("document_id") != document_id:
+        return {"error": "Contact does not belong to the specified document"}, 403
+
+    set_expr   = ", ".join(f"#{k} = :{k}" for k in updates)
+    expr_names = {f"#{k}": k for k in updates}
+    expr_vals  = {f":{k}": v for k, v in updates.items()}
+
+    try:
+        result = db.contacts_table.update_item(
+            Key={"contact_id": contact_id},
+            UpdateExpression=f"SET {set_expr}",
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_vals,
+            ReturnValues="ALL_NEW",
+        )
+    except Exception as exc:
+        logger.error("contacts update_item failed: %s", exc)
+        return {"error": "Database update failed"}, 500
+
+    return {
+        "requestId": str(uuid.uuid4()),
+        "contact":   Contact.from_dynamo(result["Attributes"]).to_dict(),
+    }
+
+
+@router.delete("/real-estate/probate-leads/documents/<document_id>/contacts/<contact_id>")
+def delete_contact(document_id: str, contact_id: str):
+    """Delete a single contact record."""
+    try:
+        existing = db.contacts_table.get_item(Key={"contact_id": contact_id}).get("Item")
+    except Exception as exc:
+        logger.error("contacts get_item failed: %s", exc)
+        return {"error": "Database query failed"}, 500
+
+    if not existing:
+        return {"error": f"Contact not found: {contact_id!r}"}, 404
+    if existing.get("document_id") != document_id:
+        return {"error": "Contact does not belong to the specified document"}, 403
+
+    try:
+        db.contacts_table.delete_item(Key={"contact_id": contact_id})
+    except Exception as exc:
+        logger.error("contacts delete_item failed: %s", exc)
+        return {"error": "Database delete failed"}, 500
+
+    return {"requestId": str(uuid.uuid4()), "deleted": contact_id}
+
+
+# ---------------------------------------------------------------------------
+# Properties — PATCH / DELETE
+# ---------------------------------------------------------------------------
+
+# Mutable property fields that callers are allowed to update.
+_PROPERTY_MUTABLE = {"address", "legal_description", "parcel_id", "city", "state", "zip", "notes"}
+
+
+@router.patch("/real-estate/probate-leads/documents/<document_id>/properties/<property_id>")
+def update_property(document_id: str, property_id: str):
+    """Partially update a property record. Only mutable fields are accepted."""
+    try:
+        body = json.loads(router.current_event.body or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {"error": "Request body must be valid JSON"}, 400
+
+    updates = {k: v for k, v in body.items() if k in _PROPERTY_MUTABLE}
+    if not updates:
+        return {"error": f"No updatable fields provided. Allowed: {sorted(_PROPERTY_MUTABLE)}"}, 400
+
+    # Verify the property exists and belongs to this document
+    try:
+        existing = db.properties_table.get_item(Key={"property_id": property_id}).get("Item")
+    except Exception as exc:
+        logger.error("properties get_item failed: %s", exc)
+        return {"error": "Database query failed"}, 500
+
+    if not existing:
+        return {"error": f"Property not found: {property_id!r}"}, 404
+    if existing.get("document_id") != document_id:
+        return {"error": "Property does not belong to the specified document"}, 403
+
+    set_expr   = ", ".join(f"#{k} = :{k}" for k in updates)
+    expr_names = {f"#{k}": k for k in updates}
+    expr_vals  = {f":{k}": v for k, v in updates.items()}
+
+    try:
+        result = db.properties_table.update_item(
+            Key={"property_id": property_id},
+            UpdateExpression=f"SET {set_expr}",
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_vals,
+            ReturnValues="ALL_NEW",
+        )
+    except Exception as exc:
+        logger.error("properties update_item failed: %s", exc)
+        return {"error": "Database update failed"}, 500
+
+    return {
+        "requestId": str(uuid.uuid4()),
+        "property":  Property.from_dynamo(result["Attributes"]).to_dict(),
+    }
+
+
+@router.delete("/real-estate/probate-leads/documents/<document_id>/properties/<property_id>")
+def delete_property(document_id: str, property_id: str):
+    """Delete a single property record."""
+    try:
+        existing = db.properties_table.get_item(Key={"property_id": property_id}).get("Item")
+    except Exception as exc:
+        logger.error("properties get_item failed: %s", exc)
+        return {"error": "Database query failed"}, 500
+
+    if not existing:
+        return {"error": f"Property not found: {property_id!r}"}, 404
+    if existing.get("document_id") != document_id:
+        return {"error": "Property does not belong to the specified document"}, 403
+
+    try:
+        db.properties_table.delete_item(Key={"property_id": property_id})
+    except Exception as exc:
+        logger.error("properties delete_item failed: %s", exc)
+        return {"error": "Database delete failed"}, 500
+
+    return {"requestId": str(uuid.uuid4()), "deleted": property_id}

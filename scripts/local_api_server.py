@@ -185,6 +185,14 @@ class LambdaHandler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "documents":
             return {"document_id": parts[1]}
 
+        # /documents/{document_id}/contacts/{contact_id}
+        if len(parts) == 4 and parts[0] == "documents" and parts[2] == "contacts":
+            return {"document_id": parts[1], "contact_id": parts[3]}
+
+        # /documents/{document_id}/properties/{property_id}
+        if len(parts) == 4 and parts[0] == "documents" and parts[2] == "properties":
+            return {"document_id": parts[1], "property_id": parts[3]}
+
         return None
 
     def _read_body(self) -> bytes:

@@ -60,12 +60,14 @@ export interface Contact {
   documentId: string
   role: string
   name: string
+  email?: string
   dob?: string
   dod?: string
   address?: string
   notes?: string
   parsedAt?: string
   parsedModel?: string
+  rawResponse?: string
 }
 
 export interface Property {
@@ -80,6 +82,7 @@ export interface Property {
   notes?: string
   parsedAt?: string
   parsedModel?: string
+  rawResponse?: string
 }
 
 /** Response from GET /documents/{document_id} */
