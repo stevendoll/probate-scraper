@@ -303,11 +303,12 @@ jobs:
         run: pipenv install
 
       # ── Smoke tests (API + CORS) ───────────────────────────────────────────
+      # SMOKE_UI_URL intentionally omitted — UI bucket is empty until the
+      # deploy-ui steps below run.  UI checks happen in the second smoke run.
       - name: Run smoke tests
         env:
           SMOKE_BASE_URL: ${{ steps.stack-outputs.outputs.endpoint }}
           SMOKE_API_KEY: ${{ steps.api-key.outputs.api_key }}
-          SMOKE_UI_URL: ${{ steps.stack-outputs.outputs.ui_url }}
         run: pipenv run python scripts/smoke_test.py
 
       # ── Deploy UI (React SPA → S3 + CloudFront invalidation) ───────────────
