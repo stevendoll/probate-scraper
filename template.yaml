@@ -799,12 +799,30 @@ Resources:
             Method: POST
             Auth:
               ApiKeyRequired: false
+        # Explicit OPTIONS — native CORS does not bypass ApiKeyRequired:true
+        # for preflight requests; browsers never send x-api-key in preflights.
+        OptionsAuthRequestLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/request-login
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
         AuthVerify:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/verify
             Method: GET
+            Auth:
+              ApiKeyRequired: false
+        OptionsAuthVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/auth/verify
+            Method: OPTIONS
             Auth:
               ApiKeyRequired: false
         AuthMe:
