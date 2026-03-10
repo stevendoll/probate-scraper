@@ -3,8 +3,8 @@ ACCOUNT_ID   := 600775874112
 REGION       := us-east-1
 ECR_REPO     := probate-scraper/scraper
 ECR_URI      := $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/$(ECR_REPO)
-STACK_NAME        := probate-scraper-collin-tx
-DOCUMENTS_BUCKET  ?= probate-scraper-collin-tx-documentsbucket-atqg0aimr8md
+STACK_NAME        := probate-scraper
+DOCUMENTS_BUCKET  ?= probate-scraper-documentsbucket-atqg0aimr8md
 
 # UI deployment — resolved from CloudFormation Outputs after sam deploy
 UI_BUCKET    = $(shell aws cloudformation describe-stacks \
@@ -298,7 +298,7 @@ test:
 # Run smoke tests against the deployed API.
 # Requires SMOKE_BASE_URL and SMOKE_API_KEY to be set:
 #   export SMOKE_BASE_URL=$(aws cloudformation describe-stacks \
-#     --stack-name probate-scraper-collin-tx \
+#     --stack-name probate-scraper \
 #     --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
 #     --output text)
 #   export SMOKE_API_KEY=$(make get-api-key)
