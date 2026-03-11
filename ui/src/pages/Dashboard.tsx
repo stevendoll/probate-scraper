@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Navigate } from 'react-router-dom'
 import { getMe } from '@/lib/api'
 import { LeadsTable } from '@/components/leads-table'
 import { Badge } from '@/components/ui/badge'
@@ -12,11 +13,10 @@ const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'o
 }
 
 export default function Dashboard() {
-  const { data: user, isLoading } = useQuery({ queryKey: ['me'], queryFn: getMe })
+  const { data: user, isLoading, isError } = useQuery({ queryKey: ['me'], queryFn: getMe })
 
-  if (isLoading || !user) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>
-  }
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
+  if (isError || !user) return <Navigate to="/login" replace />
 
   const variant = statusVariant[user.status] ?? 'outline'
   const isActive = user.status === 'active' || user.status === 'trialing'

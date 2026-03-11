@@ -69,6 +69,10 @@ async function authedFetch<T>(path: string, options: RequestInit & { params?: Pa
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...init.headers },
   })
   if (!res.ok) {
+    if (res.status === 401) {
+      // Token is invalid or expired — clear it so ProtectedRoute redirects to login.
+      clearToken()
+    }
     let message = `HTTP ${res.status}`
     try {
       const body = (await res.json()) as { error?: string; message?: string }

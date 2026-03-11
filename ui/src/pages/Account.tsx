@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Navigate } from 'react-router-dom'
 import { getMe, patchMe } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,9 +23,8 @@ export default function Account() {
     },
   })
 
-  if (isLoading || !user) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>
-  }
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
+  if (!user) return <Navigate to="/login" replace />
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
