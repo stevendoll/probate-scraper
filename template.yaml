@@ -824,6 +824,17 @@ Resources:
             Method: OPTIONS
             Auth:
               ApiKeyRequired: false
+        # Catch-all OPTIONS for every other route (auth/me, admin/*, etc.)
+        # Specific routes above take precedence; this covers the remainder.
+        # Lambda Powertools CORSConfig returns 200 + CORS headers automatically.
+        OptionsCatchAll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/{proxy+}
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
         AuthMe:
           Type: Api
           Properties:
