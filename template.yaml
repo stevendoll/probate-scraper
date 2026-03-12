@@ -823,8 +823,6 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/stripe/webhook
             Method: POST
-            Auth:
-              ApiKeyRequired: false
         # Auth — magic-link login (no API key required; Bearer JWT used instead)
         AuthRequestLogin:
           Type: Api
@@ -832,40 +830,30 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/request-login
             Method: POST
-            Auth:
-              ApiKeyRequired: false
         AuthVerify:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/verify
             Method: GET
-            Auth:
-              ApiKeyRequired: false
         AuthMe:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/me
             Method: GET
-            Auth:
-              ApiKeyRequired: false
         AuthPatchMe:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/me
             Method: PATCH
-            Auth:
-              ApiKeyRequired: false
         AuthLeads:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/leads
             Method: GET
-            Auth:
-              ApiKeyRequired: false
         # Admin — user management (no API key; admin Bearer JWT required)
         AdminListUsers:
           Type: Api
@@ -873,32 +861,24 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/users
             Method: GET
-            Auth:
-              ApiKeyRequired: false
         AdminGetUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/users/{user_id}
             Method: GET
-            Auth:
-              ApiKeyRequired: false
         AdminPatchUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/users/{user_id}
             Method: PATCH
-            Auth:
-              ApiKeyRequired: false
         AdminDeleteUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/users/{user_id}
             Method: DELETE
-            Auth:
-              ApiKeyRequired: false
         # Prospect — admin send + public unsubscribe/checkout (no API key)
         AdminProspectSend:
           Type: Api
@@ -906,25 +886,18 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/admin/prospect/send
             Method: POST
-            Auth:
-              ApiKeyRequired: false
         AuthUnsubscribe:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/auth/unsubscribe
             Method: POST
-            Auth:
-              ApiKeyRequired: false
         StripeCheckout:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/stripe/checkout
             Method: POST
-            Auth:
-              ApiKeyRequired: false
-        # ── CORS preflight OPTIONS ─────────────────────────────────────────
         # Events — POST (prospect JWT) + GET (admin Bearer token)
         PostEvents:
           Type: Api
@@ -932,16 +905,12 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/events
             Method: POST
-            Auth:
-              ApiKeyRequired: false
         GetEvents:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/events
             Method: GET
-            Auth:
-              ApiKeyRequired: false
 
   # ── Lambda — POST /{location_path}/update ─────────────────────────────────
 
