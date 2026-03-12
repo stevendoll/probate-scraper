@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { FileText } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { getLeads, getMyLeads } from '@/lib/api'
 import type { DocumentsResponse, Lead, LeadsResponse } from '@/lib/types'
@@ -113,9 +114,7 @@ export function LeadsTable({ locationPath, showParsed = false }: Props) {
                   <TableHead>Date</TableHead>
                   <TableHead>Doc #</TableHead>
                   <TableHead>Grantor</TableHead>
-                  <TableHead>Grantee</TableHead>
                   <TableHead>County</TableHead>
-                  {showParsed && <TableHead>Deceased</TableHead>}
                   <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
@@ -123,7 +122,7 @@ export function LeadsTable({ locationPath, showParsed = false }: Props) {
               <TableBody>
                 {items.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={showParsed ? 8 : 7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       No leads found for this date range.
                     </TableCell>
                   </TableRow>
@@ -146,20 +145,11 @@ export function LeadsTable({ locationPath, showParsed = false }: Props) {
                         )}
                       </TableCell>
                       <TableCell className="max-w-[180px] truncate">{lead.grantor}</TableCell>
-                      <TableCell className="max-w-[180px] truncate">{lead.grantee}</TableCell>
                       <TableCell>{lead.locationCode}</TableCell>
-                      {showParsed && <TableCell>{lead.deceasedName ?? '—'}</TableCell>}
                       <TableCell><LeadStatusBadge lead={lead} /></TableCell>
                       <TableCell>
-                        {lead.pdfUrl && (
-                          <a
-                            href={lead.pdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-primary underline-offset-2 hover:underline"
-                          >
-                            PDF
-                          </a>
+                        {lead.docS3Uri && (
+                          <FileText className="h-4 w-4 text-muted-foreground" />
                         )}
                       </TableCell>
                     </TableRow>

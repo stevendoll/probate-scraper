@@ -119,6 +119,10 @@ export function getDocument(documentId: string): Promise<DocumentDetailResponse>
   return apiFetch(`/documents/${documentId}`)
 }
 
+export function parseDocument(documentId: string): Promise<DocumentDetailResponse> {
+  return apiFetch(`/documents/${documentId}/parse-document`, { method: 'POST' })
+}
+
 /** Update mutable fields on a contact (role, name, email, dob, dod, address, notes). */
 export async function updateContact(
   documentId: string,
