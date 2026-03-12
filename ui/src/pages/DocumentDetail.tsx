@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDocument, updateContact, deleteContact, updateProperty, deleteProperty } from '@/lib/api'
+import { getDocument, parseDocument, updateContact, deleteContact, updateProperty, deleteProperty } from '@/lib/api'
 import type { Contact, Property } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -448,11 +448,17 @@ function PropertiesSection({
 export default function DocumentDetail() {
   const { documentId } = useParams<{ documentId: string }>()
   const navigate = useNavigate()
+  const qc = useQueryClient()
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['documents', documentId],
     queryFn: () => getDocument(documentId!),
     enabled: !!documentId,
+  })
+
+  const parseMut = useMutation({
+    mutationFn: () => parseDocument(documentId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['documents', documentId] }),
   })
 
   if (isLoading) {
@@ -477,10 +483,18 @@ export default function DocumentDetail() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>← Back</Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold">Document {doc.docNumber}</h1>
           <p className="text-sm text-muted-foreground">{doc.locationCode} · {doc.recordedDate}</p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => parseMut.mutate()}
+          disabled={parseMut.isPending}
+        >
+          {parseMut.isPending ? 'Parsing…' : 'Parse document'}
+        </Button>
       </div>
 
       {/* Document fields */}
