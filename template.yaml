@@ -565,7 +565,10 @@ Resources:
       Name: probate-leads-api
       StageName: prod
       Auth:
-        ApiKeyRequired: true
+        # Default is false so SAM's Cors mock OPTIONS methods (which inherit
+        # the API-level default) work without an API key.  Protected routes
+        # set ApiKeyRequired: true explicitly in their event definitions.
+        ApiKeyRequired: false
         UsagePlan:
           CreateUsagePlan: PER_API
           Throttle:
@@ -692,6 +695,8 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/{location_path}/documents
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         # Single document (with contacts + properties)
         GetDocument:
           Type: Api
@@ -699,6 +704,8 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         # Contacts for a document
         GetDocumentContacts:
           Type: Api
@@ -706,6 +713,8 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/contacts
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         # Update / delete a single contact
         UpdateContact:
           Type: Api
@@ -713,12 +722,16 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
             Method: PATCH
+            Auth:
+              ApiKeyRequired: true
         DeleteContact:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
             Method: DELETE
+            Auth:
+              ApiKeyRequired: true
         # Properties for a document
         GetDocumentProperties:
           Type: Api
@@ -726,6 +739,8 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/properties
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         # Update / delete a single property
         UpdateProperty:
           Type: Api
@@ -733,12 +748,16 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
             Method: PATCH
+            Auth:
+              ApiKeyRequired: true
         DeleteProperty:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
             Method: DELETE
+            Auth:
+              ApiKeyRequired: true
         # Locations
         ListLocations:
           Type: Api
@@ -746,12 +765,16 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/locations
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         GetLocation:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/locations/{location_code}
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         # Users
         ListUsers:
           Type: Api
@@ -759,30 +782,40 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/users
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         CreateUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/users
             Method: POST
+            Auth:
+              ApiKeyRequired: true
         GetUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/users/{user_id}
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         UpdateUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/users/{user_id}
             Method: PATCH
+            Auth:
+              ApiKeyRequired: true
         DeleteUser:
           Type: Api
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/users/{user_id}
             Method: DELETE
+            Auth:
+              ApiKeyRequired: true
         # Stripe webhook — no API key required (verified by signature)
         StripeWebhook:
           Type: Api
