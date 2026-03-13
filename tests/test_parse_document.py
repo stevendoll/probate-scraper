@@ -284,6 +284,55 @@ class TestParseDocument(unittest.TestCase):
         self.mock_properties_table.put_item.assert_called()
         self.assertEqual(self.mock_properties_table.put_item.call_count, 2)
 
+    def test_contact_parsed_snapshot_fields_written(self):
+        """parsed_* fields must mirror the editable fields on first write."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        calls = self.mock_contacts_table.put_item.call_args_list
+        # First call is the deceased contact
+        deceased_item = calls[0].kwargs["Item"]
+        self.assertEqual(deceased_item["role"],           "deceased")
+        self.assertEqual(deceased_item["parsed_role"],    "deceased")
+        self.assertEqual(deceased_item["name"],           "Jane A. Smith")
+        self.assertEqual(deceased_item["parsed_name"],    "Jane A. Smith")
+        self.assertEqual(deceased_item["dob"],            "1942-03-15")
+        self.assertEqual(deceased_item["parsed_dob"],     "1942-03-15")
+        self.assertEqual(deceased_item["dod"],            "2025-11-01")
+        self.assertEqual(deceased_item["parsed_dod"],     "2025-11-01")
+        self.assertEqual(deceased_item["address"],        "123 Main St, Plano, TX 75001")
+        self.assertEqual(deceased_item["parsed_address"], "123 Main St, Plano, TX 75001")
+        self.assertEqual(deceased_item["edited_at"],      "")
+
+        # Second call is the executor (first people entry)
+        executor_item = calls[1].kwargs["Item"]
+        self.assertEqual(executor_item["role"],        "executor")
+        self.assertEqual(executor_item["parsed_role"], "executor")
+        self.assertEqual(executor_item["name"],        "Robert Smith")
+        self.assertEqual(executor_item["parsed_name"], "Robert Smith")
+        self.assertEqual(executor_item["edited_at"],   "")
+
+    def test_property_parsed_snapshot_fields_written(self):
+        """parsed_address must mirror address on first write."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        calls = self.mock_properties_table.put_item.call_args_list
+        first_prop = calls[0].kwargs["Item"]
+        self.assertEqual(first_prop["address"],         "123 Main St, Plano, TX 75001")
+        self.assertEqual(first_prop["parsed_address"],  "123 Main St, Plano, TX 75001")
+        self.assertEqual(first_prop["edited_at"],       "")
+
     def test_happy_path_stamps_documents_table(self):
         self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {

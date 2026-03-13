@@ -197,6 +197,30 @@ class TestHandlerLocationNotFound(unittest.TestCase):
         self.assertIn("not found", _body(resp)["error"].lower())
 
 
+class TestHandlerFromDateOnly(unittest.TestCase):
+    """GSI query with only from_date (no upper bound)."""
+
+    def setUp(self):
+        self.mock_table     = MagicMock()
+        self.mock_loc_table = MagicMock()
+        db.documents_table = self.mock_table
+        db.locations_table = self.mock_loc_table
+        self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
+        self.mock_table.query.return_value     = {"Items": MOCK_LEADS[:2]}
+
+    def test_returns_200(self):
+        resp = _call({"from_date": "2026-01-01"})
+        self.assertEqual(resp["statusCode"], 200)
+
+    def test_to_date_is_none_in_response(self):
+        resp = _call({"from_date": "2026-01-01"})
+        self.assertIsNone(_body(resp)["query"]["toDate"])
+
+    def test_uses_gte_condition(self):
+        _call({"from_date": "2026-01-01"})
+        self.mock_table.query.assert_called_once()
+
+
 class TestHandlerToDateOnly(unittest.TestCase):
     """GSI query with only to_date (no lower bound)."""
 
@@ -385,6 +409,11 @@ class TestHandlerErrors(unittest.TestCase):
         db.documents_table = self.mock_table
         db.locations_table = self.mock_loc_table
         self.mock_loc_table.query.return_value = {"Items": [COLLIN_TX]}
+
+    def test_locations_gsi_exception_returns_404(self):
+        self.mock_loc_table.query.side_effect = Exception("GSI unavailable")
+        resp = _call({"from_date": "2026-01-01", "to_date": "2026-02-20"})
+        self.assertEqual(resp["statusCode"], 404)
 
     def test_dynamo_query_exception_returns_500(self):
         self.mock_table.query.side_effect = Exception("DynamoDB unavailable")

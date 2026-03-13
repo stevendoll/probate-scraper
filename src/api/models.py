@@ -104,50 +104,78 @@ class Document:
 
 @dataclass
 class Contact:
-    contact_id:   str = ""
-    document_id:  str = ""
-    role:         str = ""   # deceased / executor / beneficiary / heir / attorney / other
-    name:         str = ""
-    email:        str = ""
-    dob:          str = ""
-    dod:          str = ""
-    address:      str = ""
-    notes:        str = ""
-    parsed_at:    str = ""
-    parsed_model: str = ""
-    raw_response: str = ""   # raw JSON string returned by Bedrock
+    contact_id:    str = ""
+    document_id:   str = ""
+    # ── Editable (ground-truth / golden) fields ────────────────────────────
+    role:          str = ""   # deceased / executor / beneficiary / heir / attorney / other
+    name:          str = ""
+    email:         str = ""
+    dob:           str = ""
+    dod:           str = ""
+    address:       str = ""
+    notes:         str = ""
+    edited_at:     str = ""   # ISO timestamp of last human edit; "" = never edited
+    # ── Parse metadata ─────────────────────────────────────────────────────
+    parsed_at:     str = ""
+    parsed_model:  str = ""
+    raw_response:  str = ""   # full Bedrock JSON response (updated on every re-parse)
+    # ── Bedrock snapshot (set on first parse; preserved across re-parses) ──
+    # Diff parsed_* vs editable fields to build the golden training dataset.
+    parsed_role:    str = ""
+    parsed_name:    str = ""
+    parsed_email:   str = ""
+    parsed_dob:     str = ""
+    parsed_dod:     str = ""
+    parsed_address: str = ""
+    parsed_notes:   str = ""
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "Contact":
         return cls(
-            contact_id=   item.get("contact_id", ""),
-            document_id=  item.get("document_id", ""),
-            role=         item.get("role", ""),
-            name=         item.get("name", ""),
-            email=        item.get("email", ""),
-            dob=          item.get("dob", ""),
-            dod=          item.get("dod", ""),
-            address=      item.get("address", ""),
-            notes=        item.get("notes", ""),
-            parsed_at=    item.get("parsed_at", ""),
-            parsed_model= item.get("parsed_model", ""),
-            raw_response= item.get("raw_response", ""),
+            contact_id=     item.get("contact_id", ""),
+            document_id=    item.get("document_id", ""),
+            role=           item.get("role", ""),
+            name=           item.get("name", ""),
+            email=          item.get("email", ""),
+            dob=            item.get("dob", ""),
+            dod=            item.get("dod", ""),
+            address=        item.get("address", ""),
+            notes=          item.get("notes", ""),
+            edited_at=      item.get("edited_at", ""),
+            parsed_at=      item.get("parsed_at", ""),
+            parsed_model=   item.get("parsed_model", ""),
+            raw_response=   item.get("raw_response", ""),
+            parsed_role=    item.get("parsed_role", ""),
+            parsed_name=    item.get("parsed_name", ""),
+            parsed_email=   item.get("parsed_email", ""),
+            parsed_dob=     item.get("parsed_dob", ""),
+            parsed_dod=     item.get("parsed_dod", ""),
+            parsed_address= item.get("parsed_address", ""),
+            parsed_notes=   item.get("parsed_notes", ""),
         )
 
     def to_dict(self) -> dict:
         return {
-            "contactId":   self.contact_id,
-            "documentId":  self.document_id,
-            "role":        self.role,
-            "name":        self.name,
-            "email":       self.email,
-            "dob":         self.dob,
-            "dod":         self.dod,
-            "address":     self.address,
-            "notes":       self.notes,
-            "parsedAt":    self.parsed_at,
-            "parsedModel": self.parsed_model,
-            "rawResponse": self.raw_response,
+            "contactId":     self.contact_id,
+            "documentId":    self.document_id,
+            "role":          self.role,
+            "name":          self.name,
+            "email":         self.email,
+            "dob":           self.dob,
+            "dod":           self.dod,
+            "address":       self.address,
+            "notes":         self.notes,
+            "editedAt":      self.edited_at,
+            "parsedAt":      self.parsed_at,
+            "parsedModel":   self.parsed_model,
+            "rawResponse":   self.raw_response,
+            "parsedRole":    self.parsed_role,
+            "parsedName":    self.parsed_name,
+            "parsedEmail":   self.parsed_email,
+            "parsedDob":     self.parsed_dob,
+            "parsedDod":     self.parsed_dod,
+            "parsedAddress": self.parsed_address,
+            "parsedNotes":   self.parsed_notes,
         }
 
 
@@ -157,50 +185,77 @@ class Contact:
 
 @dataclass
 class Property:
-    property_id:       str = ""
-    document_id:       str = ""
-    address:           str = ""
-    legal_description: str = ""
-    parcel_id:         str = ""
-    city:              str = ""
-    state:             str = ""
-    zip:               str = ""
-    notes:             str = ""
-    parsed_at:         str = ""
-    parsed_model:      str = ""
-    raw_response:      str = ""   # raw JSON string returned by Bedrock
+    property_id:               str = ""
+    document_id:               str = ""
+    # ── Editable (ground-truth / golden) fields ────────────────────────────
+    address:                   str = ""
+    legal_description:         str = ""
+    parcel_id:                 str = ""
+    city:                      str = ""
+    state:                     str = ""
+    zip:                       str = ""
+    notes:                     str = ""
+    edited_at:                 str = ""   # ISO timestamp of last human edit; "" = never edited
+    # ── Parse metadata ─────────────────────────────────────────────────────
+    parsed_at:                 str = ""
+    parsed_model:              str = ""
+    raw_response:              str = ""   # full Bedrock JSON response (updated on every re-parse)
+    # ── Bedrock snapshot (set on first parse; preserved across re-parses) ──
+    parsed_address:            str = ""
+    parsed_legal_description:  str = ""
+    parsed_parcel_id:          str = ""
+    parsed_city:               str = ""
+    parsed_state:              str = ""
+    parsed_zip:                str = ""
+    parsed_notes:              str = ""
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "Property":
         return cls(
-            property_id=       item.get("property_id", ""),
-            document_id=       item.get("document_id", ""),
-            address=           item.get("address", ""),
-            legal_description= item.get("legal_description", ""),
-            parcel_id=         item.get("parcel_id", ""),
-            city=              item.get("city", ""),
-            state=             item.get("state", ""),
-            zip=               item.get("zip", ""),
-            notes=             item.get("notes", ""),
-            parsed_at=         item.get("parsed_at", ""),
-            parsed_model=      item.get("parsed_model", ""),
-            raw_response=      item.get("raw_response", ""),
+            property_id=              item.get("property_id", ""),
+            document_id=              item.get("document_id", ""),
+            address=                  item.get("address", ""),
+            legal_description=        item.get("legal_description", ""),
+            parcel_id=                item.get("parcel_id", ""),
+            city=                     item.get("city", ""),
+            state=                    item.get("state", ""),
+            zip=                      item.get("zip", ""),
+            notes=                    item.get("notes", ""),
+            edited_at=                item.get("edited_at", ""),
+            parsed_at=                item.get("parsed_at", ""),
+            parsed_model=             item.get("parsed_model", ""),
+            raw_response=             item.get("raw_response", ""),
+            parsed_address=           item.get("parsed_address", ""),
+            parsed_legal_description= item.get("parsed_legal_description", ""),
+            parsed_parcel_id=         item.get("parsed_parcel_id", ""),
+            parsed_city=              item.get("parsed_city", ""),
+            parsed_state=             item.get("parsed_state", ""),
+            parsed_zip=               item.get("parsed_zip", ""),
+            parsed_notes=             item.get("parsed_notes", ""),
         )
 
     def to_dict(self) -> dict:
         return {
-            "propertyId":       self.property_id,
-            "documentId":       self.document_id,
-            "address":          self.address,
-            "legalDescription": self.legal_description,
-            "parcelId":         self.parcel_id,
-            "city":             self.city,
-            "state":            self.state,
-            "zip":              self.zip,
-            "notes":            self.notes,
-            "parsedAt":         self.parsed_at,
-            "parsedModel":      self.parsed_model,
-            "rawResponse":      self.raw_response,
+            "propertyId":              self.property_id,
+            "documentId":              self.document_id,
+            "address":                 self.address,
+            "legalDescription":        self.legal_description,
+            "parcelId":                self.parcel_id,
+            "city":                    self.city,
+            "state":                   self.state,
+            "zip":                     self.zip,
+            "notes":                   self.notes,
+            "editedAt":                self.edited_at,
+            "parsedAt":                self.parsed_at,
+            "parsedModel":             self.parsed_model,
+            "rawResponse":             self.raw_response,
+            "parsedAddress":           self.parsed_address,
+            "parsedLegalDescription":  self.parsed_legal_description,
+            "parsedParcelId":          self.parsed_parcel_id,
+            "parsedCity":              self.parsed_city,
+            "parsedState":             self.parsed_state,
+            "parsedZip":               self.parsed_zip,
+            "parsedNotes":             self.parsed_notes,
         }
 
 
