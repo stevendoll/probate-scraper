@@ -80,6 +80,7 @@ export interface Property {
   state?: string
   zip?: string
   notes?: string
+  isVerified?: boolean
   parsedAt?: string
   parsedModel?: string
   rawResponse?: string

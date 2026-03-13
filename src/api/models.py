@@ -196,6 +196,7 @@ class Property:
     zip:                       str = ""
     notes:                     str = ""
     edited_at:                 str = ""   # ISO timestamp of last human edit; "" = never edited
+    is_verified:               bool = False  # True when address components validated by usaddress
     # ── Parse metadata ─────────────────────────────────────────────────────
     parsed_at:                 str = ""
     parsed_model:              str = ""
@@ -222,6 +223,7 @@ class Property:
             zip=                      item.get("zip", ""),
             notes=                    item.get("notes", ""),
             edited_at=                item.get("edited_at", ""),
+            is_verified=              bool(item.get("is_verified", False)),
             parsed_at=                item.get("parsed_at", ""),
             parsed_model=             item.get("parsed_model", ""),
             raw_response=             item.get("raw_response", ""),
@@ -246,6 +248,7 @@ class Property:
             "zip":                     self.zip,
             "notes":                   self.notes,
             "editedAt":                self.edited_at,
+            "isVerified":              self.is_verified,
             "parsedAt":                self.parsed_at,
             "parsedModel":             self.parsed_model,
             "rawResponse":             self.raw_response,

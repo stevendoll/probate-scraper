@@ -27,7 +27,13 @@ Return ONLY this JSON shape (use null for any field you cannot find):
     }
   ],
   "real_property": [
-    "<address or legal description of each piece of real property in the estate>"
+    {
+      "address":           "<street address only — number and street name, no city/state/zip>",
+      "city":              "<city name, or null>",
+      "state":             "<two-letter state abbreviation e.g. TX, or null>",
+      "zip":               "<5-digit ZIP code, or null>",
+      "legal_description": "<lot/block/subdivision legal description if present, else null>"
+    }
   ],
   "summary": "<150-word or fewer plain-English summary of the filing>"
 }
@@ -42,6 +48,10 @@ Rules:
 - Prioritise extracting ALL beneficiaries and heirs named anywhere in the
   document, including those listed in an attached will or exhibit.
 - Use the most specific role you can determine from the text.
+- For real_property: extract street address, city, state, and ZIP as separate
+  fields when possible. If the document only contains a legal description
+  (lot/block/subdivision) with no street address, set address to null and put
+  the legal description in legal_description.
 - If no real property is mentioned, return an empty array for real_property.
 - The summary must be 150 words or fewer and suitable for a non-lawyer audience.
 - Do not invent information that is not in the document.

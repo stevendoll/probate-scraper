@@ -122,23 +122,24 @@ MOCK_CONTACT = {
 MOCK_PROPERTY = {
     "property_id":              PROPERTY_ID,
     "document_id":              DOC_ID,
-    "address":                  "123 Main St, Plano, TX 75001",
+    "address":                  "123 Main St",
     "legal_description":        "",
     "parcel_id":                "",
-    "city":                     "",
-    "state":                    "",
-    "zip":                      "",
+    "city":                     "Plano",
+    "state":                    "TX",
+    "zip":                      "75001",
     "notes":                    "",
     "edited_at":                "",
+    "is_verified":              True,
     "parsed_at":                "2026-03-13T00:00:00+00:00",
     "parsed_model":             "us.amazon.nova-pro-v1:0",
     "raw_response":             "{}",
-    "parsed_address":           "123 Main St, Plano, TX 75001",
+    "parsed_address":           "123 Main St",
     "parsed_legal_description": "",
     "parsed_parcel_id":         "",
-    "parsed_city":              "",
-    "parsed_state":             "",
-    "parsed_zip":               "",
+    "parsed_city":              "Plano",
+    "parsed_state":             "TX",
+    "parsed_zip":               "75001",
     "parsed_notes":             "",
 }
 
@@ -256,7 +257,8 @@ class TestGetDocument(unittest.TestCase):
     def test_property_includes_parsed_fields(self):
         body = _body(_get_document())
         p = body["properties"][0]
-        self.assertEqual(p["parsedAddress"], "123 Main St, Plano, TX 75001")
+        self.assertEqual(p["parsedAddress"], "123 Main St")
+        self.assertTrue(p["isVerified"])
 
     def test_returns_404_when_not_found(self):
         self.mock_docs.get_item.return_value = {}
@@ -365,9 +367,16 @@ class TestGetDocumentProperties(unittest.TestCase):
 
     def test_returns_parsed_fields(self):
         p = _body(_get_properties())["properties"][0]
-        self.assertEqual(p["parsedAddress"],           "123 Main St, Plano, TX 75001")
+        self.assertEqual(p["parsedAddress"],           "123 Main St")
+        self.assertEqual(p["parsedCity"],              "Plano")
+        self.assertEqual(p["parsedState"],             "TX")
+        self.assertEqual(p["parsedZip"],               "75001")
         self.assertEqual(p["parsedLegalDescription"],  "")
         self.assertEqual(p["parsedParcelId"],          "")
+
+    def test_returns_is_verified(self):
+        p = _body(_get_properties())["properties"][0]
+        self.assertTrue(p["isVerified"])
 
     def test_returns_count(self):
         body = _body(_get_properties())
@@ -556,6 +565,19 @@ class TestUpdateProperty(unittest.TestCase):
         call_kwargs = self.mock_properties.update_item.call_args.kwargs
         self.assertIn("#edited_at", call_kwargs["ExpressionAttributeNames"])
         self.assertTrue(call_kwargs["ExpressionAttributeValues"][":edited_at"])
+
+    def test_address_change_clears_is_verified(self):
+        """Patching address must set is_verified=False (address not re-verified)."""
+        _patch_property(body={"address": "456 Oak Ave"})
+        call_kwargs = self.mock_properties.update_item.call_args.kwargs
+        self.assertIn("#is_verified", call_kwargs["ExpressionAttributeNames"])
+        self.assertFalse(call_kwargs["ExpressionAttributeValues"][":is_verified"])
+
+    def test_non_address_change_does_not_clear_is_verified(self):
+        """Patching city/zip without touching address must NOT clear is_verified."""
+        _patch_property(body={"city": "Allen"})
+        call_kwargs = self.mock_properties.update_item.call_args.kwargs
+        self.assertNotIn("#is_verified", call_kwargs["ExpressionAttributeNames"])
 
     def test_parsed_fields_are_rejected(self):
         _patch_property(body={"address": "456 Oak Ave", "parsed_address": "OTHER"})
