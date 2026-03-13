@@ -12,6 +12,7 @@ Routes:
 
 import json
 import uuid
+from datetime import datetime, timezone
 
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler.api_gateway import Router
@@ -256,9 +257,10 @@ def update_contact(document_id: str, contact_id: str):
     if existing.get("document_id") != document_id:
         return {"error": "Contact does not belong to the specified document"}, 403
 
-    set_expr   = ", ".join(f"#{k} = :{k}" for k in updates)
-    expr_names = {f"#{k}": k for k in updates}
-    expr_vals  = {f":{k}": v for k, v in updates.items()}
+    all_updates = {**updates, "edited_at": datetime.now(timezone.utc).isoformat()}
+    set_expr   = ", ".join(f"#{k} = :{k}" for k in all_updates)
+    expr_names = {f"#{k}": k for k in all_updates}
+    expr_vals  = {f":{k}": v for k, v in all_updates.items()}
 
     try:
         result = db.contacts_table.update_item(
@@ -331,9 +333,10 @@ def update_property(document_id: str, property_id: str):
     if existing.get("document_id") != document_id:
         return {"error": "Property does not belong to the specified document"}, 403
 
-    set_expr   = ", ".join(f"#{k} = :{k}" for k in updates)
-    expr_names = {f"#{k}": k for k in updates}
-    expr_vals  = {f":{k}": v for k, v in updates.items()}
+    all_updates = {**updates, "edited_at": datetime.now(timezone.utc).isoformat()}
+    set_expr   = ", ".join(f"#{k} = :{k}" for k in all_updates)
+    expr_names = {f"#{k}": k for k in all_updates}
+    expr_vals  = {f":{k}": v for k, v in all_updates.items()}
 
     try:
         result = db.properties_table.update_item(

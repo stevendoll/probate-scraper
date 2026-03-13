@@ -166,21 +166,35 @@ def _write_contacts(
     written = 0
 
     # Deceased contact
-    deceased_name = parsed.get("deceased_name") or ""
+    deceased_name    = parsed.get("deceased_name") or ""
+    deceased_dob     = parsed.get("deceased_dob") or ""
+    deceased_dod     = parsed.get("deceased_dod") or ""
+    deceased_address = parsed.get("deceased_last_address") or ""
     if deceased_name:
         _contacts_table.put_item(Item={
-            "contact_id":   str(uuid.uuid4()),
-            "document_id":  document_id,
-            "role":         "deceased",
-            "name":         deceased_name,
-            "email":        "",
-            "dob":          parsed.get("deceased_dob") or "",
-            "dod":          parsed.get("deceased_dod") or "",
-            "address":      parsed.get("deceased_last_address") or "",
-            "notes":        "",
-            "parsed_at":    parsed_at,
-            "parsed_model": model_id,
-            "raw_response": raw_response,
+            "contact_id":     str(uuid.uuid4()),
+            "document_id":    document_id,
+            # editable (ground-truth) fields — start as the parsed values
+            "role":           "deceased",
+            "name":           deceased_name,
+            "email":          "",
+            "dob":            deceased_dob,
+            "dod":            deceased_dod,
+            "address":        deceased_address,
+            "notes":          "",
+            "edited_at":      "",
+            # parse metadata
+            "parsed_at":      parsed_at,
+            "parsed_model":   model_id,
+            "raw_response":   raw_response,
+            # bedrock snapshot — preserved for golden-dataset comparison
+            "parsed_role":    "deceased",
+            "parsed_name":    deceased_name,
+            "parsed_email":   "",
+            "parsed_dob":     deceased_dob,
+            "parsed_dod":     deceased_dod,
+            "parsed_address": deceased_address,
+            "parsed_notes":   "",
         })
         written += 1
 
@@ -194,18 +208,29 @@ def _write_contacts(
         role  = (person.get("role") or "other").lower()
         email = person.get("email") or ""
         _contacts_table.put_item(Item={
-            "contact_id":   str(uuid.uuid4()),
-            "document_id":  document_id,
-            "role":         role,
-            "name":         name,
-            "email":        email,
-            "dob":          "",
-            "dod":          "",
-            "address":      "",
-            "notes":        "",
-            "parsed_at":    parsed_at,
-            "parsed_model": model_id,
-            "raw_response": raw_response,
+            "contact_id":     str(uuid.uuid4()),
+            "document_id":    document_id,
+            # editable (ground-truth) fields — start as the parsed values
+            "role":           role,
+            "name":           name,
+            "email":          email,
+            "dob":            "",
+            "dod":            "",
+            "address":        "",
+            "notes":          "",
+            "edited_at":      "",
+            # parse metadata
+            "parsed_at":      parsed_at,
+            "parsed_model":   model_id,
+            "raw_response":   raw_response,
+            # bedrock snapshot — preserved for golden-dataset comparison
+            "parsed_role":    role,
+            "parsed_name":    name,
+            "parsed_email":   email,
+            "parsed_dob":     "",
+            "parsed_dod":     "",
+            "parsed_address": "",
+            "parsed_notes":   "",
         })
         written += 1
 
@@ -223,18 +248,29 @@ def _write_properties(
     for prop in (parsed.get("real_property") or []):
         address = prop if isinstance(prop, str) else ""
         _properties_table.put_item(Item={
-            "property_id":       str(uuid.uuid4()),
-            "document_id":       document_id,
-            "address":           address,
-            "legal_description": "",
-            "parcel_id":         "",
-            "city":              "",
-            "state":             "",
-            "zip":               "",
-            "notes":             "",
-            "parsed_at":         parsed_at,
-            "parsed_model":      model_id,
-            "raw_response":      raw_response,
+            "property_id":              str(uuid.uuid4()),
+            "document_id":              document_id,
+            # editable (ground-truth) fields — start as the parsed values
+            "address":                  address,
+            "legal_description":        "",
+            "parcel_id":                "",
+            "city":                     "",
+            "state":                    "",
+            "zip":                      "",
+            "notes":                    "",
+            "edited_at":                "",
+            # parse metadata
+            "parsed_at":                parsed_at,
+            "parsed_model":             model_id,
+            "raw_response":             raw_response,
+            # bedrock snapshot — preserved for golden-dataset comparison
+            "parsed_address":           address,
+            "parsed_legal_description": "",
+            "parsed_parcel_id":         "",
+            "parsed_city":              "",
+            "parsed_state":             "",
+            "parsed_zip":               "",
+            "parsed_notes":             "",
         })
         written += 1
 
