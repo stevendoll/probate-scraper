@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { CheckCircle } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -347,7 +348,18 @@ function PropertyRow({
   return (
     <>
       <TableRow>
-        <TableCell className="font-medium">{property.address || '—'}</TableCell>
+        <TableCell className="font-medium">
+          <span className="flex items-center gap-1.5">
+            {property.address || '—'}
+            {property.isVerified && (
+              <CheckCircle
+                className="shrink-0 text-green-500"
+                size={14}
+                aria-label="Address verified"
+              />
+            )}
+          </span>
+        </TableCell>
         <TableCell>{property.city || '—'}</TableCell>
         <TableCell>{property.state || '—'}</TableCell>
         <TableCell>{property.zip || '—'}</TableCell>

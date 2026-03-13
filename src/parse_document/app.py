@@ -39,6 +39,16 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from prompt import SYSTEM_PROMPT, USER_PROMPT
 
+# usaddress is an optional dependency used to parse / validate street addresses.
+# If the package is not installed (e.g. during unit tests without the extra dep)
+# the fallback simply leaves city/state/zip empty and is_verified = False.
+try:
+    import usaddress as _usaddress
+    _USADDRESS_AVAILABLE = True
+except ImportError:                         # pragma: no cover
+    _usaddress = None                       # type: ignore[assignment]
+    _USADDRESS_AVAILABLE = False
+
 logger = Logger(service="parse-document")
 api    = APIGatewayRestResolver()
 
@@ -237,39 +247,97 @@ def _write_contacts(
     return written
 
 
+def _try_usaddress(raw: str) -> tuple[str, str, str, bool]:
+    """
+    Attempt to extract city, state, ZIP from a raw address string using usaddress.
+    Returns (city, state, zip, is_verified).
+    is_verified is True only when usaddress classifies the input as a Street Address
+    and at minimum an AddressNumber + PlaceName were found.
+    """
+    if not _USADDRESS_AVAILABLE or not raw:
+        return "", "", "", False
+    try:
+        tagged, addr_type = _usaddress.tag(raw)
+        if addr_type != "Street Address":
+            return "", "", "", False
+        city  = tagged.get("PlaceName", "") or ""
+        state = tagged.get("StateName", "") or ""
+        zip_  = tagged.get("ZipCode",   "") or ""
+        is_ok = bool(tagged.get("AddressNumber") and city)
+        return city, state, zip_, is_ok
+    except Exception:
+        return "", "", "", False
+
+
 def _write_properties(
     document_id: str, parsed: dict, model_id: str, parsed_at: str, raw_response: str
 ) -> int:
     """
     Write one Property record per real-property entry extracted from the document.
+
+    Accepts both the legacy flat-string format and the new structured-object format
+    returned by the updated Bedrock prompt:
+      { address, city, state, zip, legal_description }
+
+    When city/state/zip are absent from the Bedrock output, usaddress is used as a
+    fallback parser on the address string. is_verified is True when all three
+    components (address number + city + zip) could be resolved.
+
     Returns the number of properties written.
     """
     written = 0
     for prop in (parsed.get("real_property") or []):
-        address = prop if isinstance(prop, str) else ""
+        if isinstance(prop, str):
+            # Legacy / model-regression: flat string → treat as full address
+            address           = prop
+            bedrock_city      = ""
+            bedrock_state     = ""
+            bedrock_zip       = ""
+            legal_description = ""
+        elif isinstance(prop, dict):
+            address           = prop.get("address") or ""
+            bedrock_city      = prop.get("city") or ""
+            bedrock_state     = prop.get("state") or ""
+            bedrock_zip       = prop.get("zip") or ""
+            legal_description = prop.get("legal_description") or ""
+        else:
+            continue
+
+        # Resolve city/state/zip — prefer Bedrock output, fall back to usaddress
+        if bedrock_city and bedrock_state and bedrock_zip:
+            city, state, zip_ = bedrock_city, bedrock_state, bedrock_zip
+            is_verified = bool(address)        # Bedrock gave everything; verified if address present
+        else:
+            ua_city, ua_state, ua_zip, ua_ok = _try_usaddress(address)
+            city        = bedrock_city  or ua_city
+            state       = bedrock_state or ua_state
+            zip_        = bedrock_zip   or ua_zip
+            is_verified = ua_ok and bool(address)
+
         _properties_table.put_item(Item={
             "property_id":              str(uuid.uuid4()),
             "document_id":              document_id,
-            # editable (ground-truth) fields — start as the parsed values
+            # editable (ground-truth) fields — start as the resolved values
             "address":                  address,
-            "legal_description":        "",
+            "legal_description":        legal_description,
             "parcel_id":                "",
-            "city":                     "",
-            "state":                    "",
-            "zip":                      "",
+            "city":                     city,
+            "state":                    state,
+            "zip":                      zip_,
             "notes":                    "",
             "edited_at":                "",
+            "is_verified":              is_verified,
             # parse metadata
             "parsed_at":                parsed_at,
             "parsed_model":             model_id,
             "raw_response":             raw_response,
             # bedrock snapshot — preserved for golden-dataset comparison
             "parsed_address":           address,
-            "parsed_legal_description": "",
+            "parsed_legal_description": legal_description,
             "parsed_parcel_id":         "",
-            "parsed_city":              "",
-            "parsed_state":             "",
-            "parsed_zip":               "",
+            "parsed_city":              bedrock_city,
+            "parsed_state":             bedrock_state,
+            "parsed_zip":               bedrock_zip,
             "parsed_notes":             "",
         })
         written += 1

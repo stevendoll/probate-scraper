@@ -334,6 +334,9 @@ def update_property(document_id: str, property_id: str):
         return {"error": "Property does not belong to the specified document"}, 403
 
     all_updates = {**updates, "edited_at": datetime.now(timezone.utc).isoformat()}
+    # Changing the address invalidates the previous usaddress verification.
+    if "address" in updates:
+        all_updates["is_verified"] = False
     set_expr   = ", ".join(f"#{k} = :{k}" for k in all_updates)
     expr_names = {f"#{k}": k for k in all_updates}
     expr_vals  = {f":{k}": v for k, v in all_updates.items()}

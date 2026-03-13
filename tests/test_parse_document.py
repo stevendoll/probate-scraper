@@ -90,8 +90,20 @@ _GOOD_BEDROCK_PAYLOAD = {
         {"name": "Tom Brown, Esq", "role": "Attorney"},
     ],
     "real_property": [
-        "123 Main St, Plano, TX 75001",
-        "Lot 7, Block 3, Willow Creek Estates",
+        {
+            "address":           "123 Main St",
+            "city":              "Plano",
+            "state":             "TX",
+            "zip":               "75001",
+            "legal_description": None,
+        },
+        {
+            "address":           None,
+            "city":              None,
+            "state":             None,
+            "zip":               None,
+            "legal_description": "Lot 7, Block 3, Willow Creek Estates",
+        },
     ],
     "summary": (
         "This probate petition was filed on behalf of the estate of Jane A. Smith, "
@@ -317,8 +329,8 @@ class TestParseDocument(unittest.TestCase):
         self.assertEqual(executor_item["parsed_name"], "Robert Smith")
         self.assertEqual(executor_item["edited_at"],   "")
 
-    def test_property_parsed_snapshot_fields_written(self):
-        """parsed_address must mirror address on first write."""
+    def test_property_structured_fields_written(self):
+        """Structured real_property dicts are split into address + city/state/zip fields."""
         self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
@@ -328,10 +340,94 @@ class TestParseDocument(unittest.TestCase):
         parse_app.parse_document("20240001")
 
         calls = self.mock_properties_table.put_item.call_args_list
-        first_prop = calls[0].kwargs["Item"]
-        self.assertEqual(first_prop["address"],         "123 Main St, Plano, TX 75001")
-        self.assertEqual(first_prop["parsed_address"],  "123 Main St, Plano, TX 75001")
-        self.assertEqual(first_prop["edited_at"],       "")
+        # First property — has full address + city/state/zip from Bedrock
+        p1 = calls[0].kwargs["Item"]
+        self.assertEqual(p1["address"],           "123 Main St")
+        self.assertEqual(p1["city"],              "Plano")
+        self.assertEqual(p1["state"],             "TX")
+        self.assertEqual(p1["zip"],               "75001")
+        self.assertEqual(p1["parsed_address"],    "123 Main St")
+        self.assertEqual(p1["parsed_city"],       "Plano")
+        self.assertEqual(p1["parsed_state"],      "TX")
+        self.assertEqual(p1["parsed_zip"],        "75001")
+        self.assertTrue(p1["is_verified"])
+        self.assertEqual(p1["edited_at"],         "")
+
+        # Second property — legal description only; no address, city, state, zip
+        p2 = calls[1].kwargs["Item"]
+        self.assertEqual(p2["address"],           "")
+        self.assertEqual(p2["legal_description"], "Lot 7, Block 3, Willow Creek Estates")
+        self.assertEqual(p2["parsed_legal_description"], "Lot 7, Block 3, Willow Creek Estates")
+        self.assertFalse(p2["is_verified"])
+
+    def test_property_is_verified_false_for_legal_description_only(self):
+        """A property with no street address must have is_verified=False."""
+        payload = {**_GOOD_BEDROCK_PAYLOAD, "real_property": [
+            {"address": None, "city": None, "state": None, "zip": None,
+             "legal_description": "LOT 12 BLK 4 STAR CREEK ESTATES"}
+        ]}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(payload)
+
+        parse_app.parse_document("20240001")
+
+        item = self.mock_properties_table.put_item.call_args.kwargs["Item"]
+        self.assertFalse(item["is_verified"])
+
+    def test_property_legacy_string_format_handled(self):
+        """Legacy flat string in real_property is still accepted without error."""
+        payload = {**_GOOD_BEDROCK_PAYLOAD, "real_property": [
+            "123 Main St, Plano, TX 75001"
+        ]}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(payload)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["propertiesWritten"], 1)
+        item = self.mock_properties_table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["address"], "123 Main St, Plano, TX 75001")
+
+    def test_try_usaddress_returns_components_for_valid_address(self):
+        """_try_usaddress extracts city/state/zip from a well-formed US address."""
+        if not parse_app._USADDRESS_AVAILABLE:
+            self.skipTest("usaddress not installed")
+        city, state, zip_, ok = parse_app._try_usaddress(
+            "6502 Star Creek Dr, Frisco, TX 75034"
+        )
+        self.assertEqual(city,  "Frisco")
+        self.assertEqual(state, "TX")
+        self.assertEqual(zip_,  "75034")
+        self.assertTrue(ok)
+
+    def test_try_usaddress_returns_empty_for_legal_description(self):
+        """_try_usaddress returns falsy values for non-address strings."""
+        if not parse_app._USADDRESS_AVAILABLE:
+            self.skipTest("usaddress not installed")
+        city, state, zip_, ok = parse_app._try_usaddress(
+            "LOT 12 BLK 4 STAR CREEK ESTATES PHASE 2"
+        )
+        self.assertFalse(ok)
+
+    def test_try_usaddress_returns_empty_when_unavailable(self):
+        """When usaddress is not available the function returns empty strings."""
+        original = parse_app._USADDRESS_AVAILABLE
+        try:
+            parse_app._USADDRESS_AVAILABLE = False
+            city, state, zip_, ok = parse_app._try_usaddress("123 Main St, Plano, TX")
+            self.assertEqual(city,  "")
+            self.assertEqual(state, "")
+            self.assertEqual(zip_,  "")
+            self.assertFalse(ok)
+        finally:
+            parse_app._USADDRESS_AVAILABLE = original
 
     def test_happy_path_stamps_documents_table(self):
         self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
