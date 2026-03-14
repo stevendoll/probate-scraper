@@ -17,6 +17,7 @@ DynamoDB
   ├── documents      (document_id PK | location-date-index GSI)
   ├── contacts       (contact_id PK | document-contact-index GSI)
   ├── properties     (property_id PK | document-property-index GSI)
+  ├── links          (link_id PK | document-link-index GSI)
   ├── locations      (location_code PK | location-path-index GSI)
   ├── users          (user_id PK | email-index GSI)
   └── activities     (activity_id PK | user-activity-index GSI)
@@ -28,7 +29,9 @@ API Gateway (api.collincountyleads.com)
     │     GET  /{location_path}/documents
     │     GET  /documents/{document_id}
     │     GET  /documents/{document_id}/contacts
+    │     POST/DELETE  /documents/{document_id}/contacts/{contact_id}/links
     │     GET  /documents/{document_id}/properties
+    │     POST/DELETE  /documents/{document_id}/properties/{property_id}/links
     │     GET  /locations
     │     GET  /locations/{location_code}
     │     GET/POST/PATCH/DELETE  /users
@@ -44,7 +47,9 @@ API Gateway (api.collincountyleads.com)
     │     POST /{location_path}/update  → runs Fargate scrape task
     │
     └── Lambda ParseDocumentFunction
-          POST /documents/{document_id}/parse-document  → Bedrock AI parsing
+          POST /documents/{document_id}/parse-document  → Bedrock AI parsing,
+                                                           name capitalisation,
+                                                           contact deduplication
 
 CloudFront (collincountyleads.com)
     └── S3 — React SPA (Vite)
@@ -57,15 +62,18 @@ All API paths are prefixed with `/real-estate/probate-leads/`.
 | Table | Partition key | GSI | Purpose |
 |---|---|---|---|
 | `documents` | `document_id` | `location-date-index` | Scraped probate filings |
-| `contacts` | `contact_id` | `document-contact-index` | People parsed from documents (deceased, executors, heirs) |
+| `contacts` | `contact_id` | `document-contact-index` | People parsed from documents (deceased, executors, heirs, etc.) |
 | `properties` | `property_id` | `document-property-index` | Real estate assets parsed from documents |
+| `links` | `link_id` | `document-link-index` | Reference URLs attached to a contact or property (Zillow, obituary, etc.) |
 | `locations` | `location_code` | `location-path-index` | Supported counties |
 | `users` | `user_id` | `email-index` | Magic-link authenticated users |
 | `activities` | `activity_id` | `user-activity-index` | User funnel activity tracking |
 
 Documents carry a `location_code` FK. The `location-date-index` GSI (`location_code` HASH + `recorded_date` RANGE) is the primary query path.
 
-Contacts and properties are written by `ParseDocumentFunction` after Bedrock AI analysis of the archived PDF. Each links back to its parent document via `document_id`.
+Contacts and properties are written by `ParseDocumentFunction` after Bedrock AI analysis of the archived PDF. Each links back to its parent document via `document_id`. The parse Lambda also capitalises ALL-CAPS probate names to Title Case and deduplicates people who appear with multiple roles, keeping the highest-priority role and merging the rest into `notes`.
+
+Links (`links` table) are manually curated through the UI and attach to either a contact or a property via `parent_id` / `parent_type`. A single `document-link-index` GSI on `document_id` lets `GET /documents/{id}` fetch all links in one query and distribute them to the correct contact/property.
 
 ## Locations
 
@@ -88,7 +96,7 @@ The React SPA lives in `ui/` and is built with Vite + React + TailwindCSS + shad
 | `/auth/verify` | `AuthVerify` | Exchanges magic token for access token, redirects to dashboard |
 | `/signup` | `Signup` | Funnel signup page with pricing |
 | `/dashboard` | `Dashboard` | Leads table with date-range filters |
-| `/documents/:documentId` | `DocumentDetail` | Filing details, parsed people (contacts), and real estate (properties) |
+| `/documents/:documentId` | `DocumentDetail` | Filing details, parsed contacts and properties, editable links per row |
 | `/account` | `Account` | Edit email, view subscription status |
 | `/admin/users` | `admin/Users` | Admin: list and manage all users |
 | `/admin/users/:id` | `admin/UserDetail` | Admin: view and edit a single user |
@@ -273,14 +281,33 @@ Response:
     "recordedDate": "2026-01-15",
     "locationCode": "CollinTx",
     "pdfUrl": "https://...",
-    "docS3Uri": "s3://bucket/documents/CollinTx/2026000028265.pdf"
+    "docS3Uri": "s3://bucket/documents/CollinTx/2026000028265.pdf",
+    "parsedAt": "2026-03-13T12:00:00.000Z",
+    "summary": "Estate of Cesare Fred Ciatti …"
   },
   "contacts": [
-    { "contactId": "...", "documentId": "...", "role": "deceased", "name": "Cesare Fred Ciatti", "dod": "2025-12-01", ... },
-    { "contactId": "...", "documentId": "...", "role": "executor", "name": "Shannon Ciatti", ... }
+    {
+      "contactId": "...", "role": "deceased", "name": "Cesare Fred Ciatti", "dod": "2025-12-01",
+      "links": []
+    },
+    {
+      "contactId": "...", "role": "executor", "name": "Shannon Ciatti",
+      "links": [
+        { "linkId": "...", "parentId": "...", "parentType": "contact",
+          "label": "Legacy.com", "url": "https://www.legacy.com/search?name=Shannon+Ciatti",
+          "linkType": "legacy", "createdAt": "..." }
+      ]
+    }
   ],
   "properties": [
-    { "propertyId": "...", "documentId": "...", "address": "301 Oregonfly Drive", "city": "Prosper", "state": "TX", ... }
+    {
+      "propertyId": "...", "address": "301 Oregonfly Drive", "city": "Prosper", "state": "TX",
+      "isVerified": true,
+      "links": [
+        { "linkId": "...", "parentType": "property", "label": "Zillow",
+          "url": "https://www.zillow.com/homes/...", "linkType": "zillow", "createdAt": "..." }
+      ]
+    }
   ]
 }
 ```
@@ -289,17 +316,48 @@ Returns `404` if the document is not found.
 
 #### `GET /documents/{document_id}/contacts`
 
-Returns the contacts array only (same items as in the full document response above).
+Returns the contacts array only (no `links` field — use the full document endpoint for links).
 
 #### `GET /documents/{document_id}/properties`
 
-Returns the properties array only.
+Returns the properties array only (no `links` field).
 
 #### `POST /documents/{document_id}/parse-document`
 
 Trigger Bedrock AI parsing of the archived PDF. Requires `doc_s3_uri` to be set on the document (run the scraper with `DOCUMENTS_BUCKET` set, or use the backfill script).
 
+- Clears any existing contacts and properties for the document before writing new results.
+- Names are capitalised to Title Case (handles hyphenated names and apostrophes).
+- Duplicate people are collapsed: the highest-priority role is kept (`executor > attorney > trustee > guardian > beneficiary > heir > spouse > other`), secondary roles are appended to `notes`.
+
 Returns `{ contactsWritten, propertiesWritten }` on success.
+
+#### `POST /documents/{document_id}/contacts/{contact_id}/links`
+
+Add a link to a contact (Zillow, obituary, etc.).
+
+Request body:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | ✓ | Full URL |
+| `label` | string | — | Display label (e.g. `"Legacy.com"`) |
+| `link_type` | string | — | One of `zillow` \| `realtor` \| `redfin` \| `google_maps` \| `county_record` \| `obituary` \| `legacy` \| `findagrave` \| `other` (default `other`) |
+| `notes` | string | — | Free-text notes |
+
+Returns `201` with `{ link: { linkId, parentId, parentType, documentId, label, url, linkType, notes, createdAt } }`.
+
+#### `DELETE /documents/{document_id}/contacts/{contact_id}/links/{link_id}`
+
+Remove a link from a contact. Returns `{ deleted: link_id }`.
+
+#### `POST /documents/{document_id}/properties/{property_id}/links`
+
+Same schema as the contact link endpoint. Returns `201` with the created link.
+
+#### `DELETE /documents/{document_id}/properties/{property_id}/links/{link_id}`
+
+Remove a link from a property. Returns `{ deleted: link_id }`.
 
 ### Locations
 
@@ -462,16 +520,16 @@ ui/
       login-form.tsx         # Email form
       user-nav.tsx           # Avatar dropdown
     lib/
-      api.ts                 # Typed API client
+      api.ts                 # Typed API client (incl. createLink / deleteLink)
       auth.ts                # Token storage helpers
-      types.ts               # Shared TypeScript types (Document, Contact, Property, …)
+      types.ts               # Shared TypeScript types (Document, Contact, Property, Link, …)
       utils.ts               # cn() and other utilities
 src/
   api/
     app.py                   # Lambda handler — all API routes
     routers/                 # documents, locations, users, auth, admin, stripe, funnel, activity
     auth_helpers.py          # JWT helpers + email sending + activity tracking
-    models.py                # Document, Contact, Property, Location, User dataclasses
+    models.py                # Document, Contact, Property, Link, Location, User dataclasses
     stripe_helpers.py        # Stripe webhook signature verification
     requirements.txt
   scraper/
@@ -485,7 +543,8 @@ src/
     app.py                   # Lambda — starts Fargate scrape task
     requirements.txt
   parse_document/
-    app.py                   # Lambda — Bedrock AI parsing → writes contacts + properties
+    app.py                   # Lambda — Bedrock AI parsing → clears old records, writes contacts
+    #                          + properties; capitalises names; deduplicates people by role priority
     prompt.py                # System/user prompts for the Bedrock model
 scripts/
   seed_local.py              # Create tables + seed locations locally
@@ -496,6 +555,8 @@ scripts/
 tests/
   test_api.py
   test_auth.py
+  test_documents.py          # contact/property CRUD + link CRUD routes
+  test_parse_document.py     # parse Lambda, _capitalize_name, _deduplicate_people
   test_funnel.py
   test_locations.py
   test_users.py
