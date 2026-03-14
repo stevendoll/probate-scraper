@@ -384,19 +384,29 @@ def _clear_existing(document_id: str) -> tuple[int, int]:
 
 
 def _update_document_status(
-    document_id: str, model_id: str, parsed_at: str, error: str = ""
+    document_id: str,
+    model_id: str,
+    parsed_at: str,
+    error: str = "",
+    summary: str = "",
+    raw_response: str = "",
 ) -> None:
     """
-    Stamp parsed_at, parsed_model, and parse_error on the documents table.
-    Uses UpdateItem so only the status columns are touched.
+    Stamp parsed_at, parsed_model, parse_error, summary, and raw_response on
+    the documents table.  Uses UpdateItem so only the status columns are touched.
     """
     _documents_table.update_item(
         Key={"document_id": document_id},
-        UpdateExpression="SET parsed_at = :pa, parsed_model = :pm, parse_error = :pe",
+        UpdateExpression=(
+            "SET parsed_at = :pa, parsed_model = :pm, parse_error = :pe,"
+            " summary = :su, raw_response = :rr"
+        ),
         ExpressionAttributeValues={
             ":pa": parsed_at,
             ":pm": model_id,
             ":pe": error,
+            ":su": summary,
+            ":rr": raw_response,
         },
     )
 
@@ -461,8 +471,12 @@ def parse_document(document_id: str):
         return {"error": f"DynamoDB write failed: {exc}"}, 500
 
     # 5. Stamp status on the documents table
+    summary = parsed.get("summary") or ""
     try:
-        _update_document_status(document_id, _model_id, now)
+        _update_document_status(
+            document_id, _model_id, now,
+            summary=summary, raw_response=raw_response,
+        )
     except Exception as exc:
         logger.error("DynamoDB update failed: %s", exc)
         return {"error": f"DynamoDB update failed: {exc}"}, 500
