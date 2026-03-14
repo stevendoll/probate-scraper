@@ -36,6 +36,10 @@ export interface Lead {
   docLocalPath?: string
   pdfUrl?: string
   parsedAt?: string
+  parsedModel?: string
+  parseError?: string
+  summary?: string
+  rawResponse?: string
   deceasedName?: string
 }
 

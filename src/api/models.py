@@ -51,6 +51,12 @@ class Document:
     pdf_url:           str = ""
     doc_s3_uri:        str = ""
     doc_local_path:    str = ""
+    # Parse fields — populated by the parse-document Lambda
+    parsed_at:         str = ""
+    parsed_model:      str = ""
+    parse_error:       str = ""
+    summary:           str = ""
+    raw_response:      str = ""
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "Document":
@@ -73,6 +79,11 @@ class Document:
             pdf_url=           item.get("pdf_url", ""),
             doc_s3_uri=        item.get("doc_s3_uri", ""),
             doc_local_path=    item.get("doc_local_path", ""),
+            parsed_at=         item.get("parsed_at", ""),
+            parsed_model=      item.get("parsed_model", ""),
+            parse_error=       item.get("parse_error", ""),
+            summary=           item.get("summary", ""),
+            raw_response=      item.get("raw_response", ""),
         )
 
     def to_dict(self) -> dict:
@@ -95,6 +106,11 @@ class Document:
             "pdfUrl":           self.pdf_url,
             "docS3Uri":         self.doc_s3_uri,
             "docLocalPath":     self.doc_local_path,
+            "parsedAt":         self.parsed_at,
+            "parsedModel":      self.parsed_model,
+            "parseError":       self.parse_error,
+            "summary":          self.summary,
+            "rawResponse":      self.raw_response,
         }
 
 

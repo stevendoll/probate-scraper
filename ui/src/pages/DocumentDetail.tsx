@@ -538,8 +538,45 @@ export default function DocumentDetail() {
           )}
           <Field label="Extracted at"  value={doc.extractedAt} />
           <Field label="Processed at"  value={doc.processedAt} />
+          <Field label="Parsed at"     value={doc.parsedAt} />
         </CardContent>
       </Card>
+
+      {/* Parse result */}
+      {(doc.parsedAt || doc.parseError) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Parse result</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {doc.parseError ? (
+              <p className="text-sm text-destructive font-mono">{doc.parseError}</p>
+            ) : (
+              <>
+                {doc.summary && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Summary</p>
+                    <p className="text-sm">{doc.summary}</p>
+                  </div>
+                )}
+                {doc.rawResponse && (
+                  <details className="group">
+                    <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide select-none hover:text-foreground">
+                      Raw Bedrock response
+                    </summary>
+                    <pre className="mt-2 text-xs bg-muted rounded p-3 overflow-auto max-h-96 whitespace-pre-wrap break-words">
+                      {(() => {
+                        try { return JSON.stringify(JSON.parse(doc.rawResponse!), null, 2) }
+                        catch { return doc.rawResponse }
+                      })()}
+                    </pre>
+                  </details>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Contacts */}
       <ContactsSection documentId={documentId!} contacts={data.contacts} />
