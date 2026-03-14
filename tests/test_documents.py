@@ -6,8 +6,12 @@ Unit tests for src/api/routers/documents.py
   GET    /real-estate/probate-leads/documents/{document_id}/properties
   PATCH  /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
   DELETE /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+  POST   /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}/links
+  DELETE /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}/links/{link_id}
   PATCH  /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
   DELETE /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
+  POST   /real-estate/probate-leads/documents/{document_id}/properties/{property_id}/links
+  DELETE /real-estate/probate-leads/documents/{document_id}/properties/{property_id}/links/{link_id}
 """
 
 import copy
@@ -29,6 +33,7 @@ os.environ.setdefault("LOCATIONS_TABLE_NAME",      "locations")
 os.environ.setdefault("USERS_TABLE_NAME",          "users")
 os.environ.setdefault("CONTACTS_TABLE_NAME",       "contacts")
 os.environ.setdefault("PROPERTIES_TABLE_NAME",     "properties")
+os.environ.setdefault("LINKS_TABLE_NAME",          "links")
 os.environ.setdefault("GSI_NAME",                  "recorded-date-index")
 os.environ.setdefault("LOCATION_DATE_GSI",         "location-date-index")
 os.environ.setdefault("STRIPE_SECRET_KEY",         "")
@@ -74,6 +79,7 @@ class MockContext:
 DOC_ID      = "550e8400-e29b-41d4-a716-446655440001"
 CONTACT_ID  = "contact-001"
 PROPERTY_ID = "property-001"
+LINK_ID     = "link-001"
 
 MOCK_DOCUMENT = {
     "document_id":       DOC_ID,
@@ -117,6 +123,30 @@ MOCK_CONTACT = {
     "parsed_dod":     "",
     "parsed_address": "",
     "parsed_notes":   "",
+}
+
+MOCK_CONTACT_LINK = {
+    "link_id":     LINK_ID,
+    "parent_id":   CONTACT_ID,
+    "parent_type": "contact",
+    "document_id": DOC_ID,
+    "label":       "Zillow",
+    "url":         "https://www.zillow.com/homes/123-main-st_rb/",
+    "link_type":   "zillow",
+    "notes":       "",
+    "created_at":  "2026-03-13T00:00:00+00:00",
+}
+
+MOCK_PROPERTY_LINK = {
+    "link_id":     "link-002",
+    "parent_id":   PROPERTY_ID,
+    "parent_type": "property",
+    "document_id": DOC_ID,
+    "label":       "Redfin",
+    "url":         "https://www.redfin.com/search?q=123+Main",
+    "link_type":   "redfin",
+    "notes":       "",
+    "created_at":  "2026-03-13T00:00:00+00:00",
 }
 
 MOCK_PROPERTY = {
@@ -209,6 +239,32 @@ def _delete_property(doc_id=DOC_ID, property_id=PROPERTY_ID):
                  {"document_id": doc_id, "property_id": property_id})
 
 
+def _post_contact_link(doc_id=DOC_ID, contact_id=CONTACT_ID, body=None):
+    return _call("POST",
+                 f"/real-estate/probate-leads/documents/{doc_id}/contacts/{contact_id}/links",
+                 {"document_id": doc_id, "contact_id": contact_id},
+                 body=body or {})
+
+
+def _delete_contact_link(doc_id=DOC_ID, contact_id=CONTACT_ID, link_id=LINK_ID):
+    return _call("DELETE",
+                 f"/real-estate/probate-leads/documents/{doc_id}/contacts/{contact_id}/links/{link_id}",
+                 {"document_id": doc_id, "contact_id": contact_id, "link_id": link_id})
+
+
+def _post_property_link(doc_id=DOC_ID, property_id=PROPERTY_ID, body=None):
+    return _call("POST",
+                 f"/real-estate/probate-leads/documents/{doc_id}/properties/{property_id}/links",
+                 {"document_id": doc_id, "property_id": property_id},
+                 body=body or {})
+
+
+def _delete_property_link(doc_id=DOC_ID, property_id=PROPERTY_ID, link_id=LINK_ID):
+    return _call("DELETE",
+                 f"/real-estate/probate-leads/documents/{doc_id}/properties/{property_id}/links/{link_id}",
+                 {"document_id": doc_id, "property_id": property_id, "link_id": link_id})
+
+
 # ---------------------------------------------------------------------------
 # GET /documents/{document_id}
 # ---------------------------------------------------------------------------
@@ -219,13 +275,16 @@ class TestGetDocument(unittest.TestCase):
         self.mock_docs       = MagicMock()
         self.mock_contacts   = MagicMock()
         self.mock_properties = MagicMock()
+        self.mock_links      = MagicMock()
         db.documents_table   = self.mock_docs
         db.contacts_table    = self.mock_contacts
         db.properties_table  = self.mock_properties
+        db.links_table       = self.mock_links
 
-        self.mock_docs.get_item.return_value = {"Item": MOCK_DOCUMENT}
+        self.mock_docs.get_item.return_value    = {"Item": MOCK_DOCUMENT}
         self.mock_contacts.query.return_value   = {"Items": [MOCK_CONTACT]}
         self.mock_properties.query.return_value = {"Items": [MOCK_PROPERTY]}
+        self.mock_links.query.return_value      = {"Items": []}
 
     def test_returns_200(self):
         resp = _get_document()
@@ -295,6 +354,30 @@ class TestGetDocument(unittest.TestCase):
         body = _body(_get_document())
         self.assertIn("requestId", body)
         self.assertTrue(body["requestId"])
+
+    def test_contacts_include_empty_links_list_when_no_links(self):
+        """Each contact always has a 'links' key, empty list when no links exist."""
+        body = _body(_get_document())
+        self.assertIn("links", body["contacts"][0])
+        self.assertEqual(body["contacts"][0]["links"], [])
+
+    def test_links_attached_to_correct_contact(self):
+        """A link whose parent_id matches a contact's contactId is attached to that contact."""
+        self.mock_links.query.return_value = {"Items": [MOCK_CONTACT_LINK]}
+        body = _body(_get_document())
+        links = body["contacts"][0]["links"]
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["linkId"],   LINK_ID)
+        self.assertEqual(links[0]["linkType"], "zillow")
+        self.assertEqual(links[0]["url"],      MOCK_CONTACT_LINK["url"])
+
+    def test_links_gsi_error_returns_empty_links(self):
+        """Links table failure must not prevent the document from being returned."""
+        self.mock_links.query.side_effect = Exception("GSI error")
+        resp = _get_document()
+        self.assertEqual(resp["statusCode"], 200)
+        body = _body(resp)
+        self.assertEqual(body["contacts"][0]["links"], [])
 
 
 # ---------------------------------------------------------------------------
@@ -684,6 +767,204 @@ class TestDeleteProperty(unittest.TestCase):
         self.mock_properties.delete_item.side_effect = Exception("DynamoDB unavailable")
         resp = _delete_property()
         self.assertEqual(resp["statusCode"], 500)
+
+
+# ---------------------------------------------------------------------------
+# POST /documents/{document_id}/contacts/{contact_id}/links
+# ---------------------------------------------------------------------------
+
+_GOOD_LINK_BODY = {
+    "label":     "Zillow",
+    "url":       "https://www.zillow.com/homes/123-main-st_rb/",
+    "link_type": "zillow",
+    "notes":     "",
+}
+
+
+class TestCreateContactLink(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_links = MagicMock()
+        db.links_table  = self.mock_links
+        self.mock_links.put_item.return_value = {}
+
+    def test_returns_201(self):
+        resp = _post_contact_link(body=_GOOD_LINK_BODY)
+        self.assertEqual(resp["statusCode"], 201)
+
+    def test_response_includes_link(self):
+        body = _body(_post_contact_link(body=_GOOD_LINK_BODY))
+        self.assertIn("link", body)
+        self.assertEqual(body["link"]["label"],    "Zillow")
+        self.assertEqual(body["link"]["linkType"], "zillow")
+        self.assertEqual(body["link"]["url"],      _GOOD_LINK_BODY["url"])
+        self.assertEqual(body["link"]["parentId"], CONTACT_ID)
+        self.assertIn("linkId", body["link"])
+
+    def test_url_is_required(self):
+        resp = _post_contact_link(body={"label": "Missing URL"})
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("url", _body(resp)["error"].lower())
+
+    def test_empty_url_rejected(self):
+        resp = _post_contact_link(body={"url": "  "})
+        self.assertEqual(resp["statusCode"], 400)
+
+    def test_invalid_link_type_rejected(self):
+        resp = _post_contact_link(body={**_GOOD_LINK_BODY, "link_type": "unknown"})
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("link_type", _body(resp)["error"].lower())
+
+    def test_all_valid_link_types_accepted(self):
+        valid_types = ["zillow", "realtor", "redfin", "google_maps",
+                       "county_record", "obituary", "legacy", "findagrave", "other"]
+        for lt in valid_types:
+            with self.subTest(link_type=lt):
+                resp = _post_contact_link(body={**_GOOD_LINK_BODY, "link_type": lt})
+                self.assertEqual(resp["statusCode"], 201, f"Expected 201 for link_type={lt!r}")
+
+    def test_default_link_type_is_other(self):
+        body_no_type = {"url": "https://example.com"}
+        resp = _post_contact_link(body=body_no_type)
+        self.assertEqual(resp["statusCode"], 201)
+        self.assertEqual(_body(resp)["link"]["linkType"], "other")
+
+    def test_parent_type_set_to_contact(self):
+        _post_contact_link(body=_GOOD_LINK_BODY)
+        item = self.mock_links.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["parent_type"], "contact")
+        self.assertEqual(item["parent_id"],   CONTACT_ID)
+        self.assertEqual(item["document_id"], DOC_ID)
+
+    def test_returns_400_on_invalid_json(self):
+        event = {
+            "httpMethod":            "POST",
+            "path":                  f"/real-estate/probate-leads/documents/{DOC_ID}/contacts/{CONTACT_ID}/links",
+            "pathParameters":        {"document_id": DOC_ID, "contact_id": CONTACT_ID},
+            "headers":               {"x-api-key": "test-key"},
+            "queryStringParameters": None,
+            "body":                  "not-json",
+            "isBase64Encoded":       False,
+        }
+        resp = app.handler(event, MockContext())
+        self.assertEqual(resp["statusCode"], 400)
+
+    def test_returns_500_on_db_error(self):
+        self.mock_links.put_item.side_effect = Exception("ProvisionedThroughputExceeded")
+        resp = _post_contact_link(body=_GOOD_LINK_BODY)
+        self.assertEqual(resp["statusCode"], 500)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /documents/{document_id}/contacts/{contact_id}/links/{link_id}
+# ---------------------------------------------------------------------------
+
+class TestDeleteContactLink(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_links = MagicMock()
+        db.links_table  = self.mock_links
+        self.mock_links.get_item.return_value  = {"Item": MOCK_CONTACT_LINK}
+        self.mock_links.delete_item.return_value = {}
+
+    def test_returns_200(self):
+        resp = _delete_contact_link()
+        self.assertEqual(resp["statusCode"], 200)
+
+    def test_response_includes_deleted_id(self):
+        body = _body(_delete_contact_link())
+        self.assertEqual(body["deleted"], LINK_ID)
+
+    def test_calls_delete_item_with_correct_key(self):
+        _delete_contact_link()
+        self.mock_links.delete_item.assert_called_once_with(Key={"link_id": LINK_ID})
+
+    def test_returns_404_when_not_found(self):
+        self.mock_links.get_item.return_value = {"Item": None}
+        resp = _delete_contact_link()
+        self.assertEqual(resp["statusCode"], 404)
+
+    def test_returns_403_when_wrong_document(self):
+        wrong_link = {**MOCK_CONTACT_LINK, "document_id": "other-doc"}
+        self.mock_links.get_item.return_value = {"Item": wrong_link}
+        resp = _delete_contact_link()
+        self.assertEqual(resp["statusCode"], 403)
+
+    def test_returns_403_when_wrong_parent(self):
+        wrong_link = {**MOCK_CONTACT_LINK, "parent_id": "other-contact"}
+        self.mock_links.get_item.return_value = {"Item": wrong_link}
+        resp = _delete_contact_link()
+        self.assertEqual(resp["statusCode"], 403)
+
+    def test_returns_500_on_get_item_failure(self):
+        self.mock_links.get_item.side_effect = Exception("DynamoDB unavailable")
+        resp = _delete_contact_link()
+        self.assertEqual(resp["statusCode"], 500)
+
+    def test_returns_500_on_delete_failure(self):
+        self.mock_links.delete_item.side_effect = Exception("DynamoDB unavailable")
+        resp = _delete_contact_link()
+        self.assertEqual(resp["statusCode"], 500)
+
+
+# ---------------------------------------------------------------------------
+# POST /documents/{document_id}/properties/{property_id}/links
+# ---------------------------------------------------------------------------
+
+class TestCreatePropertyLink(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_links = MagicMock()
+        db.links_table  = self.mock_links
+        self.mock_links.put_item.return_value = {}
+
+    def test_returns_201(self):
+        resp = _post_property_link(body={**_GOOD_LINK_BODY, "link_type": "redfin"})
+        self.assertEqual(resp["statusCode"], 201)
+
+    def test_parent_type_set_to_property(self):
+        _post_property_link(body=_GOOD_LINK_BODY)
+        item = self.mock_links.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["parent_type"], "property")
+        self.assertEqual(item["parent_id"],   PROPERTY_ID)
+
+    def test_url_required(self):
+        resp = _post_property_link(body={"label": "No URL"})
+        self.assertEqual(resp["statusCode"], 400)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /documents/{document_id}/properties/{property_id}/links/{link_id}
+# ---------------------------------------------------------------------------
+
+class TestDeletePropertyLink(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_links = MagicMock()
+        db.links_table  = self.mock_links
+        self.mock_links.get_item.return_value    = {"Item": MOCK_PROPERTY_LINK}
+        self.mock_links.delete_item.return_value = {}
+
+    def test_returns_200(self):
+        resp = _delete_property_link(link_id=MOCK_PROPERTY_LINK["link_id"])
+        self.assertEqual(resp["statusCode"], 200)
+
+    def test_response_includes_deleted_id(self):
+        lid = MOCK_PROPERTY_LINK["link_id"]
+        body = _body(_delete_property_link(link_id=lid))
+        self.assertEqual(body["deleted"], lid)
+
+    def test_returns_403_when_wrong_document(self):
+        wrong_link = {**MOCK_PROPERTY_LINK, "document_id": "other-doc"}
+        self.mock_links.get_item.return_value = {"Item": wrong_link}
+        resp = _delete_property_link(link_id=MOCK_PROPERTY_LINK["link_id"])
+        self.assertEqual(resp["statusCode"], 403)
+
+    def test_returns_403_when_wrong_parent(self):
+        wrong_link = {**MOCK_PROPERTY_LINK, "parent_id": "other-property"}
+        self.mock_links.get_item.return_value = {"Item": wrong_link}
+        resp = _delete_property_link(link_id=MOCK_PROPERTY_LINK["link_id"])
+        self.assertEqual(resp["statusCode"], 403)
 
 
 if __name__ == "__main__":

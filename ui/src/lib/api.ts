@@ -12,6 +12,7 @@ import type {
   DocumentDetailResponse,
   DocumentsResponse,
   LeadsResponse,
+  Link,
   LocationResponse,
   LocationsResponse,
   Property,
@@ -171,6 +172,44 @@ export async function deleteProperty(
   propertyId: string,
 ): Promise<{ deleted: string }> {
   return apiFetch(`/documents/${documentId}/properties/${propertyId}`, { method: 'DELETE' })
+}
+
+// ---------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------
+
+interface LinkBody {
+  label?: string
+  url: string
+  link_type?: string
+  notes?: string
+}
+
+/** Create a link attached to a contact or property. */
+export function createLink(
+  documentId: string,
+  parentId: string,
+  parentType: 'contact' | 'property',
+  body: LinkBody,
+): Promise<{ link: Link }> {
+  const segment = parentType === 'contact' ? 'contacts' : 'properties'
+  return apiFetch(`/documents/${documentId}/${segment}/${parentId}/links`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** Delete a link by id. */
+export function deleteLink(
+  documentId: string,
+  parentId: string,
+  parentType: 'contact' | 'property',
+  linkId: string,
+): Promise<{ deleted: string }> {
+  const segment = parentType === 'contact' ? 'contacts' : 'properties'
+  return apiFetch(`/documents/${documentId}/${segment}/${parentId}/links/${linkId}`, {
+    method: 'DELETE',
+  })
 }
 
 // ---------------------------------------------------------------------------

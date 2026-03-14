@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDocument, parseDocument, updateContact, deleteContact, updateProperty, deleteProperty } from '@/lib/api'
-import type { Contact, Property } from '@/lib/types'
+import {
+  getDocument, parseDocument,
+  updateContact, deleteContact,
+  updateProperty, deleteProperty,
+  createLink, deleteLink,
+} from '@/lib/api'
+import type { Contact, Link, Property } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,8 +20,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, ExternalLink, Plus, X } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,6 +48,221 @@ function roleBadgeVariant(role: string): 'default' | 'secondary' | 'outline' {
   if (role === 'deceased') return 'default'
   if (role === 'executor') return 'secondary'
   return 'outline'
+}
+
+// ---------------------------------------------------------------------------
+// Link helpers
+// ---------------------------------------------------------------------------
+
+const LINK_TYPE_LABELS: Record<string, string> = {
+  zillow:        'Zillow',
+  realtor:       'Realtor.com',
+  redfin:        'Redfin',
+  google_maps:   'Google Maps',
+  county_record: 'County Record',
+  obituary:      'Obituary',
+  legacy:        'Legacy.com',
+  findagrave:    'FindAGrave',
+  other:         'Link',
+}
+
+type Suggestion = { label: string; url: string; linkType: string }
+
+function propertyLinkSuggestions(property: Property): Suggestion[] {
+  const addr = [property.address, property.city, property.state, property.zip]
+    .filter(Boolean)
+    .join(', ')
+  const q = encodeURIComponent(addr)
+  return [
+    { label: 'Zillow',        url: `https://www.zillow.com/homes/${q}_rb/`,                  linkType: 'zillow' },
+    { label: 'Redfin',        url: `https://www.redfin.com/search/real-estate?q=${q}`,        linkType: 'redfin' },
+    { label: 'Realtor.com',   url: `https://www.realtor.com/realestateandhomes-search/${q}`,  linkType: 'realtor' },
+    { label: 'Google Maps',   url: `https://www.google.com/maps/search/?api=1&query=${q}`,    linkType: 'google_maps' },
+    { label: 'County Record', url: 'https://www.collincad.org/propertysearch',                linkType: 'county_record' },
+  ]
+}
+
+function contactLinkSuggestions(contact: Contact): Suggestion[] {
+  const name   = contact.name || ''
+  const parts  = name.trim().split(/\s+/)
+  const first  = encodeURIComponent(parts[0] || '')
+  const last   = encodeURIComponent(parts.length > 1 ? parts[parts.length - 1] : '')
+  const full   = encodeURIComponent(name)
+  return [
+    { label: 'Legacy.com',      url: `https://www.legacy.com/search?name=${full}`,                                                      linkType: 'legacy' },
+    { label: 'FindAGrave',      url: `https://www.findagrave.com/memorial/search?firstname=${first}&lastname=${last}`,                  linkType: 'findagrave' },
+    { label: 'Obituaries.com',  url: `https://www.obituaries.com/search/results/?fname=${first}&lname=${last}`,                        linkType: 'obituary' },
+    { label: 'Google obituary', url: `https://www.google.com/search?q=${full}+obituary`,                                               linkType: 'obituary' },
+  ]
+}
+
+// ---------------------------------------------------------------------------
+// LinkChip
+// ---------------------------------------------------------------------------
+
+function LinkChip({ link, onDelete }: { link: Link; onDelete: () => void }) {
+  return (
+    <span className="group inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+      <a
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-1 hover:text-foreground"
+      >
+        <ExternalLink size={10} />
+        {link.label || LINK_TYPE_LABELS[link.linkType] || 'Link'}
+      </a>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="ml-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+        aria-label="Remove link"
+      >
+        <X size={10} />
+      </button>
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// AddLinkDialog
+// ---------------------------------------------------------------------------
+
+interface LinkFormState {
+  label:    string
+  url:      string
+  linkType: string
+  notes:    string
+}
+
+function AddLinkDialog({
+  documentId,
+  parentId,
+  parentType,
+  contextName,
+  suggestions,
+  open,
+  onOpenChange,
+}: {
+  documentId:   string
+  parentId:     string
+  parentType:   'contact' | 'property'
+  contextName:  string
+  suggestions:  Suggestion[]
+  open:         boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState<LinkFormState>({ label: '', url: '', linkType: 'other', notes: '' })
+
+  const mut = useMutation({
+    mutationFn: () =>
+      createLink(documentId, parentId, parentType, {
+        label:     form.label,
+        url:       form.url,
+        link_type: form.linkType,
+        notes:     form.notes,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['documents', documentId] })
+      setForm({ label: '', url: '', linkType: 'other', notes: '' })
+      onOpenChange(false)
+    },
+  })
+
+  const applySuggestion = (s: Suggestion) => {
+    setForm(prev => ({ ...prev, label: s.label, url: s.url, linkType: s.linkType }))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add link — {contextName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">Quick suggestions</p>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map(s => (
+                <Button
+                  key={s.label}
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={() => applySuggestion(s)}
+                  className="h-7 text-xs"
+                >
+                  {s.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Label</Label>
+              <Input
+                className="col-span-3"
+                placeholder="e.g. Zillow listing"
+                value={form.label}
+                onChange={e => setForm(prev => ({ ...prev, label: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">URL</Label>
+              <Input
+                className="col-span-3"
+                placeholder="https://…"
+                value={form.url}
+                onChange={e => setForm(prev => ({ ...prev, url: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Type</Label>
+              <Select
+                value={form.linkType}
+                onValueChange={v => setForm(prev => ({ ...prev, linkType: v }))}
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="zillow">Zillow</SelectItem>
+                  <SelectItem value="realtor">Realtor.com</SelectItem>
+                  <SelectItem value="redfin">Redfin</SelectItem>
+                  <SelectItem value="google_maps">Google Maps</SelectItem>
+                  <SelectItem value="county_record">County Record</SelectItem>
+                  <SelectItem value="obituary">Obituary</SelectItem>
+                  <SelectItem value="legacy">Legacy.com</SelectItem>
+                  <SelectItem value="findagrave">FindAGrave</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Notes</Label>
+              <Input
+                className="col-span-3"
+                value={form.notes}
+                onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+        </div>
+        {mut.isError && (
+          <p className="px-1 text-sm text-destructive">
+            {mut.error instanceof Error ? mut.error.message : 'Save failed'}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => mut.mutate()} disabled={mut.isPending || !form.url}>
+            {mut.isPending ? 'Saving…' : 'Add link'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +452,16 @@ function ContactRow({
   contact: Contact
   onDelete: (id: string) => void
 }) {
+  const qc = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
+  const [addLinkOpen, setAddLinkOpen] = useState(false)
+
+  const deleteLinkMut = useMutation({
+    mutationFn: (linkId: string) => deleteLink(documentId, contact.contactId, 'contact', linkId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['documents', documentId] }),
+  })
+
+  const links = contact.links ?? []
 
   return (
     <>
@@ -257,12 +493,47 @@ function ContactRow({
           </div>
         </TableCell>
       </TableRow>
+
+      {/* Links sub-row */}
+      <TableRow className="hover:bg-transparent border-t-0">
+        <TableCell colSpan={8} className="pb-2 pt-0 pl-6">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {links.map(link => (
+              <LinkChip
+                key={link.linkId}
+                link={link}
+                onDelete={() => deleteLinkMut.mutate(link.linkId)}
+              />
+            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setAddLinkOpen(true)}
+            >
+              <Plus size={11} /> Add link
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+
       {editOpen && (
         <EditContactDialog
           documentId={documentId}
           contact={contact}
           open={editOpen}
           onOpenChange={setEditOpen}
+        />
+      )}
+      {addLinkOpen && (
+        <AddLinkDialog
+          documentId={documentId}
+          parentId={contact.contactId}
+          parentType="contact"
+          contextName={contact.name || 'contact'}
+          suggestions={contactLinkSuggestions(contact)}
+          open={addLinkOpen}
+          onOpenChange={setAddLinkOpen}
         />
       )}
     </>
@@ -343,7 +614,16 @@ function PropertyRow({
   property: Property
   onDelete: (id: string) => void
 }) {
+  const qc = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
+  const [addLinkOpen, setAddLinkOpen] = useState(false)
+
+  const deleteLinkMut = useMutation({
+    mutationFn: (linkId: string) => deleteLink(documentId, property.propertyId, 'property', linkId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['documents', documentId] }),
+  })
+
+  const links = property.links ?? []
 
   return (
     <>
@@ -381,12 +661,47 @@ function PropertyRow({
           </div>
         </TableCell>
       </TableRow>
+
+      {/* Links sub-row */}
+      <TableRow className="hover:bg-transparent border-t-0">
+        <TableCell colSpan={7} className="pb-2 pt-0 pl-6">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {links.map(link => (
+              <LinkChip
+                key={link.linkId}
+                link={link}
+                onDelete={() => deleteLinkMut.mutate(link.linkId)}
+              />
+            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setAddLinkOpen(true)}
+            >
+              <Plus size={11} /> Add link
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+
       {editOpen && (
         <EditPropertyDialog
           documentId={documentId}
           property={property}
           open={editOpen}
           onOpenChange={setEditOpen}
+        />
+      )}
+      {addLinkOpen && (
+        <AddLinkDialog
+          documentId={documentId}
+          parentId={property.propertyId}
+          parentType="property"
+          contextName={property.address || 'property'}
+          suggestions={propertyLinkSuggestions(property)}
+          open={addLinkOpen}
+          onOpenChange={setAddLinkOpen}
         />
       )}
     </>

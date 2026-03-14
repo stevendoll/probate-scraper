@@ -59,6 +59,18 @@ export interface LeadsResponse {
   nextKey?: string
 }
 
+export interface Link {
+  linkId: string
+  parentId: string
+  parentType: 'contact' | 'property'
+  documentId: string
+  label: string
+  url: string
+  linkType: 'zillow' | 'realtor' | 'redfin' | 'google_maps' | 'county_record' | 'obituary' | 'legacy' | 'findagrave' | 'other'
+  notes?: string
+  createdAt?: string
+}
+
 export interface Contact {
   contactId: string
   documentId: string
@@ -72,6 +84,7 @@ export interface Contact {
   parsedAt?: string
   parsedModel?: string
   rawResponse?: string
+  links?: Link[]
 }
 
 export interface Property {
@@ -88,6 +101,7 @@ export interface Property {
   parsedAt?: string
   parsedModel?: string
   rawResponse?: string
+  links?: Link[]
 }
 
 /** Response from GET /documents/{document_id} */
