@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { CheckCircle, ExternalLink, Plus, X } from 'lucide-react'
+import { CheckCircle, ExternalLink, Link2, Pencil, Trash2, X } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -495,42 +495,42 @@ function ContactRow({
           {contact.notes || '—'}
         </TableCell>
         <TableCell>
-          <div className="flex gap-1">
-            <Button variant="ghost" size="sm" onClick={() => setEditOpen(true)}>Edit</Button>
+          <div className="flex items-center justify-end gap-0.5">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Add link" onClick={() => setAddLinkOpen(true)}>
+              <Link2 size={14} />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => setEditOpen(true)}>
+              <Pencil size={14} />
+            </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="text-destructive hover:text-destructive"
+              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+              title="Delete"
               onClick={() => onDelete(contact.contactId)}
             >
-              Delete
+              <Trash2 size={14} />
             </Button>
           </div>
         </TableCell>
       </TableRow>
 
       {/* Links sub-row */}
-      <TableRow className="hover:bg-transparent border-t-0">
-        <TableCell colSpan={8} className="pb-2 pt-0 pl-6">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {links.map(link => (
-              <LinkChip
-                key={link.linkId}
-                link={link}
-                onDelete={() => deleteLinkMut.mutate(link.linkId)}
-              />
-            ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setAddLinkOpen(true)}
-            >
-              <Plus size={11} /> Add link
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
+      {links.length > 0 && (
+        <TableRow className="hover:bg-transparent border-t-0">
+          <TableCell colSpan={8} className="pb-2 pt-0 pl-6">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {links.map(link => (
+                <LinkChip
+                  key={link.linkId}
+                  link={link}
+                  onDelete={() => deleteLinkMut.mutate(link.linkId)}
+                />
+              ))}
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
 
       {editOpen && (
         <EditContactDialog
@@ -663,42 +663,42 @@ function PropertyRow({
           {property.legalDescription || '—'}
         </TableCell>
         <TableCell>
-          <div className="flex gap-1">
-            <Button variant="ghost" size="sm" onClick={() => setEditOpen(true)}>Edit</Button>
+          <div className="flex items-center justify-end gap-0.5">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Add link" onClick={() => setAddLinkOpen(true)}>
+              <Link2 size={14} />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => setEditOpen(true)}>
+              <Pencil size={14} />
+            </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="text-destructive hover:text-destructive"
+              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+              title="Delete"
               onClick={() => onDelete(property.propertyId)}
             >
-              Delete
+              <Trash2 size={14} />
             </Button>
           </div>
         </TableCell>
       </TableRow>
 
       {/* Links sub-row */}
-      <TableRow className="hover:bg-transparent border-t-0">
-        <TableCell colSpan={7} className="pb-2 pt-0 pl-6">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {links.map(link => (
-              <LinkChip
-                key={link.linkId}
-                link={link}
-                onDelete={() => deleteLinkMut.mutate(link.linkId)}
-              />
-            ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setAddLinkOpen(true)}
-            >
-              <Plus size={11} /> Add link
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
+      {links.length > 0 && (
+        <TableRow className="hover:bg-transparent border-t-0">
+          <TableCell colSpan={7} className="pb-2 pt-0 pl-6">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {links.map(link => (
+                <LinkChip
+                  key={link.linkId}
+                  link={link}
+                  onDelete={() => deleteLinkMut.mutate(link.linkId)}
+                />
+              ))}
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
 
       {editOpen && (
         <EditPropertyDialog
