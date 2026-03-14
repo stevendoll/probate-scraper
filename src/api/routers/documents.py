@@ -26,6 +26,26 @@ logger = Logger(service="probate-api")
 router = Router()
 
 
+def _dynamo_update_expression(updates: dict) -> tuple[str, dict, dict]:
+    """Build a DynamoDB SET expression from a plain field→value dict.
+
+    All field names are aliased with # to avoid reserved-word collisions.
+    Returns (UpdateExpression, ExpressionAttributeNames, ExpressionAttributeValues).
+
+    Example:
+        expr, names, vals = _dynamo_update_expression({"role": "heir", "edited_at": "…"})
+        table.update_item(Key=…, UpdateExpression=expr,
+                          ExpressionAttributeNames=names,
+                          ExpressionAttributeValues=vals)
+    """
+    set_clause = ", ".join(f"#{k} = :{k}" for k in updates)
+    return (
+        f"SET {set_clause}",
+        {f"#{k}": k for k in updates},
+        {f":{k}": v for k, v in updates.items()},
+    )
+
+
 def _get_location_by_path(location_path: str) -> dict | None:
     """Look up a location item using the location-path-index GSI.
 
@@ -258,14 +278,12 @@ def update_contact(document_id: str, contact_id: str):
         return {"error": "Contact does not belong to the specified document"}, 403
 
     all_updates = {**updates, "edited_at": datetime.now(timezone.utc).isoformat()}
-    set_expr   = ", ".join(f"#{k} = :{k}" for k in all_updates)
-    expr_names = {f"#{k}": k for k in all_updates}
-    expr_vals  = {f":{k}": v for k, v in all_updates.items()}
+    update_expr, expr_names, expr_vals = _dynamo_update_expression(all_updates)
 
     try:
         result = db.contacts_table.update_item(
             Key={"contact_id": contact_id},
-            UpdateExpression=f"SET {set_expr}",
+            UpdateExpression=update_expr,
             ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_vals,
             ReturnValues="ALL_NEW",
@@ -337,14 +355,12 @@ def update_property(document_id: str, property_id: str):
     # Changing the address invalidates the previous usaddress verification.
     if "address" in updates:
         all_updates["is_verified"] = False
-    set_expr   = ", ".join(f"#{k} = :{k}" for k in all_updates)
-    expr_names = {f"#{k}": k for k in all_updates}
-    expr_vals  = {f":{k}": v for k, v in all_updates.items()}
+    update_expr, expr_names, expr_vals = _dynamo_update_expression(all_updates)
 
     try:
         result = db.properties_table.update_item(
             Key={"property_id": property_id},
-            UpdateExpression=f"SET {set_expr}",
+            UpdateExpression=update_expr,
             ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_vals,
             ReturnValues="ALL_NEW",
