@@ -20,6 +20,7 @@ Environment variables:
   DOCUMENTS_TABLE_NAME  — documents table (default: documents)
   CONTACTS_TABLE_NAME   — contacts table (default: contacts)
   PROPERTIES_TABLE_NAME — properties table (default: properties)
+  LINKS_TABLE_NAME      — links table (default: links)
   DOCUMENTS_BUCKET      — S3 bucket where PDFs are stored
   BEDROCK_MODEL_ID      — Bedrock model ID (default: us.amazon.nova-pro-v1:0)
   AWS_DEFAULT_REGION    — AWS region (injected by Lambda runtime)
@@ -30,7 +31,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote_plus
 
 import boto3
 from aws_lambda_powertools import Logger
@@ -67,10 +68,13 @@ _model_id             = os.environ.get(
     "us.amazon.nova-pro-v1:0",
 )
 
+_links_table_name    = os.environ.get("LINKS_TABLE_NAME", "links")
+
 _dynamodb          = boto3.resource("dynamodb", region_name=_region)
 _documents_table   = _dynamodb.Table(_documents_table_name)
 _contacts_table    = _dynamodb.Table(_contacts_table_name)
 _properties_table  = _dynamodb.Table(_properties_table_name)
+_links_table       = _dynamodb.Table(_links_table_name)
 _s3                = boto3.client("s3", region_name=_region)
 _bedrock           = boto3.client("bedrock-runtime", region_name=_region)
 
@@ -252,8 +256,9 @@ def _write_contacts(
     deceased_dod     = parsed.get("deceased_dod") or ""
     deceased_address = parsed.get("deceased_last_address") or ""
     if deceased_name:
+        deceased_contact_id = str(uuid.uuid4())
         _contacts_table.put_item(Item={
-            "contact_id":     str(uuid.uuid4()),
+            "contact_id":     deceased_contact_id,
             "document_id":    document_id,
             # editable (ground-truth) fields — start as the parsed values
             "role":           "deceased",
@@ -278,6 +283,21 @@ def _write_contacts(
             "parsed_notes":   "",
         })
         written += 1
+        # Auto-insert a Legacy.com obituary search link for the deceased
+        try:
+            _links_table.put_item(Item={
+                "link_id":     str(uuid.uuid4()),
+                "document_id": document_id,
+                "parent_id":   deceased_contact_id,
+                "parent_type": "contact",
+                "label":       "Legacy.com",
+                "url":         f"https://www.legacy.com/search?name={quote_plus(deceased_name)}",
+                "link_type":   "legacy",
+                "notes":       "",
+                "created_at":  parsed_at,
+            })
+        except Exception as exc:                     # pragma: no cover
+            logger.warning("Failed to insert Legacy.com link: %s", exc)
 
     # People list — deduplicate by name, then capitalise
     people = _deduplicate_people([
@@ -387,8 +407,9 @@ def _write_properties(
             zip_        = bedrock_zip   or ua_zip
             is_verified = ua_ok and bool(address)
 
+        property_id = str(uuid.uuid4())
         _properties_table.put_item(Item={
-            "property_id":              str(uuid.uuid4()),
+            "property_id":              property_id,
             "document_id":              document_id,
             # editable (ground-truth) fields — start as the resolved values
             "address":                  address,
@@ -414,17 +435,38 @@ def _write_properties(
             "parsed_notes":             "",
         })
         written += 1
+        # Auto-insert a Google Maps search link when the property has an address
+        if address:
+            try:
+                full_addr = ", ".join(filter(None, [address, city, f"{state} {zip_}".strip()]))
+                _links_table.put_item(Item={
+                    "link_id":     str(uuid.uuid4()),
+                    "document_id": document_id,
+                    "parent_id":   property_id,
+                    "parent_type": "property",
+                    "label":       "Google Maps",
+                    "url":         f"https://www.google.com/maps/search/?api=1&query={quote_plus(full_addr)}",
+                    "link_type":   "google_maps",
+                    "notes":       "",
+                    "created_at":  parsed_at,
+                })
+            except Exception as exc:               # pragma: no cover
+                logger.warning("Failed to insert Google Maps link: %s", exc)
 
     return written
 
 
 def _clear_existing(document_id: str) -> tuple[int, int]:
     """
-    Delete all contacts and properties previously written for this document.
+    Delete all contacts, properties, and links previously written for this document.
 
     Called before writing new parse results so a re-parse fully replaces the
     old data rather than appending duplicates.  Only invoked after Bedrock has
     returned successfully — if S3 or Bedrock fail the existing records are kept.
+
+    Links are always cleared alongside contacts/properties because contact and
+    property UUIDs change on every re-parse, leaving any surviving links
+    orphaned (they would never appear in the UI again).
 
     Returns (contacts_deleted, properties_deleted).
     """
@@ -451,6 +493,16 @@ def _clear_existing(document_id: str) -> tuple[int, int]:
         for item in properties_result.get("Items", []):
             batch.delete_item(Key={"property_id": item["property_id"]})
             properties_deleted += 1
+
+    # Links — orphaned by new contact/property UUIDs; always purge
+    links_result = _links_table.query(
+        IndexName="document-link-index",
+        KeyConditionExpression=Key("document_id").eq(document_id),
+        ProjectionExpression="link_id",
+    )
+    with _links_table.batch_writer() as batch:
+        for item in links_result.get("Items", []):
+            batch.delete_item(Key={"link_id": item["link_id"]})
 
     return contacts_deleted, properties_deleted
 

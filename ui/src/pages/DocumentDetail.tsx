@@ -100,7 +100,19 @@ function contactLinkSuggestions(contact: Contact): Suggestion[] {
 // LinkChip
 // ---------------------------------------------------------------------------
 
+const LINK_FAVICONS: Record<string, string> = {
+  zillow:        'https://www.google.com/s2/favicons?domain=zillow.com&sz=16',
+  realtor:       'https://www.google.com/s2/favicons?domain=realtor.com&sz=16',
+  redfin:        'https://www.google.com/s2/favicons?domain=redfin.com&sz=16',
+  google_maps:   'https://www.google.com/s2/favicons?domain=maps.google.com&sz=16',
+  county_record: 'https://www.google.com/s2/favicons?domain=car.org&sz=16',
+  obituary:      'https://www.google.com/s2/favicons?domain=obituaries.com&sz=16',
+  legacy:        'https://www.google.com/s2/favicons?domain=legacy.com&sz=16',
+  findagrave:    'https://www.google.com/s2/favicons?domain=findagrave.com&sz=16',
+}
+
 function LinkChip({ link, onDelete }: { link: Link; onDelete: () => void }) {
+  const favicon = LINK_FAVICONS[link.linkType]
   return (
     <span className="group inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
       <a
@@ -109,7 +121,10 @@ function LinkChip({ link, onDelete }: { link: Link; onDelete: () => void }) {
         rel="noopener noreferrer"
         className="flex items-center gap-1 hover:text-foreground"
       >
-        <ExternalLink size={10} />
+        {favicon
+          ? <img src={favicon} alt="" className="h-3 w-3 shrink-0" />
+          : <ExternalLink size={10} />
+        }
         {link.label || LINK_TYPE_LABELS[link.linkType] || 'Link'}
       </a>
       <button
