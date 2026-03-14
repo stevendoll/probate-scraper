@@ -3,8 +3,8 @@ Shared DynamoDB table references, configuration constants, and common queries.
 
 Imported as ``import db`` so callers can write ``db.documents_table``.
 Tests replace ``db.documents_table``, ``db.locations_table``, ``db.users_table``,
-``db.contacts_table``, ``db.properties_table``, and ``db.events_table``
-in setUp to inject mocks.
+``db.contacts_table``, ``db.properties_table``, ``db.events_table``, and
+``db.links_table`` in setUp to inject mocks.
 """
 
 import logging
@@ -23,6 +23,7 @@ _users_table_name      = os.environ.get("USERS_TABLE_NAME", "users")
 _contacts_table_name   = os.environ.get("CONTACTS_TABLE_NAME", "contacts")
 _properties_table_name = os.environ.get("PROPERTIES_TABLE_NAME", "properties")
 _events_table_name     = os.environ.get("EVENTS_TABLE_NAME", "events")
+_links_table_name      = os.environ.get("LINKS_TABLE_NAME", "links")
 
 # Index names
 gsi_name          = os.environ.get("GSI_NAME", "recorded-date-index")
@@ -36,6 +37,7 @@ users_table      = _dynamodb.Table(_users_table_name)
 contacts_table   = _dynamodb.Table(_contacts_table_name)
 properties_table = _dynamodb.Table(_properties_table_name)
 events_table     = _dynamodb.Table(_events_table_name)
+links_table      = _dynamodb.Table(_links_table_name)
 
 # Query limits
 MAX_LIMIT     = 200

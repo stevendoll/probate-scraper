@@ -678,5 +678,133 @@ class TestParseDocument(unittest.TestCase):
         self.assertEqual(body["propertiesWritten"], 0)
 
 
+# ---------------------------------------------------------------------------
+# _capitalize_name
+# ---------------------------------------------------------------------------
+
+class TestCapitalizeName(unittest.TestCase):
+
+    def test_all_caps_converted_to_title_case(self):
+        self.assertEqual(parse_app._capitalize_name("JOHN SMITH"), "John Smith")
+
+    def test_already_title_case_unchanged(self):
+        self.assertEqual(parse_app._capitalize_name("Jane Doe"), "Jane Doe")
+
+    def test_hyphenated_name(self):
+        self.assertEqual(parse_app._capitalize_name("MARY-JANE WATSON"), "Mary-Jane Watson")
+
+    def test_double_hyphen_name(self):
+        self.assertEqual(parse_app._capitalize_name("ANNA-LOU-BETH JONES"), "Anna-Lou-Beth Jones")
+
+    def test_name_with_apostrophe(self):
+        self.assertEqual(parse_app._capitalize_name("O'BRIEN"), "O'Brien")
+
+    def test_mixed_case_normalised(self):
+        self.assertEqual(parse_app._capitalize_name("roBERT smiTH"), "Robert Smith")
+
+    def test_single_word(self):
+        self.assertEqual(parse_app._capitalize_name("ADMINISTRATOR"), "Administrator")
+
+    def test_empty_string_returns_empty(self):
+        self.assertEqual(parse_app._capitalize_name(""), "")
+
+    def test_whitespace_preserved_between_words(self):
+        result = parse_app._capitalize_name("  JOHN   DOE  ")
+        # split/join normalises spacing
+        self.assertIn("John", result)
+        self.assertIn("Doe", result)
+
+
+# ---------------------------------------------------------------------------
+# _deduplicate_people
+# ---------------------------------------------------------------------------
+
+class TestDeduplicatePeople(unittest.TestCase):
+
+    def test_no_duplicates_unchanged(self):
+        people = [
+            {"name": "Alice Jones",  "role": "executor"},
+            {"name": "Bob Williams", "role": "heir"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(len(result), 2)
+
+    def test_duplicate_keeps_higher_priority_role(self):
+        """When the same person has two roles, keep the higher-priority one."""
+        people = [
+            {"name": "John Smith", "role": "heir"},
+            {"name": "John Smith", "role": "executor"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["role"], "executor")
+
+    def test_lower_priority_role_appended_to_notes(self):
+        people = [
+            {"name": "John Smith", "role": "heir"},
+            {"name": "John Smith", "role": "executor"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertIn("heir", result[0].get("notes", ""))
+
+    def test_existing_notes_preserved_on_merge(self):
+        people = [
+            {"name": "John Smith", "role": "heir",     "notes": "see prior case"},
+            {"name": "John Smith", "role": "executor", "notes": ""},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertIn("heir",           result[0]["notes"])
+        self.assertIn("see prior case", result[0]["notes"])
+
+    def test_case_insensitive_dedup(self):
+        """JOHN SMITH and John Smith are the same person after normalisation."""
+        people = [
+            {"name": "JOHN SMITH", "role": "executor"},
+            {"name": "john smith", "role": "heir"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(len(result), 1)
+
+    def test_extra_whitespace_normalised(self):
+        people = [
+            {"name": "Jane  Doe", "role": "heir"},
+            {"name": "Jane Doe",  "role": "executor"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(len(result), 1)
+
+    def test_empty_name_skipped(self):
+        people = [
+            {"name": "",          "role": "heir"},
+            {"name": "Bob Jones", "role": "executor"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "Bob Jones")
+
+    def test_three_roles_same_person(self):
+        """Three entries for the same person collapse into one with all extras noted."""
+        people = [
+            {"name": "Carol Reed", "role": "beneficiary"},
+            {"name": "Carol Reed", "role": "executor"},
+            {"name": "Carol Reed", "role": "heir"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["role"], "executor")
+        notes = result[0].get("notes", "")
+        self.assertIn("beneficiary", notes)
+        self.assertIn("heir", notes)
+
+    def test_order_of_roles_does_not_matter(self):
+        """Priority must be by _ROLE_PRIORITY, not by list position."""
+        people = [
+            {"name": "Dan White", "role": "attorney"},
+            {"name": "Dan White", "role": "heir"},
+        ]
+        result = parse_app._deduplicate_people(people)
+        self.assertEqual(result[0]["role"], "attorney")
+
+
 if __name__ == "__main__":
     unittest.main()

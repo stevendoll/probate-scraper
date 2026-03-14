@@ -5,9 +5,13 @@ Routes:
   GET    /real-estate/probate-leads/documents/{document_id}/contacts
   PATCH  /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
   DELETE /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}
+  POST   /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}/links
+  DELETE /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}/links/{link_id}
   GET    /real-estate/probate-leads/documents/{document_id}/properties
   PATCH  /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
   DELETE /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
+  POST   /real-estate/probate-leads/documents/{document_id}/properties/{property_id}/links
+  DELETE /real-estate/probate-leads/documents/{document_id}/properties/{property_id}/links/{link_id}
 """
 
 import json
@@ -19,7 +23,7 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 from boto3.dynamodb.conditions import Attr, Key
 
 import db
-from models import Contact, Document, Location, Property
+from models import Contact, Document, Link, Location, Property
 from utils import decode_key, encode_key, parse_date
 
 logger = Logger(service="probate-api")
@@ -159,9 +163,26 @@ def get_documents_by_location(location_path: str):
     return body
 
 
+def _fetch_links_for_document(document_id: str) -> dict[str, list]:
+    """Query all links for a document and return a dict of parent_id → [link dicts]."""
+    try:
+        result = db.links_table.query(
+            IndexName="document-link-index",
+            KeyConditionExpression=Key("document_id").eq(document_id),
+        )
+        links_by_parent: dict[str, list] = {}
+        for item in result.get("Items", []):
+            pid = item.get("parent_id", "")
+            links_by_parent.setdefault(pid, []).append(Link.from_dynamo(item).to_dict())
+        return links_by_parent
+    except Exception as exc:
+        logger.error("links GSI query failed: %s", exc)
+        return {}
+
+
 @router.get("/real-estate/probate-leads/documents/<document_id>")
 def get_document(document_id: str):
-    """Return a single document with its contacts and properties."""
+    """Return a single document with its contacts, properties, and links."""
     # 1. Fetch the document
     try:
         result = db.documents_table.get_item(Key={"document_id": document_id})
@@ -181,10 +202,10 @@ def get_document(document_id: str):
             IndexName="document-contact-index",
             KeyConditionExpression=Key("document_id").eq(document_id),
         )
-        contacts = [Contact.from_dynamo(c).to_dict() for c in contacts_result.get("Items", [])]
+        contacts_raw = contacts_result.get("Items", [])
     except Exception as exc:
         logger.error("contacts GSI query failed: %s", exc)
-        contacts = []
+        contacts_raw = []
 
     # 3. Fetch properties
     try:
@@ -192,10 +213,20 @@ def get_document(document_id: str):
             IndexName="document-property-index",
             KeyConditionExpression=Key("document_id").eq(document_id),
         )
-        properties = [Property.from_dynamo(p).to_dict() for p in props_result.get("Items", [])]
+        props_raw = props_result.get("Items", [])
     except Exception as exc:
         logger.error("properties GSI query failed: %s", exc)
-        properties = []
+        props_raw = []
+
+    # 4. Fetch links (one query, distribute by parent_id)
+    links_by_parent = _fetch_links_for_document(document_id)
+
+    def _with_links(item_dict: dict, id_key: str) -> dict:
+        item_dict["links"] = links_by_parent.get(item_dict.get(id_key, ""), [])
+        return item_dict
+
+    contacts   = [_with_links(Contact.from_dynamo(c).to_dict(),  "contactId")  for c in contacts_raw]
+    properties = [_with_links(Property.from_dynamo(p).to_dict(), "propertyId") for p in props_raw]
 
     return {
         "requestId":  str(uuid.uuid4()),
@@ -396,3 +427,96 @@ def delete_property(document_id: str, property_id: str):
         return {"error": "Database delete failed"}, 500
 
     return {"requestId": str(uuid.uuid4()), "deleted": property_id}
+
+
+# ---------------------------------------------------------------------------
+# Links — POST / DELETE  (shared logic for contacts and properties)
+# ---------------------------------------------------------------------------
+
+_VALID_LINK_TYPES = {
+    "zillow", "realtor", "redfin", "google_maps",
+    "county_record", "obituary", "legacy", "findagrave", "other",
+}
+
+
+def _create_link(document_id: str, parent_id: str, parent_type: str):
+    """Shared POST handler — creates a link attached to a contact or property."""
+    try:
+        body = json.loads(router.current_event.body or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {"error": "Request body must be valid JSON"}, 400
+
+    url = (body.get("url") or "").strip()
+    if not url:
+        return {"error": "url is required"}, 400
+
+    label     = (body.get("label") or "").strip()
+    link_type = (body.get("link_type") or "other").strip().lower()
+    notes     = (body.get("notes") or "").strip()
+
+    if link_type not in _VALID_LINK_TYPES:
+        return {"error": f"link_type must be one of: {sorted(_VALID_LINK_TYPES)}"}, 400
+
+    item = {
+        "link_id":     str(uuid.uuid4()),
+        "parent_id":   parent_id,
+        "parent_type": parent_type,
+        "document_id": document_id,
+        "label":       label,
+        "url":         url,
+        "link_type":   link_type,
+        "notes":       notes,
+        "created_at":  datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        db.links_table.put_item(Item=item)
+    except Exception as exc:
+        logger.error("links put_item failed: %s", exc)
+        return {"error": "Database write failed"}, 500
+
+    return {"requestId": str(uuid.uuid4()), "link": Link.from_dynamo(item).to_dict()}, 201
+
+
+def _delete_link(document_id: str, parent_id: str, link_id: str):
+    """Shared DELETE handler — removes a link by link_id after ownership checks."""
+    try:
+        existing = db.links_table.get_item(Key={"link_id": link_id}).get("Item")
+    except Exception as exc:
+        logger.error("links get_item failed: %s", exc)
+        return {"error": "Database query failed"}, 500
+
+    if not existing:
+        return {"error": f"Link not found: {link_id!r}"}, 404
+    if existing.get("document_id") != document_id:
+        return {"error": "Link does not belong to the specified document"}, 403
+    if existing.get("parent_id") != parent_id:
+        return {"error": "Link does not belong to the specified parent"}, 403
+
+    try:
+        db.links_table.delete_item(Key={"link_id": link_id})
+    except Exception as exc:
+        logger.error("links delete_item failed: %s", exc)
+        return {"error": "Database delete failed"}, 500
+
+    return {"requestId": str(uuid.uuid4()), "deleted": link_id}
+
+
+@router.post("/real-estate/probate-leads/documents/<document_id>/contacts/<contact_id>/links")
+def create_contact_link(document_id: str, contact_id: str):
+    return _create_link(document_id, parent_id=contact_id, parent_type="contact")
+
+
+@router.delete("/real-estate/probate-leads/documents/<document_id>/contacts/<contact_id>/links/<link_id>")
+def delete_contact_link(document_id: str, contact_id: str, link_id: str):
+    return _delete_link(document_id, parent_id=contact_id, link_id=link_id)
+
+
+@router.post("/real-estate/probate-leads/documents/<document_id>/properties/<property_id>/links")
+def create_property_link(document_id: str, property_id: str):
+    return _create_link(document_id, parent_id=property_id, parent_type="property")
+
+
+@router.delete("/real-estate/probate-leads/documents/<document_id>/properties/<property_id>/links/<link_id>")
+def delete_property_link(document_id: str, property_id: str, link_id: str):
+    return _delete_link(document_id, parent_id=property_id, link_id=link_id)

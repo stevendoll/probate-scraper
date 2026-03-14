@@ -83,6 +83,76 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _capitalize_name(name: str) -> str:
+    """Title-case a probate document name, handling hyphens and apostrophes.
+
+    Probate documents are typically ALL-CAPS; this converts them to
+    First Last style matching the API's capitalize_name() in data_helpers.py.
+    """
+    if not name:
+        return ""
+    parts = []
+    for word in name.split():
+        if "-" in word:
+            parts.append("-".join(p.capitalize() for p in word.split("-")))
+        elif "'" in word:
+            parts.append("'".join(p.capitalize() for p in word.split("'")))
+        else:
+            parts.append(word.capitalize())
+    return " ".join(parts)
+
+
+# Role priority for deduplication: lower index = higher priority.
+_ROLE_PRIORITY = [
+    "executor", "attorney", "trustee", "guardian",
+    "beneficiary", "heir", "spouse", "other",
+]
+
+
+def _role_rank(role: str) -> int:
+    try:
+        return _ROLE_PRIORITY.index(role.lower())
+    except ValueError:
+        return len(_ROLE_PRIORITY)
+
+
+def _deduplicate_people(people: list[dict]) -> list[dict]:
+    """Merge duplicate people entries (same normalised name) into one record.
+
+    The highest-priority role is kept; secondary roles are appended to notes.
+    """
+    seen: dict[str, dict] = {}   # normalised_name → merged entry
+
+    for person in people:
+        name = (person.get("name") or "").strip()
+        if not name:
+            continue
+        key = " ".join(name.lower().split())
+
+        if key not in seen:
+            seen[key] = {**person, "_extra_roles": []}
+        else:
+            existing    = seen[key]
+            new_role    = (person.get("role") or "other").lower()
+            exist_role  = (existing.get("role") or "other").lower()
+            if _role_rank(new_role) < _role_rank(exist_role):
+                existing["_extra_roles"].append(exist_role)
+                existing["role"] = new_role
+            else:
+                existing["_extra_roles"].append(new_role)
+
+    result = []
+    for entry in seen.values():
+        extra = entry.pop("_extra_roles", [])
+        if extra:
+            role_note    = "Also: " + ", ".join(extra)
+            entry["notes"] = (
+                ((entry.get("notes") or "") + "; " + role_note).lstrip("; ")
+            )
+        result.append(entry)
+    return result
+
+
 def _s3_uri_to_bucket_key(s3_uri: str) -> tuple[str, str]:
     """Parse ``s3://bucket/key`` into ``(bucket, key)``."""
     parsed = urlparse(s3_uri)
@@ -177,7 +247,7 @@ def _write_contacts(
     written = 0
 
     # Deceased contact
-    deceased_name    = parsed.get("deceased_name") or ""
+    deceased_name    = _capitalize_name(parsed.get("deceased_name") or "")
     deceased_dob     = parsed.get("deceased_dob") or ""
     deceased_dod     = parsed.get("deceased_dod") or ""
     deceased_address = parsed.get("deceased_last_address") or ""
@@ -209,15 +279,17 @@ def _write_contacts(
         })
         written += 1
 
-    # People list (executor, beneficiaries, heirs, attorney, etc.)
-    for person in (parsed.get("people") or []):
-        if not isinstance(person, dict):
-            continue
-        name = person.get("name") or ""
+    # People list — deduplicate by name, then capitalise
+    people = _deduplicate_people([
+        p for p in (parsed.get("people") or []) if isinstance(p, dict)
+    ])
+    for person in people:
+        name = _capitalize_name(person.get("name") or "")
         if not name:
             continue
         role  = (person.get("role") or "other").lower()
         email = person.get("email") or ""
+        notes = person.get("notes") or ""
         _contacts_table.put_item(Item={
             "contact_id":     str(uuid.uuid4()),
             "document_id":    document_id,
@@ -228,7 +300,7 @@ def _write_contacts(
             "dob":            "",
             "dod":            "",
             "address":        "",
-            "notes":          "",
+            "notes":          notes,
             "edited_at":      "",
             # parse metadata
             "parsed_at":      parsed_at,
@@ -241,7 +313,7 @@ def _write_contacts(
             "parsed_dob":     "",
             "parsed_dod":     "",
             "parsed_address": "",
-            "parsed_notes":   "",
+            "parsed_notes":   notes,
         })
         written += 1
 

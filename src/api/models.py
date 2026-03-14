@@ -279,6 +279,51 @@ class Property:
 
 
 # ---------------------------------------------------------------------------
+# Link (reference URLs attached to a contact or property)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Link:
+    link_id:     str = ""
+    parent_id:   str = ""   # contact_id or property_id
+    parent_type: str = ""   # "contact" | "property"
+    document_id: str = ""
+    label:       str = ""   # e.g. "Zillow", "Legacy.com"
+    url:         str = ""
+    link_type:   str = "other"  # zillow | realtor | google_maps | county_record |
+                                 # obituary | legacy | findagrave | other
+    notes:       str = ""
+    created_at:  str = ""
+
+    @classmethod
+    def from_dynamo(cls, item: dict) -> "Link":
+        return cls(
+            link_id=     item.get("link_id", ""),
+            parent_id=   item.get("parent_id", ""),
+            parent_type= item.get("parent_type", ""),
+            document_id= item.get("document_id", ""),
+            label=       item.get("label", ""),
+            url=         item.get("url", ""),
+            link_type=   item.get("link_type", "other"),
+            notes=       item.get("notes", ""),
+            created_at=  item.get("created_at", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "linkId":     self.link_id,
+            "parentId":   self.parent_id,
+            "parentType": self.parent_type,
+            "documentId": self.document_id,
+            "label":      self.label,
+            "url":        self.url,
+            "linkType":   self.link_type,
+            "notes":      self.notes,
+            "createdAt":  self.created_at,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Location
 # ---------------------------------------------------------------------------
 

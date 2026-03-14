@@ -153,6 +153,7 @@ Globals:
         DOCUMENTS_TABLE_NAME: !Ref DocumentsTable
         CONTACTS_TABLE_NAME: !Ref ContactsTable
         PROPERTIES_TABLE_NAME: !Ref PropertiesTable
+        LINKS_TABLE_NAME: !Ref LinksTable
         LOCATIONS_TABLE_NAME: !Ref LocationsTable
         USERS_TABLE_NAME: !Ref UsersTable
         EVENTS_TABLE_NAME: events
@@ -282,6 +283,31 @@ Resources:
           KeyType: HASH
       GlobalSecondaryIndexes:
         - IndexName: document-property-index
+          KeySchema:
+            - AttributeName: document_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB — Links ──────────────────────────────────────────────────────
+  # Stores user-added reference links attached to contacts or properties.
+
+  LinksTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: links
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: link_id
+          AttributeType: S
+        - AttributeName: document_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: link_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: document-link-index
           KeySchema:
             - AttributeName: document_id
               KeyType: HASH
@@ -681,6 +707,17 @@ Resources:
               Resource:
                 - !GetAtt EventsTable.Arn
                 - !Sub "${EventsTable.Arn}/index/*"
+        # Links — full CRUD
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt LinksTable.Arn
+                - !Sub "${LinksTable.Arn}/index/*"
         # SES — send magic-link emails (only when FROM_EMAIL is set)
         - Statement:
             - Effect: Allow
@@ -755,6 +792,40 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}
+            Method: DELETE
+            Auth:
+              ApiKeyRequired: true
+        # Links — contacts
+        CreateContactLink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}/links
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+        DeleteContactLink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/contacts/{contact_id}/links/{link_id}
+            Method: DELETE
+            Auth:
+              ApiKeyRequired: true
+        # Links — properties
+        CreatePropertyLink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}/links
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+        DeletePropertyLink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/documents/{document_id}/properties/{property_id}/links/{link_id}
             Method: DELETE
             Auth:
               ApiKeyRequired: true
@@ -1214,6 +1285,10 @@ Outputs:
   EventsTableName:
     Description: Events DynamoDB table name
     Value: !Ref EventsTable
+
+  LinksTableName:
+    Description: Links DynamoDB table name
+    Value: !Ref LinksTable
 
   DocumentsBucketName:
     Description: S3 bucket storing scraped documents (documents/{location_code}/{doc_number}.pdf)
