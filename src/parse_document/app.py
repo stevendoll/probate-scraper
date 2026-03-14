@@ -36,6 +36,7 @@ import boto3
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from boto3.dynamodb.conditions import Key
 
 from prompt import SYSTEM_PROMPT, USER_PROMPT
 
@@ -345,6 +346,43 @@ def _write_properties(
     return written
 
 
+def _clear_existing(document_id: str) -> tuple[int, int]:
+    """
+    Delete all contacts and properties previously written for this document.
+
+    Called before writing new parse results so a re-parse fully replaces the
+    old data rather than appending duplicates.  Only invoked after Bedrock has
+    returned successfully — if S3 or Bedrock fail the existing records are kept.
+
+    Returns (contacts_deleted, properties_deleted).
+    """
+    # Contacts
+    contacts_result = _contacts_table.query(
+        IndexName="document-contact-index",
+        KeyConditionExpression=Key("document_id").eq(document_id),
+        ProjectionExpression="contact_id",
+    )
+    contacts_deleted = 0
+    with _contacts_table.batch_writer() as batch:
+        for item in contacts_result.get("Items", []):
+            batch.delete_item(Key={"contact_id": item["contact_id"]})
+            contacts_deleted += 1
+
+    # Properties
+    properties_result = _properties_table.query(
+        IndexName="document-property-index",
+        KeyConditionExpression=Key("document_id").eq(document_id),
+        ProjectionExpression="property_id",
+    )
+    properties_deleted = 0
+    with _properties_table.batch_writer() as batch:
+        for item in properties_result.get("Items", []):
+            batch.delete_item(Key={"property_id": item["property_id"]})
+            properties_deleted += 1
+
+    return contacts_deleted, properties_deleted
+
+
 def _update_document_status(
     document_id: str, model_id: str, parsed_at: str, error: str = ""
 ) -> None:
@@ -404,7 +442,14 @@ def parse_document(document_id: str):
         _update_document_status(document_id, _model_id, now, error=err_msg)
         return {"error": err_msg}, 500
 
-    # 4. Write contacts and properties
+    # 4. Clear any previously parsed records, then write fresh results
+    try:
+        _clear_existing(document_id)
+    except Exception as exc:
+        logger.error("DynamoDB clear failed: %s", exc)
+        _update_document_status(document_id, _model_id, now, error=str(exc))
+        return {"error": f"DynamoDB clear failed: {exc}"}, 500
+
     contacts_written = 0
     properties_written = 0
     try:

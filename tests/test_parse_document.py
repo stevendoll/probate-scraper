@@ -264,6 +264,109 @@ class TestParseDocument(unittest.TestCase):
         self.assertEqual(status, 500)
         self.assertIn("DynamoDB update failed", body["error"])
 
+    # ── 500 — clear fails ───────────────────────────────────────────────────
+
+    def test_clear_failure_returns_500_and_stores_parse_error(self):
+        """If _clear_existing raises, we return 500 and stamp parse_error."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+        self.mock_contacts_table.query.side_effect = Exception("ServiceUnavailable")
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 500)
+        self.assertIn("DynamoDB clear failed", body["error"])
+        # parse_error must be persisted
+        self.mock_documents_table.update_item.assert_called_once()
+        call_kwargs = self.mock_documents_table.update_item.call_args.kwargs
+        self.assertIn("ServiceUnavailable", call_kwargs["ExpressionAttributeValues"][":pe"])
+
+    def test_clear_not_called_when_bedrock_fails(self):
+        """Existing records must be preserved if Bedrock itself fails."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.side_effect = Exception("ThrottlingException")
+
+        parse_app.parse_document("20240001")
+
+        self.mock_contacts_table.query.assert_not_called()
+        self.mock_properties_table.query.assert_not_called()
+
+    # ── reparsing clears existing records ───────────────────────────────────
+
+    def _setup_existing_records(self, contact_ids=("old-c-1",), property_ids=("old-p-1",)):
+        """Configure mocks so the contacts/properties GSIs return existing records."""
+        self.mock_contacts_table.query.return_value = {
+            "Items": [{"contact_id": cid} for cid in contact_ids]
+        }
+        self.mock_properties_table.query.return_value = {
+            "Items": [{"property_id": pid} for pid in property_ids]
+        }
+        # batch_writer() context manager
+        self._mock_contact_batch   = MagicMock()
+        self._mock_property_batch  = MagicMock()
+        self.mock_contacts_table.batch_writer.return_value.__enter__.return_value   = self._mock_contact_batch
+        self.mock_contacts_table.batch_writer.return_value.__exit__.return_value    = False
+        self.mock_properties_table.batch_writer.return_value.__enter__.return_value = self._mock_property_batch
+        self.mock_properties_table.batch_writer.return_value.__exit__.return_value  = False
+
+    def test_reparsing_deletes_existing_contacts(self):
+        """Re-parse must delete all previously written contacts for the document."""
+        self._setup_existing_records(contact_ids=["old-c-1", "old-c-2"])
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        delete_calls = self._mock_contact_batch.delete_item.call_args_list
+        deleted_ids = {c.kwargs["Key"]["contact_id"] for c in delete_calls}
+        self.assertEqual(deleted_ids, {"old-c-1", "old-c-2"})
+
+    def test_reparsing_deletes_existing_properties(self):
+        """Re-parse must delete all previously written properties for the document."""
+        self._setup_existing_records(property_ids=["old-p-1", "old-p-2"])
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        delete_calls = self._mock_property_batch.delete_item.call_args_list
+        deleted_ids = {c.kwargs["Key"]["property_id"] for c in delete_calls}
+        self.assertEqual(deleted_ids, {"old-p-1", "old-p-2"})
+
+    def test_reparsing_with_no_existing_records_succeeds(self):
+        """First-time parse (no existing records) must still succeed cleanly."""
+        self.mock_contacts_table.query.return_value   = {"Items": []}
+        self.mock_properties_table.query.return_value = {"Items": []}
+        self.mock_contacts_table.batch_writer.return_value.__enter__.return_value   = MagicMock()
+        self.mock_contacts_table.batch_writer.return_value.__exit__.return_value    = False
+        self.mock_properties_table.batch_writer.return_value.__enter__.return_value = MagicMock()
+        self.mock_properties_table.batch_writer.return_value.__exit__.return_value  = False
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["contactsWritten"],   4)
+        self.assertEqual(body["propertiesWritten"], 2)
+
     # ── 200 — happy path ────────────────────────────────────────────────────
 
     def test_happy_path_returns_200_with_counts(self):
@@ -394,6 +497,36 @@ class TestParseDocument(unittest.TestCase):
         self.assertEqual(body["propertiesWritten"], 1)
         item = self.mock_properties_table.put_item.call_args.kwargs["Item"]
         self.assertEqual(item["address"], "123 Main St, Plano, TX 75001")
+
+    def test_property_full_address_string_fallback(self):
+        """When Bedrock can't split parts it returns the full string in address
+        with city/state/zip null — the property must still be written."""
+        payload = {**_GOOD_BEDROCK_PAYLOAD, "real_property": [
+            {
+                "address":           "6502 Star Creek, Frisco, TX 75034",
+                "city":              None,
+                "state":             None,
+                "zip":               None,
+                "legal_description": None,
+            }
+        ]}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(payload)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["propertiesWritten"], 1)
+        item = self.mock_properties_table.put_item.call_args.kwargs["Item"]
+        # Full unsplit address must be stored as-is
+        self.assertEqual(item["address"], "6502 Star Creek, Frisco, TX 75034")
+        # parsed_* snapshot must reflect the raw Bedrock output (empty city/state/zip)
+        self.assertEqual(item["parsed_city"],  "")
+        self.assertEqual(item["parsed_state"], "")
+        self.assertEqual(item["parsed_zip"],   "")
 
     def test_try_usaddress_returns_components_for_valid_address(self):
         """_try_usaddress extracts city/state/zip from a well-formed US address."""
