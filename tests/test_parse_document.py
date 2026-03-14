@@ -395,6 +395,36 @@ class TestParseDocument(unittest.TestCase):
         item = self.mock_properties_table.put_item.call_args.kwargs["Item"]
         self.assertEqual(item["address"], "123 Main St, Plano, TX 75001")
 
+    def test_property_full_address_string_fallback(self):
+        """When Bedrock can't split parts it returns the full string in address
+        with city/state/zip null — the property must still be written."""
+        payload = {**_GOOD_BEDROCK_PAYLOAD, "real_property": [
+            {
+                "address":           "6502 Star Creek, Frisco, TX 75034",
+                "city":              None,
+                "state":             None,
+                "zip":               None,
+                "legal_description": None,
+            }
+        ]}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(payload)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["propertiesWritten"], 1)
+        item = self.mock_properties_table.put_item.call_args.kwargs["Item"]
+        # Full unsplit address must be stored as-is
+        self.assertEqual(item["address"], "6502 Star Creek, Frisco, TX 75034")
+        # parsed_* snapshot must reflect the raw Bedrock output (empty city/state/zip)
+        self.assertEqual(item["parsed_city"],  "")
+        self.assertEqual(item["parsed_state"], "")
+        self.assertEqual(item["parsed_zip"],   "")
+
     def test_try_usaddress_returns_components_for_valid_address(self):
         """_try_usaddress extracts city/state/zip from a well-formed US address."""
         if not parse_app._USADDRESS_AVAILABLE:

@@ -28,10 +28,10 @@ Return ONLY this JSON shape (use null for any field you cannot find):
   ],
   "real_property": [
     {
-      "address":           "<street address only — number and street name, no city/state/zip>",
-      "city":              "<city name, or null>",
-      "state":             "<two-letter state abbreviation e.g. TX, or null>",
-      "zip":               "<5-digit ZIP code, or null>",
+      "address":           "<street address — if you can separate parts, put street number + name here; otherwise put the full raw address string here>",
+      "city":              "<city name if you can identify it, else null>",
+      "state":             "<two-letter state abbreviation e.g. TX if you can identify it, else null>",
+      "zip":               "<5-digit ZIP code if you can identify it, else null>",
       "legal_description": "<lot/block/subdivision legal description if present, else null>"
     }
   ],
@@ -48,10 +48,13 @@ Rules:
 - Prioritise extracting ALL beneficiaries and heirs named anywhere in the
   document, including those listed in an attached will or exhibit.
 - Use the most specific role you can determine from the text.
-- For real_property: extract street address, city, state, and ZIP as separate
-  fields when possible. If the document only contains a legal description
-  (lot/block/subdivision) with no street address, set address to null and put
-  the legal description in legal_description.
+- For real_property: always include every property mentioned. Put the street
+  address (or the full raw address string if parts cannot be cleanly separated)
+  in the address field — never omit a property just because you cannot parse
+  city/state/zip separately. Only set address to null when there is no street
+  address at all (e.g. the document contains only a legal description).
+  Separate city/state/zip fields are preferred but optional — leave them null
+  if you cannot identify them confidently.
 - If no real property is mentioned, return an empty array for real_property.
 - The summary must be 150 words or fewer and suitable for a non-lawyer audience.
 - Do not invent information that is not in the document.
