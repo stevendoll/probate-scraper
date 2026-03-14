@@ -133,7 +133,7 @@ def _call_bedrock(pdf_bytes: bytes) -> tuple[dict, str]:
             }
         ],
         inferenceConfig={
-            "maxTokens": 2048,
+            "maxTokens": 5120,  # Nova Pro max; 2048 truncated long people arrays
             "temperature": 0,
         },
     )
