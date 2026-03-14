@@ -983,18 +983,28 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt DocumentsTable.Arn
-        # Contacts — write parsed contacts
+        # Contacts — write parsed contacts + query/delete for re-parse clearing
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:PutItem
+                - dynamodb:BatchWriteItem
               Resource: !GetAtt ContactsTable.Arn
-        # Properties — write parsed properties
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub "${ContactsTable.Arn}/index/document-contact-index"
+        # Properties — write parsed properties + query/delete for re-parse clearing
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:PutItem
+                - dynamodb:BatchWriteItem
               Resource: !GetAtt PropertiesTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub "${PropertiesTable.Arn}/index/document-property-index"
         # S3 — read PDFs from the documents bucket
         - Statement:
             - Effect: Allow
