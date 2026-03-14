@@ -1046,6 +1046,7 @@ Resources:
           DOCUMENTS_TABLE_NAME: !Ref DocumentsTable
           CONTACTS_TABLE_NAME: !Ref ContactsTable
           PROPERTIES_TABLE_NAME: !Ref PropertiesTable
+          LINKS_TABLE_NAME: !Ref LinksTable
       Policies:
         # Documents — read + stamp parsed_at
         - Statement:
@@ -1076,6 +1077,17 @@ Resources:
               Action:
                 - dynamodb:Query
               Resource: !Sub "${PropertiesTable.Arn}/index/document-property-index"
+        # Links — auto-insert on parse + query/delete for re-parse clearing
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:BatchWriteItem
+              Resource: !GetAtt LinksTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub "${LinksTable.Arn}/index/document-link-index"
         # S3 — read PDFs from the documents bucket
         - Statement:
             - Effect: Allow

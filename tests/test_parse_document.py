@@ -169,15 +169,28 @@ class TestParseDocument(unittest.TestCase):
         self.mock_documents_table  = MagicMock()
         self.mock_contacts_table   = MagicMock()
         self.mock_properties_table = MagicMock()
+        self.mock_links_table      = MagicMock()
         self.mock_s3               = MagicMock()
         self.mock_bedrock          = MagicMock()
 
         parse_app._documents_table  = self.mock_documents_table
         parse_app._contacts_table   = self.mock_contacts_table
         parse_app._properties_table = self.mock_properties_table
+        parse_app._links_table      = self.mock_links_table
         parse_app._s3               = self.mock_s3
         parse_app._bedrock          = self.mock_bedrock
         parse_app._model_id         = "us.amazon.nova-pro-v1:0"
+
+        # Default: no pre-existing records to clear
+        self.mock_contacts_table.query.return_value   = {"Items": []}
+        self.mock_properties_table.query.return_value = {"Items": []}
+        self.mock_links_table.query.return_value      = {"Items": []}
+        self.mock_contacts_table.batch_writer.return_value.__enter__.return_value   = MagicMock()
+        self.mock_contacts_table.batch_writer.return_value.__exit__.return_value    = False
+        self.mock_properties_table.batch_writer.return_value.__enter__.return_value = MagicMock()
+        self.mock_properties_table.batch_writer.return_value.__exit__.return_value  = False
+        self.mock_links_table.batch_writer.return_value.__enter__.return_value      = MagicMock()
+        self.mock_links_table.batch_writer.return_value.__exit__.return_value       = False
 
     # ── 404 — document not found ─────────────────────────────────────────────
 
@@ -296,24 +309,31 @@ class TestParseDocument(unittest.TestCase):
 
         self.mock_contacts_table.query.assert_not_called()
         self.mock_properties_table.query.assert_not_called()
+        self.mock_links_table.query.assert_not_called()
 
     # ── reparsing clears existing records ───────────────────────────────────
 
-    def _setup_existing_records(self, contact_ids=("old-c-1",), property_ids=("old-p-1",)):
-        """Configure mocks so the contacts/properties GSIs return existing records."""
+    def _setup_existing_records(self, contact_ids=("old-c-1",), property_ids=("old-p-1",), link_ids=()):
+        """Configure mocks so the contacts/properties/links GSIs return existing records."""
         self.mock_contacts_table.query.return_value = {
             "Items": [{"contact_id": cid} for cid in contact_ids]
         }
         self.mock_properties_table.query.return_value = {
             "Items": [{"property_id": pid} for pid in property_ids]
         }
+        self.mock_links_table.query.return_value = {
+            "Items": [{"link_id": lid} for lid in link_ids]
+        }
         # batch_writer() context manager
         self._mock_contact_batch   = MagicMock()
         self._mock_property_batch  = MagicMock()
+        self._mock_link_batch      = MagicMock()
         self.mock_contacts_table.batch_writer.return_value.__enter__.return_value   = self._mock_contact_batch
         self.mock_contacts_table.batch_writer.return_value.__exit__.return_value    = False
         self.mock_properties_table.batch_writer.return_value.__enter__.return_value = self._mock_property_batch
         self.mock_properties_table.batch_writer.return_value.__exit__.return_value  = False
+        self.mock_links_table.batch_writer.return_value.__enter__.return_value      = self._mock_link_batch
+        self.mock_links_table.batch_writer.return_value.__exit__.return_value       = False
 
     def test_reparsing_deletes_existing_contacts(self):
         """Re-parse must delete all previously written contacts for the document."""
@@ -349,12 +369,7 @@ class TestParseDocument(unittest.TestCase):
 
     def test_reparsing_with_no_existing_records_succeeds(self):
         """First-time parse (no existing records) must still succeed cleanly."""
-        self.mock_contacts_table.query.return_value   = {"Items": []}
-        self.mock_properties_table.query.return_value = {"Items": []}
-        self.mock_contacts_table.batch_writer.return_value.__enter__.return_value   = MagicMock()
-        self.mock_contacts_table.batch_writer.return_value.__exit__.return_value    = False
-        self.mock_properties_table.batch_writer.return_value.__enter__.return_value = MagicMock()
-        self.mock_properties_table.batch_writer.return_value.__exit__.return_value  = False
+        # setUp already configures empty query returns + batch_writer mocks
         self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
         self.mock_s3.get_object.return_value = {
             "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
@@ -676,6 +691,155 @@ class TestParseDocument(unittest.TestCase):
         # 1 deceased contact, no people, no properties
         self.assertEqual(body["contactsWritten"],   1)
         self.assertEqual(body["propertiesWritten"], 0)
+
+    # ── auto-link insertion ──────────────────────────────────────────────────
+
+    def test_deceased_contact_inserts_legacy_link(self):
+        """Parsing a deceased contact auto-inserts a Legacy.com search link."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        # At least one put_item call to links_table should be the Legacy.com link
+        link_calls = self.mock_links_table.put_item.call_args_list
+        legacy_calls = [
+            c for c in link_calls
+            if c.kwargs["Item"].get("link_type") == "legacy"
+        ]
+        self.assertEqual(len(legacy_calls), 1)
+        item = legacy_calls[0].kwargs["Item"]
+        self.assertEqual(item["link_type"],   "legacy")
+        self.assertIn("legacy.com/search",    item["url"])
+        self.assertIn("Jane",                 item["url"])  # URL-encoded name present
+        self.assertEqual(item["parent_type"], "contact")
+        self.assertEqual(item["document_id"], "20240001")  # document_id is the route arg
+
+    def test_legacy_link_parent_id_matches_deceased_contact_id(self):
+        """The Legacy.com link's parent_id must equal the deceased contact's contact_id."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        # The deceased contact is always the first put_item call to contacts_table
+        deceased_contact_id = self.mock_contacts_table.put_item.call_args_list[0].kwargs["Item"]["contact_id"]
+        link_calls = self.mock_links_table.put_item.call_args_list
+        legacy_calls = [c for c in link_calls if c.kwargs["Item"].get("link_type") == "legacy"]
+        self.assertEqual(len(legacy_calls), 1)
+        self.assertEqual(legacy_calls[0].kwargs["Item"]["parent_id"], deceased_contact_id)
+
+    def test_property_with_address_inserts_google_maps_link(self):
+        """Parsing a property with an address auto-inserts a Google Maps search link."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        # _GOOD_BEDROCK_PAYLOAD has 2 real_property entries; only the first has an address
+        link_calls = self.mock_links_table.put_item.call_args_list
+        maps_calls = [
+            c for c in link_calls
+            if c.kwargs["Item"].get("link_type") == "google_maps"
+        ]
+        self.assertEqual(len(maps_calls), 1)
+        item = maps_calls[0].kwargs["Item"]
+        self.assertEqual(item["link_type"],   "google_maps")
+        self.assertIn("google.com/maps",      item["url"])
+        self.assertIn("123",                  item["url"])  # address present
+        self.assertEqual(item["parent_type"], "property")
+        self.assertEqual(item["document_id"], "20240001")  # document_id is the route arg
+
+    def test_google_maps_link_parent_id_matches_property_id(self):
+        """The Google Maps link's parent_id must equal the property's property_id."""
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        parse_app.parse_document("20240001")
+
+        # The first property put_item call (has address) → its property_id should be parent_id
+        first_property_id = self.mock_properties_table.put_item.call_args_list[0].kwargs["Item"]["property_id"]
+        link_calls = self.mock_links_table.put_item.call_args_list
+        maps_calls = [c for c in link_calls if c.kwargs["Item"].get("link_type") == "google_maps"]
+        self.assertEqual(len(maps_calls), 1)
+        self.assertEqual(maps_calls[0].kwargs["Item"]["parent_id"], first_property_id)
+
+    def test_property_without_address_does_not_insert_maps_link(self):
+        """A property with no address must NOT get a Google Maps link."""
+        payload = {**_GOOD_BEDROCK_PAYLOAD, "real_property": [
+            {"address": None, "city": None, "state": None, "zip": None,
+             "legal_description": "Lot 7, Block 3, Willow Creek Estates"}
+        ]}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(payload)
+
+        parse_app.parse_document("20240001")
+
+        link_calls = self.mock_links_table.put_item.call_args_list
+        maps_calls = [c for c in link_calls if c.kwargs["Item"].get("link_type") == "google_maps"]
+        self.assertEqual(len(maps_calls), 0)
+
+    def test_no_deceased_name_does_not_insert_legacy_link(self):
+        """When the deceased name is empty no Legacy.com link should be inserted."""
+        payload = {**_GOOD_BEDROCK_PAYLOAD, "deceased_name": None}
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(payload)
+
+        parse_app.parse_document("20240001")
+
+        link_calls = self.mock_links_table.put_item.call_args_list
+        legacy_calls = [c for c in link_calls if c.kwargs["Item"].get("link_type") == "legacy"]
+        self.assertEqual(len(legacy_calls), 0)
+
+    def test_reparsing_deletes_existing_links(self):
+        """Re-parse must delete all previously written links for the document."""
+        self._setup_existing_records(link_ids=["old-l-1", "old-l-2"])
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        body, status = parse_app.parse_document("20240001")
+
+        self.assertEqual(status, 200)
+        delete_calls = self._mock_link_batch.delete_item.call_args_list
+        deleted_ids = {c.kwargs["Key"]["link_id"] for c in delete_calls}
+        self.assertEqual(deleted_ids, {"old-l-1", "old-l-2"})
+
+    def test_links_table_failure_is_non_fatal(self):
+        """A failure writing to the links table must not abort the parse."""
+        self.mock_links_table.put_item.side_effect = Exception("LinksTableError")
+        self.mock_documents_table.get_item.return_value = {"Item": _make_document()}
+        self.mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"%PDF fake"))
+        }
+        self.mock_bedrock.converse.return_value = _bedrock_response(_GOOD_BEDROCK_PAYLOAD)
+
+        body, status = parse_app.parse_document("20240001")
+
+        # Contacts and properties must still be written successfully
+        self.assertEqual(status, 200)
+        self.assertEqual(body["contactsWritten"],   4)
+        self.assertEqual(body["propertiesWritten"], 2)
 
 
 # ---------------------------------------------------------------------------
