@@ -50,6 +50,21 @@ function roleBadgeVariant(role: string): 'default' | 'secondary' | 'outline' {
   return 'outline'
 }
 
+const ROLE_ORDER: Record<string, number> = {
+  deceased: 0,
+  executor: 1,
+  spouse:   2,
+  family:   3,
+}
+
+function roleOrder(role: string): number {
+  return ROLE_ORDER[role?.toLowerCase()] ?? 4
+}
+
+function sortContacts(contacts: Contact[]): Contact[] {
+  return [...contacts].sort((a, b) => roleOrder(a.role) - roleOrder(b.role))
+}
+
 // ---------------------------------------------------------------------------
 // Link helpers
 // ---------------------------------------------------------------------------
@@ -89,7 +104,7 @@ function contactLinkSuggestions(contact: Contact): Suggestion[] {
   const last   = encodeURIComponent(parts.length > 1 ? parts[parts.length - 1] : '')
   const full   = encodeURIComponent(name)
   return [
-    { label: 'Legacy.com',      url: `https://www.legacy.com/search?name=${full}`,                                                      linkType: 'legacy' },
+    // { label: 'Legacy.com', url: `https://www.legacy.com/search?name=${full}`, linkType: 'legacy' }, // disabled — search not reliable
     { label: 'FindAGrave',      url: `https://www.findagrave.com/memorial/search?firstname=${first}&lastname=${last}`,                  linkType: 'findagrave' },
     { label: 'Obituaries.com',  url: `https://www.obituaries.com/search/results/?fname=${first}&lname=${last}`,                        linkType: 'obituary' },
     { label: 'Google obituary', url: `https://www.google.com/search?q=${full}+obituary`,                                               linkType: 'obituary' },
@@ -97,7 +112,7 @@ function contactLinkSuggestions(contact: Contact): Suggestion[] {
 }
 
 // ---------------------------------------------------------------------------
-// LinkChip
+// LinkIcon — inline favicon icon for a saved link
 // ---------------------------------------------------------------------------
 
 const LINK_FAVICONS: Record<string, string> = {
@@ -111,29 +126,30 @@ const LINK_FAVICONS: Record<string, string> = {
   findagrave:    'https://www.google.com/s2/favicons?domain=findagrave.com&sz=16',
 }
 
-function LinkChip({ link, onDelete }: { link: Link; onDelete: () => void }) {
+function LinkIcon({ link, onDelete }: { link: Link; onDelete: () => void }) {
   const favicon = LINK_FAVICONS[link.linkType]
+  const label = link.label || LINK_TYPE_LABELS[link.linkType] || 'Link'
   return (
-    <span className="group inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+    <span className="group relative inline-flex shrink-0">
       <a
         href={link.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1 hover:text-foreground"
+        title={label}
+        className="flex items-center opacity-70 hover:opacity-100"
       >
         {favicon
-          ? <img src={favicon} alt="" className="h-3 w-3 shrink-0" />
-          : <ExternalLink size={10} />
+          ? <img src={favicon} alt={label} className="h-3.5 w-3.5" />
+          : <ExternalLink size={12} className="text-muted-foreground" />
         }
-        {link.label || LINK_TYPE_LABELS[link.linkType] || 'Link'}
       </a>
       <button
         type="button"
         onClick={onDelete}
-        className="ml-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
-        aria-label="Remove link"
+        aria-label={`Remove ${label}`}
+        className="absolute -right-1 -top-1 hidden h-3 w-3 items-center justify-center rounded-full bg-destructive text-white group-hover:flex"
       >
-        <X size={10} />
+        <X size={6} />
       </button>
     </span>
   )
@@ -486,7 +502,18 @@ function ContactRow({
             {contact.role}
           </Badge>
         </TableCell>
-        <TableCell className="font-medium whitespace-nowrap">{contact.name || '—'}</TableCell>
+        <TableCell className="font-medium whitespace-nowrap">
+          <span className="flex items-center gap-1.5">
+            {contact.name || '—'}
+            {links.map(link => (
+              <LinkIcon
+                key={link.linkId}
+                link={link}
+                onDelete={() => deleteLinkMut.mutate(link.linkId)}
+              />
+            ))}
+          </span>
+        </TableCell>
         <TableCell className="text-sm">{contact.email || '—'}</TableCell>
         <TableCell className="whitespace-nowrap text-sm">{contact.dob || '—'}</TableCell>
         <TableCell className="whitespace-nowrap text-sm">{contact.dod || '—'}</TableCell>
@@ -514,23 +541,6 @@ function ContactRow({
           </div>
         </TableCell>
       </TableRow>
-
-      {/* Links sub-row */}
-      {links.length > 0 && (
-        <TableRow className="hover:bg-transparent border-t-0">
-          <TableCell colSpan={8} className="pb-2 pt-0 pl-6">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {links.map(link => (
-                <LinkChip
-                  key={link.linkId}
-                  link={link}
-                  onDelete={() => deleteLinkMut.mutate(link.linkId)}
-                />
-              ))}
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
 
       {editOpen && (
         <EditContactDialog
@@ -600,7 +610,7 @@ function ContactsSection({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contacts.map(c => (
+              {sortContacts(contacts).map(c => (
                 <ContactRow
                   key={c.contactId}
                   documentId={documentId}
@@ -647,12 +657,17 @@ function PropertyRow({
           <span className="flex items-center gap-1.5">
             {property.address || '—'}
             {property.isVerified && (
-              <CheckCircle
-                className="shrink-0 text-green-500"
-                size={14}
-                aria-label="Address verified"
-              />
+              <span title="Address verified — parsed and confirmed by address validator">
+                <CheckCircle className="shrink-0 text-green-500" size={14} />
+              </span>
             )}
+            {links.map(link => (
+              <LinkIcon
+                key={link.linkId}
+                link={link}
+                onDelete={() => deleteLinkMut.mutate(link.linkId)}
+              />
+            ))}
           </span>
         </TableCell>
         <TableCell>{property.city || '—'}</TableCell>
@@ -682,23 +697,6 @@ function PropertyRow({
           </div>
         </TableCell>
       </TableRow>
-
-      {/* Links sub-row */}
-      {links.length > 0 && (
-        <TableRow className="hover:bg-transparent border-t-0">
-          <TableCell colSpan={7} className="pb-2 pt-0 pl-6">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {links.map(link => (
-                <LinkChip
-                  key={link.linkId}
-                  link={link}
-                  onDelete={() => deleteLinkMut.mutate(link.linkId)}
-                />
-              ))}
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
 
       {editOpen && (
         <EditPropertyDialog

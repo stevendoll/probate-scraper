@@ -5,6 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Git workflow
 
 - Always push commits to the current branch. Never create a new branch unless explicitly told to.
+- When committing, add a `Prompted-by:` trailer as the last line of the commit message body (before `Co-Authored-By:`). Summarise the user's intent in ≤ 120 characters — what they asked for, not what you did. Example:
+  ```
+  Prompted-by: split the leads table into documents, contacts, and properties
+  ```
+
+## Prompt history
+
+Every Claude session is automatically logged to `docs/sessions/` via the Stop hook in `.claude/settings.json`. Each file captures all user prompts with timestamps for that session.
+
+- Session files are named `YYYY-MM-DD-{short-session-id}.md`
+- When opening a PR, reference the session file in the PR body so reviewers can see what was asked
+- These files are committed alongside code changes to preserve designer intent
 
 ## Commands
 
