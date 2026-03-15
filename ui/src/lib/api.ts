@@ -7,10 +7,13 @@
  */
 
 import type {
+  AppEvent,
   AuthVerifyResponse,
   Contact,
   DocumentDetailResponse,
   DocumentsResponse,
+  EventsDashboardResponse,
+  EventsResponse,
   LeadsResponse,
   Link,
   LocationResponse,
@@ -326,4 +329,48 @@ export async function createCheckoutSession(token: string): Promise<{ url: strin
     throw new Error(body.error ?? 'Failed to start checkout')
   }
   return res.json() as Promise<{ url: string }>
+}
+
+// ---------------------------------------------------------------------------
+// Admin event dashboard
+// ---------------------------------------------------------------------------
+
+export interface AdminEventsParams {
+  user_id?:    string
+  event_type?: string
+  from_date?:  string
+  to_date?:    string
+  limit?:      number
+}
+
+export async function adminListAllEvents(params: AdminEventsParams = {}): Promise<EventsResponse> {
+  return authedFetch('/admin/events', { params: params as Record<string, string | number | undefined> })
+}
+
+export async function adminGetEventsDashboard(weeks?: number): Promise<EventsDashboardResponse> {
+  return authedFetch('/admin/events/dashboard', { params: weeks ? { weeks } : {} })
+}
+
+// ---------------------------------------------------------------------------
+// Feedback
+// ---------------------------------------------------------------------------
+
+export interface FeedbackBody {
+  message: string
+  source:  string
+  email?:  string
+}
+
+/** Public endpoint — no API key or Bearer token required. */
+export async function submitFeedback(body: FeedbackBody): Promise<{ status: string }> {
+  const res = await fetch(`${BASE}/feedback`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(json.error ?? 'Failed to submit feedback')
+  }
+  return res.json() as Promise<{ status: string }>
 }

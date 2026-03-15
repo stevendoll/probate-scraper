@@ -27,6 +27,9 @@ Routes (all under /real-estate/probate-leads/):
   POST /auth/unsubscribe                    — unsubscribe via prospect JWT (no API key)
   POST /events                              — track prospect-initiated events (prospect JWT)
   GET  /events                              — query events for a user (admin Bearer token, ?user_id=&limit=)
+  GET  /admin/events                        — list all events with filtering (admin Bearer token)
+  GET  /admin/events/dashboard              — funnel + weekly + status aggregates (admin Bearer token)
+  POST /feedback                            — submit user feedback (public, no auth)
 
 Environment variables:
   DOCUMENTS_TABLE_NAME    — documents table
@@ -45,6 +48,7 @@ Environment variables:
   UI_BASE_URL             — base URL for prospect subscribe/unsubscribe links
   FROM_EMAIL              — SES verified sender; leave blank to skip sending (local dev)
   SES_CONFIGURATION_SET  — SES configuration set name for event publishing
+  ADMIN_EMAIL             — destination for feedback emails (default: admin@collincountyleads.com)
 """
 
 from aws_lambda_powertools import Logger, Tracer
@@ -61,7 +65,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import documents, locations, users, stripe, auth, admin, prospect, event
+from routers import documents, locations, users, stripe, auth, admin, prospect, event, event_dashboard, feedback
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -83,6 +87,8 @@ api.include_router(auth.router)
 api.include_router(admin.router)
 api.include_router(prospect.router)
 api.include_router(event.router)
+api.include_router(event_dashboard.router)
+api.include_router(feedback.router)
 
 # ---------------------------------------------------------------------------
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)

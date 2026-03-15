@@ -14,9 +14,14 @@ import Unsubscribe from '@/pages/Unsubscribe'
 import Dashboard from '@/pages/Dashboard'
 import Account from '@/pages/Account'
 import DocumentDetail from '@/pages/DocumentDetail'
+import HowItWorks from '@/pages/HowItWorks'
+import Contact from '@/pages/Contact'
+import Feedback from '@/pages/Feedback'
 import AdminUsers from '@/pages/admin/Users'
 import AdminUserDetail from '@/pages/admin/UserDetail'
 import AdminProspectSend from '@/pages/admin/ProspectSend'
+import AdminEvents from '@/pages/admin/Events'
+import AdminEventsDashboard from '@/pages/admin/EventsDashboard'
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -33,23 +38,26 @@ function ProtectedRoute({ requireAdmin = false }: { requireAdmin?: boolean }) {
 // Layouts
 // ---------------------------------------------------------------------------
 
-function UserLayout() {
+/** Shared nav link style */
+const navLink = 'text-sm text-muted-foreground hover:text-foreground transition-colors'
+
+/**
+ * CustomerLayout — shown for authenticated user pages.
+ * Nav: brand + Dashboard + Account
+ */
+function CustomerLayout() {
   const { data: user } = useQuery({ queryKey: ['me'], queryFn: getMe })
   const nav = useNavigate()
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b">
+      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-40">
         <div className="mx-auto max-w-5xl flex items-center justify-between h-14 px-4">
           <nav className="flex items-center gap-6">
-            <Link to="/dashboard" className="font-semibold text-lg tracking-tight">
-              Probate Leads
+            <Link to="/" className="font-semibold text-base tracking-tight text-foreground">
+              Collin County Leads
             </Link>
-            <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Dashboard
-            </Link>
-            <Link to="/account" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Account
-            </Link>
+            <Link to="/dashboard" className={navLink}>Dashboard</Link>
+            <Link to="/account" className={navLink}>Account</Link>
           </nav>
           {user && <UserNav user={user} navigate={nav} />}
         </div>
@@ -61,27 +69,55 @@ function UserLayout() {
   )
 }
 
+/**
+ * PublicLayout — wraps public marketing pages (Landing, HowItWorks, Contact, Feedback).
+ * Same brand nav but without auth-only links.
+ */
+function PublicLayout() {
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-40">
+        <div className="mx-auto max-w-5xl flex items-center justify-between h-14 px-4">
+          <nav className="flex items-center gap-6">
+            <Link to="/" className="font-semibold text-base tracking-tight text-foreground">
+              Collin County Leads
+            </Link>
+            <Link to="/how-it-works" className={navLink}>How it works</Link>
+            <Link to="/contact" className={navLink}>Contact</Link>
+          </nav>
+          <Link to="/login" className="text-sm font-medium text-primary hover:underline">
+            Sign in
+          </Link>
+        </div>
+      </header>
+      <main className="flex-1">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+
+/**
+ * AdminLayout — shown for admin-only pages.
+ * Same shared theme; wider nav with Events, Dashboard, Users, Prospects links.
+ */
 function AdminLayout() {
   const { data: user } = useQuery({ queryKey: ['me'], queryFn: getMe })
   const nav = useNavigate()
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b bg-muted/40">
+      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-40">
         <div className="mx-auto max-w-5xl flex items-center justify-between h-14 px-4">
           <nav className="flex items-center gap-6">
-            <Link to="/admin/users" className="font-semibold text-lg tracking-tight">
-              Probate Leads{' '}
+            <Link to="/admin/users" className="font-semibold text-base tracking-tight text-foreground">
+              Collin County Leads{' '}
               <span className="text-muted-foreground font-normal text-sm">Admin</span>
             </Link>
-            <Link to="/admin/users" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Users
-            </Link>
-            <Link to="/admin/prospect/send" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Prospects
-            </Link>
-            <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              My dashboard
-            </Link>
+            <Link to="/admin/events/dashboard" className={navLink}>Dashboard</Link>
+            <Link to="/admin/events" className={navLink}>Events</Link>
+            <Link to="/admin/users" className={navLink}>Users</Link>
+            <Link to="/admin/prospect/send" className={navLink}>Prospects</Link>
+            <Link to="/dashboard" className={navLink}>My dashboard</Link>
           </nav>
           {user && <UserNav user={user} navigate={nav} />}
         </div>
@@ -102,27 +138,37 @@ export default function App() {
     <QueryProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          {/* Public marketing pages */}
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<Landing />} />
+            <Route path="/how-it-works" element={<HowItWorks />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/feedback" element={<Feedback />} />
+          </Route>
+
+          {/* Auth flows — no layout */}
           <Route path="/login" element={<Login />} />
           <Route path="/auth/verify" element={<AuthVerify />} />
-
-          {/* Public prospect pages — no auth required */}
           <Route path="/signup" element={<Signup />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
 
+          {/* Authenticated customer pages */}
           <Route element={<ProtectedRoute />}>
-            <Route element={<UserLayout />}>
+            <Route element={<CustomerLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/account" element={<Account />} />
               <Route path="/documents/:documentId" element={<DocumentDetail />} />
             </Route>
           </Route>
 
+          {/* Admin-only pages */}
           <Route element={<ProtectedRoute requireAdmin />}>
             <Route element={<AdminLayout />}>
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/users/:userId" element={<AdminUserDetail />} />
               <Route path="/admin/prospect/send" element={<AdminProspectSend />} />
+              <Route path="/admin/events" element={<AdminEvents />} />
+              <Route path="/admin/events/dashboard" element={<AdminEventsDashboard />} />
             </Route>
           </Route>
 

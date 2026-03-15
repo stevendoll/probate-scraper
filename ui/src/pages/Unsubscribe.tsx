@@ -2,6 +2,19 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { unsubscribe } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { FeedbackWidget } from '@/components/feedback-widget'
+
+/** Extract the email claim from a JWT payload without verifying the signature. */
+function decodeTokenEmail(token: string): string {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return ''
+    const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof json?.email === 'string' ? json.email : ''
+  } catch {
+    return ''
+  }
+}
 
 export default function Unsubscribe() {
   const [searchParams]        = useSearchParams()
@@ -9,6 +22,8 @@ export default function Unsubscribe() {
   const [loading, setLoading] = useState(false)
   const [done, setDone]       = useState(false)
   const [error, setError]     = useState<string | null>(null)
+
+  const prospectEmail = decodeTokenEmail(token)
 
   async function handleUnsubscribe() {
     if (!token) return
@@ -40,12 +55,19 @@ export default function Unsubscribe() {
   if (done) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="max-w-sm text-center space-y-3">
-          <h1 className="text-xl font-semibold">You've been unsubscribed</h1>
-          <p className="text-sm text-muted-foreground">
-            You won't receive any more emails from us. If this was a mistake,
-            contact us to reactivate.
-          </p>
+        <div className="max-w-sm w-full space-y-8">
+          <div className="text-center space-y-3">
+            <h1 className="text-xl font-semibold">You've been unsubscribed</h1>
+            <p className="text-sm text-muted-foreground">
+              You won't receive any more emails from us. If this was a mistake,
+              contact us to reactivate.
+            </p>
+          </div>
+          <FeedbackWidget
+            title="Tell us why"
+            source="unsubscribe-page"
+            defaultEmail={prospectEmail}
+          />
         </div>
       </div>
     )
@@ -53,8 +75,8 @@ export default function Unsubscribe() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="max-w-sm w-full text-center space-y-6">
-        <div className="space-y-1">
+      <div className="max-w-sm w-full space-y-6">
+        <div className="text-center space-y-1">
           <h1 className="text-2xl font-semibold">Unsubscribe</h1>
           <p className="text-sm text-muted-foreground">
             Are you sure you want to stop receiving Collin County Probate Leads emails?

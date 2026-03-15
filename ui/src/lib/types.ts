@@ -150,3 +150,45 @@ export interface AuthVerifyResponse {
   accessToken: string
   user: User
 }
+
+// ---------------------------------------------------------------------------
+// Events dashboard
+// ---------------------------------------------------------------------------
+
+export interface FunnelStep {
+  event_type:      string
+  count:           number
+  conversion_rate: number
+}
+
+export interface WeeklyRow {
+  week:   string
+  counts: Record<string, number>
+}
+
+export interface AppEvent {
+  event_id:   string
+  user_id:    string
+  event_type: string
+  timestamp:  string
+  variant?:   string
+  metadata?:  Record<string, unknown>
+}
+
+export interface EventsDashboard {
+  funnel:             FunnelStep[]
+  weekly:             WeeklyRow[]
+  user_statuses:      Record<string, number>
+  recent_conversions: Array<{ user_id: string; email: string; converted_at: string }>
+}
+
+export interface EventsResponse {
+  requestId: string
+  events:    AppEvent[]
+  count:     number
+}
+
+export interface EventsDashboardResponse {
+  requestId: string
+  dashboard: EventsDashboard
+}

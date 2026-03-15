@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { getMe } from '@/lib/api'
 import { LeadsTable } from '@/components/leads-table'
 import { Badge } from '@/components/ui/badge'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  active: 'default',
+  active:   'default',
   trialing: 'secondary',
   past_due: 'destructive',
   canceled: 'outline',
@@ -13,16 +13,40 @@ const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'o
 }
 
 export default function Dashboard() {
-  const { data: user, isLoading, isError } = useQuery({ queryKey: ['me'], queryFn: getMe })
+  const [searchParams, setSearchParams] = useSearchParams()
+  const checkoutSuccess = searchParams.get('checkout') === 'success'
+
+  const { data: user, isLoading, isError } = useQuery({
+    queryKey: ['me'],
+    queryFn:  getMe,
+    // Poll every 3 s while checkout=success and subscription not yet active
+    refetchInterval: (query) => {
+      const u = query.state.data
+      return checkoutSuccess && u?.status !== 'active' ? 3000 : false
+    },
+  })
+
+  // Once status reaches active, clear the ?checkout=success param
+  if (checkoutSuccess && user?.status === 'active') {
+    setSearchParams({})
+  }
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (isError || !user) return <Navigate to="/login" replace />
 
-  const variant = statusVariant[user.status] ?? 'outline'
+  const variant  = statusVariant[user.status] ?? 'outline'
   const isActive = user.status === 'active' || user.status === 'trialing'
 
   return (
     <div className="space-y-6">
+      {/* Checkout-pending activation banner */}
+      {checkoutSuccess && user.status !== 'active' && (
+        <div className="rounded-md border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary flex items-center gap-2">
+          <span className="animate-spin inline-block h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+          Activating your subscription…
+        </div>
+      )}
+
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Your leads</h1>
