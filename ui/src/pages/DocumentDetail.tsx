@@ -798,7 +798,7 @@ export default function DocumentDetail() {
 
   const parseMut = useMutation({
     mutationFn: () => parseDocument(documentId!),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['documents', documentId] }),
+    onSuccess: () => window.location.reload(),
   })
 
   if (isLoading) {

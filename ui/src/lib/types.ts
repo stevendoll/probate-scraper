@@ -167,9 +167,9 @@ export interface WeeklyRow {
 }
 
 export interface AppEvent {
-  event_id:   string
-  user_id:    string
-  event_type: string
+  eventId:    string
+  userId:     string
+  eventType:  string
   timestamp:  string
   variant?:   string
   metadata?:  Record<string, unknown>

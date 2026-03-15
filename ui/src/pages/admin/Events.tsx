@@ -133,16 +133,16 @@ export default function AdminEvents() {
                   </td>
                 </tr>
               ) : events.map(ev => (
-                <tr key={ev.event_id} className="hover:bg-muted/20 transition-colors">
+                <tr key={ev.eventId} className="hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-2 font-mono text-xs text-muted-foreground whitespace-nowrap">
                     {ev.timestamp.slice(0, 19).replace('T', ' ')}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
-                    <span title={ev.user_id}>{ev.user_id.slice(0, 8)}…</span>
+                    <span title={ev.userId}>{ev.userId.slice(0, 8)}…</span>
                   </td>
                   <td className="px-4 py-2">
-                    <Badge variant={typeBadgeVariant[ev.event_type] ?? 'outline'} className="text-xs">
-                      {ev.event_type}
+                    <Badge variant={typeBadgeVariant[ev.eventType] ?? 'outline'} className="text-xs">
+                      {ev.eventType}
                     </Badge>
                   </td>
                   <td className="px-4 py-2 text-xs text-muted-foreground">
