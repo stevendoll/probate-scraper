@@ -115,6 +115,7 @@ POST /{location_path}/update              trigger Fargate scrape (TriggerFunctio
 | `DOWNLOAD_DIR` | scraper | `/tmp/scraper_downloads` | local dir for Chrome downloads |
 | `CHROME_BIN` | scraper | `/usr/bin/chromium` | set in Dockerfile |
 | `CHROMEDRIVER_PATH` | scraper | `/usr/bin/chromedriver` | set in Dockerfile |
+| `ADMIN_EMAIL` | api | `admin@collincountyleads.com` | destination for feedback notification emails |
 
 To run the scraper locally (outside Docker), first start DynamoDB Local, then:
 ```bash

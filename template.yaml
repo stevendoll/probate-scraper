@@ -132,6 +132,12 @@ Parameters:
       Base URL of the React UI, used to build prospect subscribe/unsubscribe links
       in marketing emails, e.g. https://collincountyleads.com.
 
+  AdminEmail:
+    Type: String
+    Default: "admin@collincountyleads.com"
+    Description: >
+      Destination email address for admin notifications (feedback submissions, etc.).
+
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
@@ -167,6 +173,7 @@ Globals:
         MAGIC_LINK_BASE_URL: !Ref MagicLinkBaseUrl
         UI_BASE_URL: !Ref UiBaseUrl
         FROM_EMAIL: !Ref FromEmail
+        ADMIN_EMAIL: !Ref AdminEmail
 
 # ---------------------------------------------------------------------------
 # Resources
@@ -698,12 +705,13 @@ Resources:
               Resource:
                 - !GetAtt UsersTable.Arn
                 - !Sub "${UsersTable.Arn}/index/*"
-        # Events — write + query
+        # Events — write + query + scan (admin dashboard)
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:PutItem
                 - dynamodb:Query
+                - dynamodb:Scan
               Resource:
                 - !GetAtt EventsTable.Arn
                 - !Sub "${EventsTable.Arn}/index/*"
@@ -982,6 +990,26 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/events
             Method: GET
+        # Admin events list + dashboard (no API key; admin Bearer JWT required)
+        AdminListAllEvents:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/events
+            Method: GET
+        AdminEventsDashboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/admin/events/dashboard
+            Method: GET
+        # Feedback — public, no API key or auth required
+        PostFeedback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/feedback
+            Method: POST
 
   # ── Lambda — POST /{location_path}/update ─────────────────────────────────
 

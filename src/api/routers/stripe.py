@@ -51,9 +51,13 @@ def stripe_webhook():
         try:
             db.users_table.update_item(
                 Key={"user_id": user_id},
-                UpdateExpression="SET stripe_customer_id = :cid, updated_at = :updated_at",
+                UpdateExpression=(
+                    "SET stripe_customer_id = :cid, #status = :status, updated_at = :updated_at"
+                ),
+                ExpressionAttributeNames={"#status": "status"},
                 ExpressionAttributeValues={
                     ":cid":        stripe_customer_id,
+                    ":status":     "pending",
                     ":updated_at": now_iso(),
                 },
             )
@@ -61,7 +65,7 @@ def stripe_webhook():
             logger.error("users update stripe_customer_id failed: %s", exc)
             return {"error": "Database error"}, 500
         logger.info(
-            "checkout.session.completed user=%s stripe_customer=%s",
+            "checkout.session.completed user=%s stripe_customer=%s status=pending",
             user_id, stripe_customer_id,
         )
         return {
@@ -106,15 +110,23 @@ def stripe_webhook():
         return {"received": True, "action": "no_subscriber_found"}, 200
 
     user_id = items[0]["user_id"]
+
+    # Build update expression — always set status; also persist subscription ID when available
+    update_parts  = ["#status = :status", "updated_at = :updated_at"]
+    attr_names    = {"#status": "status"}
+    attr_values   = {":status": new_status, ":updated_at": now_iso()}
+
+    stripe_sub_id = data_object.get("id", "") if event_type == "customer.subscription.created" else ""
+    if stripe_sub_id:
+        update_parts.append("stripe_subscription_id = :sub_id")
+        attr_values[":sub_id"] = stripe_sub_id
+
     try:
         db.users_table.update_item(
             Key={"user_id": user_id},
-            UpdateExpression="SET #status = :status, updated_at = :updated_at",
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={
-                ":status":     new_status,
-                ":updated_at": now_iso(),
-            },
+            UpdateExpression="SET " + ", ".join(update_parts),
+            ExpressionAttributeNames=attr_names,
+            ExpressionAttributeValues=attr_values,
         )
     except Exception as exc:
         logger.error("users update for webhook failed: %s", exc)
