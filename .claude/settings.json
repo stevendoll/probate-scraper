@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/steven/Developer/probate-scraper/scripts/extract_session.py"
+          }
+        ]
+      }
+    ]
+  }
+}

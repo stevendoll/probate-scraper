@@ -1,5 +1,5 @@
 .env
-.claude
+.claude/settings.local.json
 .DS_Store
 .aws-sam/
 .vscode/
