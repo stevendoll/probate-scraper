@@ -39,25 +39,43 @@ function ProtectedRoute({ requireAdmin = false }: { requireAdmin?: boolean }) {
 // ---------------------------------------------------------------------------
 
 /** Shared nav link style */
-const navLink = 'text-sm text-muted-foreground hover:text-foreground transition-colors'
+const navLink      = 'text-sm text-muted-foreground hover:text-foreground transition-colors'
+/** Admin nav link style — violet to distinguish from user links */
+const adminNavLink = 'text-sm text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 transition-colors'
 
 /**
- * CustomerLayout — shown for authenticated user pages.
- * Nav: brand + Dashboard + Account
+ * AppLayout — single authenticated layout for both customer and admin pages.
+ * User links (Dashboard, Account) sit on the left; if the user is an admin,
+ * admin links (Analytics, Events, Users, Prospects) follow in violet after a
+ * thin separator.
  */
-function CustomerLayout() {
+function AppLayout() {
   const { data: user } = useQuery({ queryKey: ['me'], queryFn: getMe })
   const nav = useNavigate()
+  const isAdmin = user?.role === 'admin'
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-40">
         <div className="mx-auto max-w-5xl flex items-center justify-between h-14 px-4">
           <nav className="flex items-center gap-6">
-            <Link to="/" className="font-semibold text-base tracking-tight text-foreground">
+            {/* ── User links ── */}
+            <Link to="/dashboard" className="font-semibold text-base tracking-tight text-foreground">
               Collin County Leads
             </Link>
             <Link to="/dashboard" className={navLink}>Dashboard</Link>
-            <Link to="/account" className={navLink}>Account</Link>
+            <Link to="/account"   className={navLink}>Account</Link>
+
+            {/* ── Admin links (admins only) ── */}
+            {isAdmin && (
+              <>
+                <span className="h-4 w-px bg-border" aria-hidden="true" />
+                <Link to="/admin/events/dashboard" className={adminNavLink}>Analytics</Link>
+                <Link to="/admin/events"           className={adminNavLink}>Events</Link>
+                <Link to="/admin/users"            className={adminNavLink}>Users</Link>
+                <Link to="/admin/prospect/send"    className={adminNavLink}>Prospects</Link>
+              </>
+            )}
           </nav>
           {user && <UserNav user={user} navigate={nav} />}
         </div>
@@ -83,7 +101,7 @@ function PublicLayout() {
               Collin County Leads
             </Link>
             <Link to="/how-it-works" className={navLink}>How it works</Link>
-            <Link to="/contact" className={navLink}>Contact</Link>
+            <Link to="/contact"      className={navLink}>Contact</Link>
           </nav>
           <Link to="/login" className="text-sm font-medium text-primary hover:underline">
             Sign in
@@ -91,38 +109,6 @@ function PublicLayout() {
         </div>
       </header>
       <main className="flex-1">
-        <Outlet />
-      </main>
-    </div>
-  )
-}
-
-/**
- * AdminLayout — shown for admin-only pages.
- * Same shared theme; wider nav with Events, Dashboard, Users, Prospects links.
- */
-function AdminLayout() {
-  const { data: user } = useQuery({ queryKey: ['me'], queryFn: getMe })
-  const nav = useNavigate()
-  return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-40">
-        <div className="mx-auto max-w-5xl flex items-center justify-between h-14 px-4">
-          <nav className="flex items-center gap-6">
-            <Link to="/admin/users" className="font-semibold text-base tracking-tight text-foreground">
-              Collin County Leads{' '}
-              <span className="text-muted-foreground font-normal text-sm">Admin</span>
-            </Link>
-            <Link to="/admin/events/dashboard" className={navLink}>Dashboard</Link>
-            <Link to="/admin/events" className={navLink}>Events</Link>
-            <Link to="/admin/users" className={navLink}>Users</Link>
-            <Link to="/admin/prospect/send" className={navLink}>Prospects</Link>
-            <Link to="/dashboard" className={navLink}>My dashboard</Link>
-          </nav>
-          {user && <UserNav user={user} navigate={nav} />}
-        </div>
-      </header>
-      <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-8">
         <Outlet />
       </main>
     </div>
@@ -152,23 +138,22 @@ export default function App() {
           <Route path="/signup" element={<Signup />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
 
-          {/* Authenticated customer pages */}
+          {/* Authenticated pages — single layout for users and admins */}
           <Route element={<ProtectedRoute />}>
-            <Route element={<CustomerLayout />}>
+            <Route element={<AppLayout />}>
+              {/* Customer routes */}
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/account" element={<Account />} />
               <Route path="/documents/:documentId" element={<DocumentDetail />} />
-            </Route>
-          </Route>
 
-          {/* Admin-only pages */}
-          <Route element={<ProtectedRoute requireAdmin />}>
-            <Route element={<AdminLayout />}>
-              <Route path="/admin/users" element={<AdminUsers />} />
-              <Route path="/admin/users/:userId" element={<AdminUserDetail />} />
-              <Route path="/admin/prospect/send" element={<AdminProspectSend />} />
-              <Route path="/admin/events" element={<AdminEvents />} />
-              <Route path="/admin/events/dashboard" element={<AdminEventsDashboard />} />
+              {/* Admin-only routes — nested guard */}
+              <Route element={<ProtectedRoute requireAdmin />}>
+                <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/users/:userId" element={<AdminUserDetail />} />
+                <Route path="/admin/prospect/send" element={<AdminProspectSend />} />
+                <Route path="/admin/events" element={<AdminEvents />} />
+                <Route path="/admin/events/dashboard" element={<AdminEventsDashboard />} />
+              </Route>
             </Route>
           </Route>
 
