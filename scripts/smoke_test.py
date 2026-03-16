@@ -299,7 +299,9 @@ def test_auth_cors() -> None:
         )
 
     # POST /auth/request-login must accept requests without an API key.
-    r = post("/auth/request-login", {"email": "smoke-noreply@example.com"}, require_key=False)
+    # Use the verified admin address so the existing-user path is taken
+    # (magic link only — no prospect email, no SES rejection).
+    r = post("/auth/request-login", {"email": "admin@collincountyleads.com"}, require_key=False)
     check(
         "POST /auth/request-login (no API key) → 200",
         r.status_code == 200,
