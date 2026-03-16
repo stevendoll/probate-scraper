@@ -63,8 +63,10 @@ function AppLayout() {
             <Link to="/dashboard" className="font-semibold text-base tracking-tight text-foreground">
               Collin County Leads
             </Link>
-            <Link to="/dashboard" className={navLink}>Dashboard</Link>
-            <Link to="/account"   className={navLink}>Account</Link>
+            <Link to="/dashboard"    className={navLink}>Dashboard</Link>
+            <Link to="/account"      className={navLink}>Account</Link>
+            <Link to="/how-it-works" className={navLink}>How it works</Link>
+            <Link to="/contact"      className={navLink}>Contact</Link>
 
             {/* ── Admin links (admins only) ── */}
             {isAdmin && (
