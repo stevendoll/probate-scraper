@@ -43,7 +43,7 @@ export function TrialBanner({ onSubscribe }: TrialBannerProps) {
 
   const { data: trialData } = useQuery({
     queryKey: ['trialStatus', userId],
-    queryFn: () => getTrialStatus(userId!),
+    queryFn: () => userId ? getTrialStatus(userId) : Promise.reject('No user ID'),
     enabled: !!userId,
     refetchInterval: 1000 * 60 * 60, // Refetch every hour
   })
