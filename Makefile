@@ -160,7 +160,7 @@ deploy: sam-build
 			fi; \
 		done; \
 	fi; \
-	sam deploy --parameter-overrides "JwtSecret=$$JWT_SECRET"
+	sam deploy --parameter-overrides JwtSecret=$$JWT_SECRET
 	$(MAKE) deploy-ui
 
 deploy-ui:

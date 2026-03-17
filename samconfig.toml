@@ -26,12 +26,12 @@ s3_prefix             = "probate-scraper"
 
 # ── Update these before deploying ─────────────────────────────────────────
 parameter_overrides = """
-  VpcId=vpc-REPLACE_ME
-  SubnetIds=subnet-REPLACE_ME_1,subnet-REPLACE_ME_2
+  VpcId=vpc-05ba2b5563a179d60
+  SubnetIds=subnet-066bc56d9cfcca086,subnet-0363963d2a87e1daa
   ScraperImageUri=600775874112.dkr.ecr.us-east-1.amazonaws.com/probate-scraper/scraper:latest
-  ScrapeSchedule=cron(0 6 * * ? *)
-  ScraperUsername=REPLACE_ME
-  ScraperPassword=REPLACE_ME
+  ScrapeSchedule="cron(0 6 * * ? *)"
+  ScraperUsername=""
+  ScraperPassword="placeholder"
   BedrockModelId=us.amazon.nova-pro-v1:0
   MagicLinkBaseUrl=https://collincountyleads.com/auth/verify
   FromEmail=hello@collincountyleads.com

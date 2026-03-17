@@ -22,6 +22,9 @@ import AdminUserDetail from '@/pages/admin/UserDetail'
 import AdminProspectSend from '@/pages/admin/ProspectSend'
 import AdminEvents from '@/pages/admin/Events'
 import AdminEventsDashboard from '@/pages/admin/EventsDashboard'
+import WaitlistSignup from '@/pages/WaitlistSignup'
+import WaitlistSuccess from '@/pages/WaitlistSuccess'
+import TrialSignup from '@/pages/TrialSignup'
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -139,6 +142,11 @@ export default function App() {
           <Route path="/auth/verify" element={<AuthVerify />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/unsubscribe" element={<Unsubscribe />} />
+
+          {/* Customer journey flows — no layout */}
+          <Route path="/waitlist/signup" element={<WaitlistSignup />} />
+          <Route path="/waitlist/success" element={<WaitlistSuccess />} />
+          <Route path="/trial/signup" element={<TrialSignup />} />
 
           {/* Authenticated pages — single layout for users and admins */}
           <Route element={<ProtectedRoute />}>
