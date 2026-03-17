@@ -1010,6 +1010,43 @@ Resources:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/feedback
             Method: POST
+        # Customer Journeys — admin endpoints require admin Bearer JWT, public endpoints no auth
+        JourneysInviteToWaitlist:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/journeys/invite-to-waitlist
+            Method: POST
+        JourneysAcceptWaitlist:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/journeys/accept-waitlist
+            Method: POST
+        JourneysInviteToJoinFromWaitlist:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/journeys/invite-to-join-from-waitlist
+            Method: POST
+        JourneysInviteToTrial:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/journeys/invite-to-trial
+            Method: POST
+        JourneysStartTrial:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/journeys/start-trial
+            Method: POST
+        JourneysTrialStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/journeys/trial-status/{user_id}
+            Method: GET
 
   # ── Lambda — POST /{location_path}/update ─────────────────────────────────
 
