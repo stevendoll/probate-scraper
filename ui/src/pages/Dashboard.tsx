@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, useSearchParams } from 'react-router-dom'
-import { getMe } from '@/lib/api'
+import { getMe, createCheckoutSession } from '@/lib/api'
 import { LeadsTable } from '@/components/leads-table'
 import { Badge } from '@/components/ui/badge'
+import { TrialBanner } from '@/components/trial-banner'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   active:   'default',
@@ -37,8 +38,17 @@ export default function Dashboard() {
   const variant  = statusVariant[user.status] ?? 'outline'
   const isActive = user.status === 'active' || user.status === 'trialing'
 
+  const handleSubscribe = async () => {
+    // For trial users, we'd need to create a prospect token
+    // For now, redirect to contact page
+    window.location.href = '/contact'
+  }
+
   return (
     <div className="space-y-6">
+      {/* Free trial banner */}
+      <TrialBanner onSubscribe={handleSubscribe} />
+
       {/* Checkout-pending activation banner */}
       {checkoutSuccess && user.status !== 'active' && (
         <div className="rounded-md border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary flex items-center gap-2">

@@ -94,10 +94,13 @@ The React SPA lives in `ui/` and is built with Vite + React + TailwindCSS + shad
 | `/` | `Landing` | Marketing landing page |
 | `/login` | `Login` | Magic-link sign-in form |
 | `/auth/verify` | `AuthVerify` | Exchanges magic token for access token, redirects to dashboard |
-| `/signup` | `Signup` | Funnel signup page with pricing |
-| `/dashboard` | `Dashboard` | Leads table with date-range filters |
+| `/signup` | `Signup` | Prospect signup page with pricing (existing journey) |
+| `/dashboard` | `Dashboard` | Leads table with date-range filters + trial countdown banner |
 | `/documents/:documentId` | `DocumentDetail` | Filing details, parsed contacts and properties, editable links per row |
 | `/account` | `Account` | Edit email, view subscription status |
+| `/waitlist/signup` | `WaitlistSignup` | Join waitlist for coming soon journey |
+| `/waitlist/success` | `WaitlistSuccess` | Waitlist confirmation with countdown |
+| `/trial/signup` | `TrialSignup` | Free trial invitation signup |
 | `/admin/users` | `admin/Users` | Admin: list and manage all users |
 | `/admin/users/:id` | `admin/UserDetail` | Admin: view and edit a single user |
 
@@ -121,9 +124,13 @@ The React SPA lives in `ui/` and is built with Vite + React + TailwindCSS + shad
 4. `AuthVerify` exchanges the token → API returns an access token stored in `localStorage`
 5. Authenticated requests use `Authorization: Bearer <token>`
 
-**User Status Flow**: `inbound` → `prospect` → `free_trial` → `active`
+**User Status Flow**: Multiple customer journeys supported:
 
-Tokens are short-lived JWTs signed with `JWT_SECRET`. Magic-link tokens expire in 15 minutes; access tokens expire in 7 days; funnel tokens expire in 30 days.
+1. **Coming Soon Journey**: `invited_to_waitlist` → `accepted_waitlist` → `invited_to_join` → `subscribed`
+2. **Prospect Journey**: `inbound` → `prospect` → `active`
+3. **Free Trial Journey**: `invited_to_trial` → `trialing` → `active` | `trial_expired`
+
+Tokens are short-lived JWTs signed with `JWT_SECRET`. Magic-link tokens expire in 15 minutes; access tokens expire in 7 days; prospect tokens expire in 30 days.
 
 ### Local development
 
@@ -391,6 +398,19 @@ No API key required. All auth routes are public.
 | `GET` | `/auth/leads` | Get own leads (Bearer token, active users only) |
 | `POST` | `/auth/unsubscribe` | Unsubscribe via funnel JWT (no API key) |
 
+### Customer Journeys
+
+Bearer token required for admin endpoints; public endpoints for user actions.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/journeys/invite-to-waitlist` | Admin | Send waitlist invitations |
+| `POST` | `/journeys/accept-waitlist` | Public | Accept waitlist signup |
+| `POST` | `/journeys/invite-to-join-from-waitlist` | Admin | Send launch invitations to waitlist users |
+| `POST` | `/journeys/invite-to-trial` | Admin | Send free trial invitations |
+| `POST` | `/journeys/start-trial` | Public | Start free trial with prospect JWT |
+| `GET` | `/journeys/trial-status/{user_id}` | Bearer | Get trial status for UI banners |
+
 ### Admin
 
 Bearer token required, user must have `role: admin`.
@@ -508,10 +528,13 @@ ui/
       Landing.tsx            # Marketing landing page
       Login.tsx              # Magic-link sign-in
       AuthVerify.tsx         # Token exchange + redirect
-      Signup.tsx             # Funnel signup with pricing
-      Dashboard.tsx          # Documents table (own leads)
+      Signup.tsx             # Prospect signup with pricing (existing journey)
+      Dashboard.tsx          # Documents table (own leads) + trial countdown banner
       DocumentDetail.tsx     # Single document: filing details, people, real estate
       Account.tsx            # User profile
+      WaitlistSignup.tsx     # Join waitlist for coming soon journey
+      WaitlistSuccess.tsx    # Waitlist confirmation with countdown
+      TrialSignup.tsx        # Free trial invitation signup
       admin/
         Users.tsx            # Admin user list
         UserDetail.tsx       # Admin user detail
@@ -519,6 +542,8 @@ ui/
       leads-table.tsx        # Filterable documents table with links to detail page
       login-form.tsx         # Email form
       user-nav.tsx           # Avatar dropdown
+      trial-banner.tsx       # Free trial countdown banner
+      waitlist-form.tsx      # Waitlist signup form component
     lib/
       api.ts                 # Typed API client (incl. createLink / deleteLink)
       auth.ts                # Token storage helpers
@@ -527,10 +552,17 @@ ui/
 src/
   api/
     app.py                   # Lambda handler — all API routes
-    routers/                 # documents, locations, users, auth, admin, stripe, funnel, activity
+    routers/                 # documents, locations, users, auth, admin, stripe, customer_journeys
     auth_helpers.py          # JWT helpers + email sending + activity tracking
-    models.py                # Document, Contact, Property, Link, Location, User dataclasses
+    email_templates.py       # Jinja2-based email template system for customer journeys
+    models.py                # Document, Contact, Property, Link, Location, User dataclasses (+ journey fields)
     stripe_helpers.py        # Stripe webhook signature verification
+    templates/
+      journeys/              # Customer journey email templates
+        coming_soon/         # Waitlist invitation, acceptance confirmation
+        prospect/            # Enhanced prospect email templates
+        free_trial/          # Trial invitation templates
+        subjects/            # Subject line variations by journey type
     requirements.txt
   scraper/
     app.py                   # ECS entrypoint
