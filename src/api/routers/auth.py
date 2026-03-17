@@ -59,6 +59,9 @@ def _create_inbound_user(email: str, first_name: str = "", last_name: str = "") 
         "offered_price":          19,
         "created_at":             now,
         "updated_at":             now,
+        "trial_expires_on":       "",
+        "journey_type":           "prospect",
+        "journey_step":           "inbound",
     }
     try:
         db.users_table.put_item(Item=user_item)

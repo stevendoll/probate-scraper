@@ -21,6 +21,7 @@ from auth_helpers import (
 )
 from data_helpers import parse_email_input
 from email_helpers import send_prospect_email
+from email_templates import send_journey_email
 from models import Document, User
 from utils import now_iso
 
@@ -187,6 +188,9 @@ def admin_prospect_send():
                 "offered_price":          price,
                 "created_at":             now,
                 "updated_at":             now,
+                "trial_expires_on":       "",
+                "journey_type":           "prospect",
+                "journey_step":           "prospect",
             }
             try:
                 db.users_table.put_item(Item=user_item)

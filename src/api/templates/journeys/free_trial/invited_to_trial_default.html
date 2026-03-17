@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ subject }}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
+        .container { max-width: 600px; margin: 0 auto; background-color: white; }
+        .header { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 40px 20px; text-align: center; color: white; }
+        .content { padding: 40px 20px; }
+        .trial-badge { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 16px 24px; border-radius: 8px; display: inline-block; font-weight: 600; margin: 20px 0; }
+        .cta-button { display: inline-block; background: #3b82f6; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; margin: 20px 0; font-weight: 600; font-size: 18px; }
+        .benefits { background-color: #f1f5f9; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .footer { background-color: #f8fafc; padding: 20px; text-align: center; font-size: 14px; color: #64748b; }
+    </style>
+</head>
+<body>
+    <div style="display: none;">{{ preheader }}</div>
+
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0; font-size: 28px;">🎁 FREE Trial Invitation</h1>
+            <p style="margin: 10px 0 0; font-size: 16px; opacity: 0.9;">14 Days of Collin County Probate Leads</p>
+        </div>
+
+        <div class="content">
+            {% if user.first_name %}
+            <p>Hi {{ user.first_name }},</p>
+            {% else %}
+            <p>Hi there,</p>
+            {% endif %}
+
+            <div style="text-align: center;">
+                <div class="trial-badge">✨ FREE {{ trial_days }}-Day Trial</div>
+            </div>
+
+            <p>You've been selected for exclusive access to try <strong>Collin County Probate Leads</strong> completely free for {{ trial_days }} days!</p>
+
+            <div class="benefits">
+                <h3 style="margin: 0 0 15px 0; color: #1e293b;">What you get during your trial:</h3>
+                <ul style="margin: 0; padding-left: 20px;">
+                    <li>📊 <strong>Fresh daily probate filings</strong> from Collin County</li>
+                    <li>🏠 <strong>Complete property details</strong> including addresses and values</li>
+                    <li>👥 <strong>Contact information</strong> for executors, heirs, and attorneys</li>
+                    <li>📈 <strong>Advanced filtering</strong> by property value, date, and more</li>
+                    <li>📱 <strong>Mobile-friendly dashboard</strong> for leads on the go</li>
+                </ul>
+            </div>
+
+            <p><strong>No credit card required.</strong> No commitments. Just 14 days of unlimited access to discover how probate leads can transform your real estate business.</p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{ trial_signup_url }}" class="cta-button">Start My Free Trial</a>
+            </div>
+
+            <p style="background-color: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;"><strong>⚡ Limited Time:</strong> This free trial offer expires in 48 hours. Don't miss your chance to get ahead of the competition!</p>
+
+            <p>Questions? Just reply to this email — we're here to help!</p>
+
+            <p>Best regards,<br>
+            The Probate Leads Team</p>
+        </div>
+
+        <div class="footer">
+            <p>You received this exclusive free trial invitation because of your interest in probate leads.</p>
+            <p>Trial automatically ends after {{ trial_days }} days with no charges.</p>
+        </div>
+    </div>
+</body>
+</html>

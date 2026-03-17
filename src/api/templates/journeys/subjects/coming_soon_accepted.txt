@@ -1,0 +1,5 @@
+✅ You're on our waitlist!
+Welcome to the waitlist, {first_name}!
+You're in! We'll notify you soon
+Thanks for joining our waitlist
+{first_name}, you're on the list!

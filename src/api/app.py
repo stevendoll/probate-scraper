@@ -65,7 +65,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import documents, locations, users, stripe, auth, admin, prospect, event, event_dashboard, feedback
+from routers import documents, locations, users, stripe, auth, admin, prospect, event, event_dashboard, feedback, customer_journeys
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -89,6 +89,7 @@ api.include_router(prospect.router)
 api.include_router(event.router)
 api.include_router(event_dashboard.router)
 api.include_router(feedback.router)
+api.include_router(customer_journeys.router)
 
 # ---------------------------------------------------------------------------
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)

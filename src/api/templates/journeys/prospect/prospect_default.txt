@@ -1,0 +1,37 @@
+Fresh Collin County Probate Leads
+
+{% if user.firstName %}Hi {{ user.firstName }},{% else %}Hi there,{% endif %}
+
+Here are the latest probate filings from Collin County — fresh opportunities for motivated real estate investors:
+
+{% if leads and leads|length > 0 %}Recent Probate Filings:
+{% for lead in leads[:10] %}
+• {{ lead.grantor or lead.Grantor or '' }} - {{ lead.recordedDate or lead.recorded_date or '' }} (Doc# {{ lead.docNumber or lead.doc_number or '' }})
+{% endfor %}
+{% endif %}
+
+Why probate leads?
+• Motivated sellers: Heirs often want quick sales
+• Below-market prices: Less competition than MLS listings
+• Perfect timing: Get there before other investors
+• Fresh data: Updated daily from county records
+
+SPECIAL OFFER: Get unlimited access for just ${{ price }}/month
+
+Join hundreds of investors who are already using our probate leads to:
+- Find off-market properties before they're listed
+- Connect directly with property owners and heirs
+- Build a consistent pipeline of investment opportunities
+
+Subscribe now: {{ subscribe_url }}
+
+No setup fees - start immediately with instant access to our full database.
+
+Questions? Just reply to this email.
+
+Best regards,
+{% if from_name %}{{ from_name }}{% else %}The Probate Leads Team{% endif %}
+
+---
+You received this email because of your interest in Collin County real estate opportunities.
+{% if unsubscribe_url %}Unsubscribe: {{ unsubscribe_url }}{% endif %}

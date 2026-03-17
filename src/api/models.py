@@ -421,6 +421,10 @@ class User:
     offered_price:          int = 0
     created_at:             str = ""
     updated_at:             str = ""
+    # Customer journey fields
+    trial_expires_on:       str = ""  # ISO timestamp for free trial expiration
+    journey_type:           str = "prospect"  # coming_soon | prospect | free_trial
+    journey_step:           str = ""  # current step in the customer journey
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "User":
@@ -438,6 +442,9 @@ class User:
             offered_price=          int(item.get("offered_price", 0) or 0),
             created_at=             item.get("created_at", ""),
             updated_at=             item.get("updated_at", ""),
+            trial_expires_on=       item.get("trial_expires_on", ""),
+            journey_type=           item.get("journey_type", "prospect"),
+            journey_step=           item.get("journey_step", ""),
         )
 
     def to_dict(self) -> dict:
@@ -455,4 +462,7 @@ class User:
             "offeredPrice":          self.offered_price,
             "createdAt":             self.created_at,
             "updatedAt":             self.updated_at,
+            "trialExpiresOn":        self.trial_expires_on,
+            "journeyType":           self.journey_type,
+            "journeyStep":           self.journey_step,
         }
