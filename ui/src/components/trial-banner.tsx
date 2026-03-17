@@ -39,11 +39,16 @@ interface TrialBannerProps {
 
 export function TrialBanner({ onSubscribe }: TrialBannerProps) {
   const { payload } = useAuth()
-  const userId = payload?.sub
+  const userId = payload?.sub as string | undefined
 
   const { data: trialData } = useQuery({
     queryKey: ['trialStatus', userId],
-    queryFn: () => userId ? getTrialStatus(userId) : Promise.reject('No user ID'),
+    queryFn: () => {
+      if (!userId) {
+        return Promise.reject('No user ID')
+      }
+      return getTrialStatus(userId)
+    },
     enabled: !!userId,
     refetchInterval: 1000 * 60 * 60, // Refetch every hour
   })
