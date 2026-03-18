@@ -13,6 +13,7 @@ Routes (all under /real-estate/probate-leads/):
   PATCH /users/{user_id}                    — update user (locations, status)
   DELETE /users/{user_id}                   — soft-delete user (status → inactive)
   POST /stripe/webhook                      — Stripe event webhook (no API key)
+  POST /resend/webhook                      — Resend email event webhook (no API key)
   POST /stripe/checkout                     — create Stripe Checkout Session (no API key)
   POST /auth/request-login                  — request magic-link email
   GET  /auth/verify                         — exchange magic token for access token
@@ -46,8 +47,9 @@ Environment variables:
   JWT_SECRET              — HMAC-SHA256 secret for magic + access tokens
   MAGIC_LINK_BASE_URL     — base URL for magic link emails
   UI_BASE_URL             — base URL for prospect subscribe/unsubscribe links
-  FROM_EMAIL              — SES verified sender; leave blank to skip sending (local dev)
-  SES_CONFIGURATION_SET  — SES configuration set name for event publishing
+  FROM_EMAIL              — verified sender address; leave blank to skip sending (local dev)
+  RESEND_API_KEY          — Resend API key (re_...); leave blank to skip sending (local dev)
+  RESEND_WEBHOOK_SECRET   — Resend webhook signing secret; leave blank to skip verification
   ADMIN_EMAIL             — destination for feedback emails (default: admin@collincountyleads.com)
 """
 
@@ -65,7 +67,7 @@ from utils import (
     now_iso as _now_iso,
     parse_date as _parse_date,
 )
-from routers import documents, locations, users, stripe, auth, admin, prospect, event, event_dashboard, feedback, customer_journeys
+from routers import documents, locations, users, stripe, auth, admin, prospect, event, event_dashboard, feedback, customer_journeys, resend_webhook
 
 logger = Logger(service="probate-api")
 tracer = Tracer(service="probate-api")
@@ -90,6 +92,7 @@ api.include_router(event.router)
 api.include_router(event_dashboard.router)
 api.include_router(feedback.router)
 api.include_router(customer_journeys.router)
+api.include_router(resend_webhook.router)
 
 # ---------------------------------------------------------------------------
 # Backward-compatible transform shims (used by TestHelpers in test_api.py)

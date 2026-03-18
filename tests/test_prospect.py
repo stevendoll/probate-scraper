@@ -244,50 +244,58 @@ class TestCreateProspectToken(unittest.TestCase):
 
 class TestSendProspectEmail(unittest.TestCase):
 
-    def test_no_ses_when_from_email_unset(self):
-        original = email_helpers.FROM_EMAIL
-        email_helpers.FROM_EMAIL = ""
+    def test_no_send_when_from_email_unset(self):
+        original_from = email_helpers.FROM_EMAIL
+        original_key  = email_helpers.RESEND_API_KEY
+        email_helpers.FROM_EMAIL     = ""
+        email_helpers.RESEND_API_KEY = ""
         try:
             leads = [{"grantor": "SMITH JOHN", "recordedDate": "2026-01-23", "docNumber": "123"}]
             token = auth_helpers.create_prospect_token("u1", "x@y.com", 19)
-            with patch("boto3.client") as mock_boto:
+            with patch("resend.Emails.send") as mock_send:
                 email_helpers.send_prospect_email("x@y.com", token, leads, 19)
-                mock_boto.assert_not_called()
+                mock_send.assert_not_called()
         finally:
-            email_helpers.FROM_EMAIL = original
+            email_helpers.FROM_EMAIL     = original_from
+            email_helpers.RESEND_API_KEY = original_key
 
-    def test_calls_ses_when_from_email_set(self):
-        original = email_helpers.FROM_EMAIL
-        email_helpers.FROM_EMAIL = "noreply@example.com"
+    def test_calls_resend_when_credentials_set(self):
+        original_from = email_helpers.FROM_EMAIL
+        original_key  = email_helpers.RESEND_API_KEY
+        email_helpers.FROM_EMAIL     = "noreply@example.com"
+        email_helpers.RESEND_API_KEY = "re_test_key"
         try:
             leads = [{"grantor": "SMITH JOHN", "recordedDate": "2026-01-23", "docNumber": "123"}]
             token = auth_helpers.create_prospect_token("u1", "x@y.com", 19)
-            mock_ses = MagicMock()
-            with patch("boto3.client", return_value=mock_ses):
+            with patch("resend.Emails.send") as mock_send:
                 email_helpers.send_prospect_email("x@y.com", token, leads, 19)
-            mock_ses.send_email.assert_called_once()
-            call_kwargs = mock_ses.send_email.call_args[1]
-            self.assertIn("Html", call_kwargs["Message"]["Body"])
+            mock_send.assert_called_once()
+            call_params = mock_send.call_args[0][0]
+            self.assertIn("html", call_params)
         finally:
-            email_helpers.FROM_EMAIL = original
+            email_helpers.FROM_EMAIL     = original_from
+            email_helpers.RESEND_API_KEY = original_key
 
     def test_subscribe_url_in_html(self):
         original_from = email_helpers.FROM_EMAIL
+        original_key  = email_helpers.RESEND_API_KEY
         original_ui   = email_helpers.UI_BASE_URL
-        email_helpers.FROM_EMAIL  = "noreply@example.com"
-        email_helpers.UI_BASE_URL = "https://example.com"
+        email_helpers.FROM_EMAIL     = "noreply@example.com"
+        email_helpers.RESEND_API_KEY = "re_test_key"
+        email_helpers.UI_BASE_URL    = "https://example.com"
         try:
             leads = []
             token = auth_helpers.create_prospect_token("u1", "x@y.com", 39)
-            mock_ses = MagicMock()
-            with patch("boto3.client", return_value=mock_ses):
+            with patch("resend.Emails.send") as mock_send:
                 email_helpers.send_prospect_email("x@y.com", token, leads, 39)
-            html = mock_ses.send_email.call_args[1]["Message"]["Body"]["Html"]["Data"]
+            call_params = mock_send.call_args[0][0]
+            html = call_params["html"]
             self.assertIn("/signup?token=", html)
             self.assertIn("/unsubscribe?token=", html)
         finally:
-            email_helpers.FROM_EMAIL  = original_from
-            email_helpers.UI_BASE_URL = original_ui
+            email_helpers.FROM_EMAIL     = original_from
+            email_helpers.RESEND_API_KEY = original_key
+            email_helpers.UI_BASE_URL    = original_ui
 
 
 # ---------------------------------------------------------------------------
@@ -436,13 +444,10 @@ class TestAdminProspectSend(unittest.TestCase):
                 self.assertEqual(user_item["last_name"], expected_last)
                 self.assertEqual(user_item["email"], email_input.split("<")[1].split(">")[0].strip())
 
-    def test_sends_clean_email_to_ses(self):
-        """Test that only clean email address is passed to SES, not the full format."""
-        mock_ses = MagicMock()
-
-        with patch("boto3.client", return_value=mock_ses):
-            with patch("routers.prospect.send_prospect_email") as mock_send:
-                resp = self._post({"emails": ["John Doe <john@example.com>"]})
+    def test_sends_clean_email_to_resend(self):
+        """Test that only clean email address is passed to send_prospect_email, not the full format."""
+        with patch("routers.prospect.send_prospect_email") as mock_send:
+            resp = self._post({"emails": ["John Doe <john@example.com>"]})
 
         # Check that send_prospect_email was called with clean email
         mock_send.assert_called_once()

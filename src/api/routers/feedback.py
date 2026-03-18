@@ -3,14 +3,13 @@ Public feedback route (no API key, no auth required):
 
   POST /real-estate/probate-leads/feedback
 
-Logs a DynamoDB event and sends an SES email to ADMIN_EMAIL.
+Logs a DynamoDB event and sends a Resend email to ADMIN_EMAIL.
 """
 
 import logging
 import os
 import uuid
 
-import boto3
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler.api_gateway import Router
 from boto3.dynamodb.conditions import Attr
@@ -21,17 +20,9 @@ from utils import now_iso
 logger = Logger(service="probate-api")
 router = Router()
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@collincountyleads.com")
-FROM_EMAIL  = os.environ.get("FROM_EMAIL", "")
-
-_ses = None
-
-
-def _get_ses():
-    global _ses  # noqa: PLW0603
-    if _ses is None:
-        _ses = boto3.client("ses")
-    return _ses
+ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@collincountyleads.com")
+FROM_EMAIL     = os.environ.get("FROM_EMAIL", "")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +77,8 @@ def post_feedback():
         logger.error("Failed to store feedback event: %s", exc)
         # Continue — still try to send the email
 
-    # Send email to admin (skip if FROM_EMAIL not configured)
-    if FROM_EMAIL and ADMIN_EMAIL:
+    # Send email to admin (skip if FROM_EMAIL / RESEND_API_KEY not configured)
+    if FROM_EMAIL and ADMIN_EMAIL and RESEND_API_KEY:
         ts = now_iso()
         body_text = "\n".join([
             f"Source: {source}",
@@ -98,20 +89,20 @@ def post_feedback():
         ])
         subject = f"New feedback — {source}"
         try:
-            _get_ses().send_email(
-                Source=FROM_EMAIL,
-                Destination={"ToAddresses": [ADMIN_EMAIL]},
-                Message={
-                    "Subject": {"Data": subject},
-                    "Body":    {"Text": {"Data": body_text}},
-                },
-            )
+            import resend  # noqa: PLC0415
+            resend.api_key = RESEND_API_KEY
+            resend.Emails.send({
+                "from":    FROM_EMAIL,
+                "to":      [ADMIN_EMAIL],
+                "subject": subject,
+                "text":    body_text,
+            })
             logger.info("Feedback email sent to %s", ADMIN_EMAIL)
         except Exception as exc:
             logger.error("Failed to send feedback email: %s", exc)
     else:
         logger.info(
-            "Feedback received (email skipped — FROM_EMAIL not set): source=%s",
+            "Feedback received (email skipped — FROM_EMAIL/RESEND_API_KEY not set): source=%s",
             source,
         )
 
