@@ -29,6 +29,9 @@ export default function AdminUserDetail() {
   const [status, setStatus] = useState('')
   const [role, setRole] = useState('')
   const [locationCodes, setLocationCodes] = useState('')
+  const [journeyType, setJourneyType] = useState('')
+  const [journeyStep, setJourneyStep] = useState('')
+  const [trialExpiresOn, setTrialExpiresOn] = useState('')
   const [saved, setSaved] = useState(false)
 
   const user = data?.user
@@ -41,6 +44,9 @@ export default function AdminUserDetail() {
         ...(locationCodes !== ''
           ? { location_codes: locationCodes.split(',').map((s) => s.trim()).filter(Boolean) }
           : {}),
+        ...(journeyType ? { journey_type: journeyType } : {}),
+        ...(journeyStep ? { journey_step: journeyStep } : {}),
+        ...(trialExpiresOn ? { trial_expires_on: trialExpiresOn } : {}),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'users'] })
@@ -87,6 +93,29 @@ export default function AdminUserDetail() {
             <span className="text-muted-foreground">Counties: </span>
             {user.locationCodes.join(', ') || '—'}
           </p>
+          {user.journeyType && (
+            <p>
+              <span className="text-muted-foreground">Journey: </span>
+              <span className="capitalize">{user.journeyType.replace('_', ' ')}</span>
+              {user.journeyStep && ` → ${user.journeyStep.replace('_', ' ')}`}
+            </p>
+          )}
+          {user.trialExpiresOn && (
+            <p>
+              <span className="text-muted-foreground">Trial expires: </span>
+              {new Date(user.trialExpiresOn).toLocaleDateString()}
+            </p>
+          )}
+          {user.stripeCustomerId && (
+            <p>
+              <span className="text-muted-foreground">Stripe customer: </span>
+              <span className="font-mono text-xs">{user.stripeCustomerId}</span>
+            </p>
+          )}
+          <p>
+            <span className="text-muted-foreground">Created: </span>
+            {new Date(user.createdAt).toLocaleDateString()}
+          </p>
         </CardContent>
       </Card>
 
@@ -102,8 +131,15 @@ export default function AdminUserDetail() {
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
               <SelectContent>
-                {['active', 'inactive', 'past_due', 'canceled', 'trialing'].map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                {[
+                  'active', 'inactive', 'past_due', 'canceled', 'trialing', 'free_trial',
+                  'unsubscribed', 'prospect', 'inbound',
+                  'invited_to_waitlist', 'accepted_waitlist', 'invited_to_join',
+                  'invited_to_trial', 'trial_expired'
+                ].map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s.replace(/_/g, ' ')}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -129,6 +165,60 @@ export default function AdminUserDetail() {
               placeholder={user.locationCodes.join(', ') || 'e.g. CollinTx, DallasTx'}
               onChange={(e) => setLocationCodes(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Journey Type</Label>
+            <Select onValueChange={setJourneyType} defaultValue={user.journeyType}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select journey type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">None</SelectItem>
+                <SelectItem value="prospect">Prospect</SelectItem>
+                <SelectItem value="coming_soon">Coming Soon</SelectItem>
+                <SelectItem value="free_trial">Free Trial</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Journey Step</Label>
+            <Select onValueChange={setJourneyStep} defaultValue={user.journeyStep}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select journey step" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">None</SelectItem>
+                <SelectItem value="prospect">Prospect</SelectItem>
+                <SelectItem value="inbound">Inbound</SelectItem>
+                <SelectItem value="invited_to_waitlist">Invited to Waitlist</SelectItem>
+                <SelectItem value="accepted_waitlist">Accepted Waitlist</SelectItem>
+                <SelectItem value="invited_to_join">Invited to Join</SelectItem>
+                <SelectItem value="invited_to_trial">Invited to Trial</SelectItem>
+                <SelectItem value="trialing">Trialing</SelectItem>
+                <SelectItem value="trial_expired">Trial Expired</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="trialExpires">Trial Expires (ISO date)</Label>
+            <Input
+              id="trialExpires"
+              type="datetime-local"
+              placeholder={user.trialExpiresOn || 'YYYY-MM-DDTHH:MM:SS'}
+              onChange={(e) => {
+                // Convert datetime-local to ISO string
+                const isoString = e.target.value ? new Date(e.target.value).toISOString() : ''
+                setTrialExpiresOn(isoString)
+              }}
+            />
+            {user.trialExpiresOn && (
+              <p className="text-xs text-muted-foreground">
+                Current: {new Date(user.trialExpiresOn).toLocaleString()}
+              </p>
+            )}
           </div>
 
           {patchMutation.isError && (
