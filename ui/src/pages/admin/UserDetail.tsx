@@ -20,7 +20,7 @@ export default function AdminUserDetail() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'users', userId],
     queryFn: () => adminGetUser(userId!),
     enabled: !!userId,
@@ -63,8 +63,42 @@ export default function AdminUserDetail() {
     },
   })
 
-  if (isLoading || !user) {
+  if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+            ← Back
+          </Button>
+          <h1 className="text-2xl font-semibold">User not found</h1>
+        </div>
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4">
+          <p className="text-sm text-destructive">
+            {error instanceof Error ? error.message : 'Failed to load user details'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+            ← Back
+          </Button>
+          <h1 className="text-2xl font-semibold">User not found</h1>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          The requested user does not exist or you don't have permission to view it.
+        </p>
+      </div>
+    )
   }
 
   return (

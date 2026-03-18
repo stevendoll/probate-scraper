@@ -20,6 +20,7 @@ import type {
   LocationsResponse,
   Property,
   ProspectSendResponse,
+  ProspectSendResult,
   User,
   UserResponse,
   UsersResponse,
@@ -303,7 +304,65 @@ export async function adminDeleteUser(userId: string): Promise<UserResponse> {
 export async function adminSendProspect(
   emails: string[],
   leadCount: number,
+  journeyType: string = 'prospect',
 ): Promise<ProspectSendResponse> {
+  // For non-prospect journeys, use customer journey endpoints
+  if (journeyType === 'coming_soon') {
+    // For coming_soon journey, we'll call invite-to-waitlist for each email
+    const results: ProspectSendResult[] = []
+
+    for (const email of emails) {
+      try {
+        await authedFetch('/journeys/invite-to-waitlist', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: email.trim(),
+            first_name: '',
+            last_name: ''
+          }),
+        })
+        results.push({ email, status: 'sent', message: 'Waitlist invitation sent' })
+      } catch (error) {
+        results.push({
+          email,
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Failed to send'
+        })
+      }
+    }
+
+    return { requestId: crypto.randomUUID(), results, count: results.length }
+  }
+
+  if (journeyType === 'free_trial') {
+    // For free_trial journey, we'll call invite-to-trial for each email
+    const results: ProspectSendResult[] = []
+
+    for (const email of emails) {
+      try {
+        await authedFetch('/journeys/invite-to-trial', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: email.trim(),
+            first_name: '',
+            last_name: '',
+            trial_days: 14
+          }),
+        })
+        results.push({ email, status: 'sent', message: 'Trial invitation sent' })
+      } catch (error) {
+        results.push({
+          email,
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Failed to send'
+        })
+      }
+    }
+
+    return { requestId: crypto.randomUUID(), results, count: results.length }
+  }
+
+  // Default prospect journey - use existing bulk endpoint
   return authedFetch('/admin/prospect/send', {
     method: 'POST',
     body: JSON.stringify({ emails, lead_count: leadCount }),
