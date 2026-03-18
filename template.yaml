@@ -168,7 +168,7 @@ Conditions:
 Globals:
   Function:
     Runtime: python3.12
-    Architectures: [x86_64]
+    Architectures: [arm64]
     Environment:
       Variables:
         DOCUMENTS_TABLE_NAME: !Ref DocumentsTable
@@ -413,13 +413,34 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  # ── CloudWatch Log Group ──────────────────────────────────────────────────
+  # ── CloudWatch Log Groups ─────────────────────────────────────────────────
+  # Explicit log groups for all Lambda functions enforce retention so logs
+  # don't accumulate forever at $0.03/GB-month (SAM auto-created groups have
+  # no retention by default).
 
   ScraperLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/probate-scraper
       RetentionInDays: 30
+
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/probate-leads-api
+      RetentionInDays: 30
+
+  TriggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/probate-leads-trigger
+      RetentionInDays: 14
+
+  ParseDocumentFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/probate-leads-parse-document
+      RetentionInDays: 14
 
   # ── ECS ───────────────────────────────────────────────────────────────────
 
