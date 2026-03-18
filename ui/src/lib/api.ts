@@ -277,7 +277,14 @@ export async function adminGetUser(userId: string): Promise<UserResponse> {
 
 export async function adminPatchUser(
   userId: string,
-  update: { status?: string; role?: string; location_codes?: string[] },
+  update: {
+    status?: string;
+    role?: string;
+    location_codes?: string[];
+    journey_type?: string;
+    journey_step?: string;
+    trial_expires_on?: string;
+  },
 ): Promise<UserResponse> {
   return authedFetch(`/admin/users/${userId}`, {
     method: 'PATCH',

@@ -122,6 +122,13 @@ export interface User {
   locationCodes: string[]
   offeredPrice?: number
   createdAt: string
+  updatedAt?: string
+  stripeCustomerId?: string
+  stripeSubscriptionId?: string
+  // Customer journey fields
+  trialExpiresOn?: string
+  journeyType?: string
+  journeyStep?: string
 }
 
 export interface ProspectSendResult {

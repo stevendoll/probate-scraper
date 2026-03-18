@@ -26,6 +26,7 @@ export default function AdminUsers() {
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Journey</TableHead>
                 <TableHead>Counties</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead />
@@ -34,7 +35,7 @@ export default function AdminUsers() {
             <TableBody>
               {data.users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     No users found.
                   </TableCell>
                 </TableRow>
@@ -53,6 +54,20 @@ export default function AdminUsers() {
                     <Badge variant={user.status === 'active' ? 'default' : 'outline'}>
                       {user.status}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {user.journeyType ? (
+                      <div>
+                        <div className="font-medium">{user.journeyType.replace('_', ' ')}</div>
+                        {user.journeyStep && (
+                          <div className="text-muted-foreground">
+                            {user.journeyStep.replace('_', ' ')}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      '—'
+                    )}
                   </TableCell>
                   <TableCell>{user.locationCodes.join(', ') || '—'}</TableCell>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
