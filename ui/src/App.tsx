@@ -32,8 +32,18 @@ import TrialSignup from '@/pages/TrialSignup'
 
 function ProtectedRoute({ requireAdmin = false }: { requireAdmin?: boolean }) {
   const { token, payload } = useAuth()
-  if (!token) return <Navigate to="/login" replace />
-  if (requireAdmin && payload?.role !== 'admin') return <Navigate to="/dashboard" replace />
+  console.log('ProtectedRoute check:', { token: !!token, payload, requireAdmin })
+
+  if (!token) {
+    console.log('No token, redirecting to login')
+    return <Navigate to="/login" replace />
+  }
+
+  if (requireAdmin && payload?.role !== 'admin') {
+    console.log('Admin required but user role is:', payload?.role)
+    return <Navigate to="/dashboard" replace />
+  }
+
   return <Outlet />
 }
 

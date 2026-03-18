@@ -20,11 +20,35 @@ export default function AdminUserDetail() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
+  console.log('AdminUserDetail rendering with userId:', userId)
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'users', userId],
-    queryFn: () => adminGetUser(userId!),
+    queryFn: () => {
+      console.log('Fetching user with ID:', userId)
+      return adminGetUser(userId!)
+    },
     enabled: !!userId,
+    retry: 1,
+    staleTime: 0,
   })
+
+  console.log('Query state:', { isLoading, isError, data, error })
+
+  // Early render test
+  if (!userId) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+            ← Back
+          </Button>
+          <h1 className="text-2xl font-semibold">Invalid User ID</h1>
+        </div>
+        <p className="text-sm text-destructive">No user ID provided in URL</p>
+      </div>
+    )
+  }
 
   const [status, setStatus] = useState('')
   const [role, setRole] = useState('')
@@ -64,7 +88,17 @@ export default function AdminUserDetail() {
   })
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+            ← Back
+          </Button>
+          <h1 className="text-2xl font-semibold">User Detail</h1>
+        </div>
+        <p className="text-sm text-muted-foreground">Loading user {userId}…</p>
+      </div>
+    )
   }
 
   if (isError) {
