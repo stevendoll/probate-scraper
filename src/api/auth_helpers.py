@@ -14,7 +14,7 @@ send_prospect_email lives in email_helpers.py (marketing, not auth).
 
 Local dev / tests
 -----------------
-When FROM_EMAIL is unset, send_magic_link logs to console instead of calling SES.
+When FROM_EMAIL is unset, send_magic_link logs to console instead of calling Resend.
 """
 
 import logging
@@ -22,7 +22,6 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import boto3
 import jwt
 
 from utils import now_iso  # noqa: F401 — re-exported for convenience in tests
@@ -35,6 +34,7 @@ ACCESS_TOKEN_EXPIRY_DAYS    = 7
 PROSPECT_TOKEN_EXPIRY_DAYS  = 30
 
 FROM_EMAIL          = os.environ.get("FROM_EMAIL", "")
+RESEND_API_KEY      = os.environ.get("RESEND_API_KEY", "")
 MAGIC_LINK_BASE_URL = os.environ.get("MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify")
 
 
@@ -92,33 +92,28 @@ def get_bearer_payload(event: dict) -> dict | None:
 
 
 def send_magic_link(email: str, token: str) -> None:
-    """Send a magic-link login email via SES.
+    """Send a magic-link login email via Resend.
 
-    When FROM_EMAIL is unset the link is logged to console instead.
+    When FROM_EMAIL or RESEND_API_KEY is unset the link is logged to console instead.
     """
     link = f"{MAGIC_LINK_BASE_URL}?token={token}"
-    if not FROM_EMAIL:
-        log.info("Magic link (FROM_EMAIL unset — not sent via SES): %s", link)
+    if not FROM_EMAIL or not RESEND_API_KEY:
+        log.info("Magic link (FROM_EMAIL/RESEND_API_KEY unset — not sent): %s", link)
         return
-    ses = boto3.client("ses")
+    import resend  # noqa: PLC0415
+    resend.api_key = RESEND_API_KEY
     try:
-        ses.send_email(
-            Source=FROM_EMAIL,
-            Destination={"ToAddresses": [email]},
-            Message={
-                "Subject": {"Data": "Your login link"},
-                "Body": {
-                    "Text": {
-                        "Data": (
-                            f"Click to log in (expires in {MAGIC_LINK_EXPIRY_MIN} minutes):"
-                            f"\n\n{link}"
-                        )
-                    }
-                },
-            },
-        )
+        resend.Emails.send({
+            "from": FROM_EMAIL,
+            "to": [email],
+            "subject": "Your login link",
+            "text": (
+                f"Click to log in (expires in {MAGIC_LINK_EXPIRY_MIN} minutes):"
+                f"\n\n{link}"
+            ),
+        })
     except Exception as exc:
-        log.error("SES send_email failed: %s", exc)
+        log.error("Resend send failed: %s", exc)
 
 
 def log_event(

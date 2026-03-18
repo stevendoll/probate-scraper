@@ -1,11 +1,11 @@
 """
-email_helpers.py — SES email sending for prospect/marketing emails.
+email_helpers.py — Resend email sending for prospect/marketing emails.
 
 Magic-link (auth) email is in auth_helpers.send_magic_link.
 
-When FROM_EMAIL is unset (local dev / unit tests) all sends are logged to
-console at INFO level and no SES call is made — same pattern used by
-stripe_helpers.py for webhook verification.
+When FROM_EMAIL or RESEND_API_KEY is unset (local dev / unit tests) all sends
+are logged to console at INFO level and no API call is made — same pattern used
+by stripe_helpers.py for webhook verification.
 """
 
 import logging
@@ -13,13 +13,11 @@ import os
 import random
 from pathlib import Path
 
-import boto3
-
 log = logging.getLogger(__name__)
 
-FROM_EMAIL            = os.environ.get("FROM_EMAIL", "")
-UI_BASE_URL           = os.environ.get("UI_BASE_URL", "http://localhost:3001")
-SES_CONFIGURATION_SET = os.environ.get("SES_CONFIGURATION_SET", "")
+FROM_EMAIL      = os.environ.get("FROM_EMAIL", "")
+RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")
+UI_BASE_URL     = os.environ.get("UI_BASE_URL", "http://localhost:3001")
 
 
 def _load_random_line_from_file(file_path: Path) -> str:
@@ -120,36 +118,31 @@ def send_prospect_email(
         f"Unsubscribe: {unsubscribe_url}\n"
     )
 
-    if not FROM_EMAIL:
+    if not FROM_EMAIL or not RESEND_API_KEY:
         log.info(
-            "Prospect email (FROM_EMAIL unset — not sent via SES) to=%s price=%s subscribe=%s",
+            "Prospect email (FROM_EMAIL/RESEND_API_KEY unset — not sent) to=%s price=%s subscribe=%s",
             to_email, price, subscribe_url,
         )
         return
 
-    ses = boto3.client("ses")
+    import resend  # noqa: PLC0415
+    resend.api_key = RESEND_API_KEY
     source_email = f"{from_name} <{FROM_EMAIL}>" if from_name else FROM_EMAIL
-    send_kwargs = {
-        "Source":      source_email,
-        "Destination": {"ToAddresses": [to_email]},
-        "Message": {
-            "Subject": {"Data": subject},
-            "Body": {
-                "Text": {"Data": text_body},
-                "Html": {"Data": html_body},
-            },
-        },
+    send_params = {
+        "from":    source_email,
+        "to":      [to_email],
+        "subject": subject,
+        "text":    text_body,
+        "html":    html_body,
+        "tags": [
+            {"name": "user_id", "value": user_id or ""},
+            {"name": "variant", "value": variant},
+        ],
     }
-    if SES_CONFIGURATION_SET:
-        send_kwargs["ConfigurationSetName"] = SES_CONFIGURATION_SET
-        send_kwargs["Tags"] = [
-            {"Name": "user_id", "Value": user_id or ""},
-            {"Name": "variant", "Value": variant},
-        ]
     try:
-        ses.send_email(**send_kwargs)
+        resend.Emails.send(send_params)
     except Exception as exc:
-        log.error("SES send_email (prospect) failed for %s: %s", to_email, exc)
+        log.error("Resend send (prospect) failed for %s: %s", to_email, exc)
         raise
 
     # Log event only after a confirmed successful send

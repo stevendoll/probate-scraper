@@ -91,8 +91,23 @@ Parameters:
     Type: String
     Default: ""
     Description: >
-      SES-verified sender address for magic-link emails.
-      Leave blank to skip sending (local dev / CI).
+      Verified sender address for transactional emails (must be a domain
+      verified with Resend).  Leave blank to skip sending (local dev / CI).
+
+  ResendApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Resend API key (re_...).  Leave blank to skip sending (local dev / CI).
+
+  ResendWebhookSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Resend webhook signing secret (whsec_...).
+      Leave blank to skip signature verification (local dev / CI).
 
 
   UiBucketName:
@@ -166,7 +181,8 @@ Globals:
         GSI_NAME: recorded-date-index
         LOCATION_DATE_GSI: location-date-index
         USER_EVENT_GSI: user-event-index
-        SES_CONFIGURATION_SET: !Ref SesConfigurationSet
+        RESEND_API_KEY: !Ref ResendApiKey
+        RESEND_WEBHOOK_SECRET: !Ref ResendWebhookSecret
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         JWT_SECRET: !Ref JwtSecret
@@ -396,77 +412,6 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-
-  # ── SES — Configuration Set + Event Publishing ─────────────────────────────
-  # Publishes send/delivery/open/bounce/complaint events to SNS.
-  # SES automatically adds a tracking pixel to HTML emails for open tracking.
-  # Click tracking is intentionally disabled to preserve prospect token links.
-
-  SesConfigurationSet:
-    Type: AWS::SES::ConfigurationSet
-    Properties:
-      Name: !Sub "${AWS::StackName}-events"
-
-  SesEventsTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub "${AWS::StackName}-ses-events"
-
-  SesEventsTopicPolicy:
-    Type: AWS::SNS::TopicPolicy
-    Properties:
-      Topics:
-        - !Ref SesEventsTopic
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ses.amazonaws.com
-            Action: sns:Publish
-            Resource: !Ref SesEventsTopic
-
-  SesConfigurationSetEventDestination:
-    Type: AWS::SES::ConfigurationSetEventDestination
-    Properties:
-      ConfigurationSetName: !Ref SesConfigurationSet
-      EventDestination:
-        Name: ses-events-sns
-        Enabled: true
-        MatchingEventTypes:
-          - send
-          - delivery
-          - open
-          - bounce
-          - complaint
-        SnsDestination:
-          TopicARN: !Ref SesEventsTopic
-
-  # ── Lambda — SES event processor ──────────────────────────────────────────
-
-  SesEventsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: probate-leads-ses-events
-      CodeUri: src/ses_events/
-      Handler: app.handler
-      MemorySize: 128
-      Timeout: 30
-      Environment:
-        Variables:
-          EVENTS_TABLE_NAME: events
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:PutItem
-              Resource:
-                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/events"
-      Events:
-        SnsEvent:
-          Type: SNS
-          Properties:
-            Topic: !Ref SesEventsTopic
 
   # ── CloudWatch Log Group ──────────────────────────────────────────────────
 
@@ -901,6 +846,13 @@ Resources:
           Properties:
             RestApiId: !Ref ProbateApi
             Path: /real-estate/probate-leads/stripe/webhook
+            Method: POST
+        # Resend webhook — no API key required (verified by svix signature)
+        ResendWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProbateApi
+            Path: /real-estate/probate-leads/resend/webhook
             Method: POST
         # Auth — magic-link login (no API key required; Bearer JWT used instead)
         AuthRequestLogin:

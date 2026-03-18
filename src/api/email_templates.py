@@ -17,9 +17,9 @@ from jinja2 import Environment, FileSystemLoader, Template
 
 log = logging.getLogger(__name__)
 
-FROM_EMAIL = os.environ.get("FROM_EMAIL", "")
-UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://localhost:3001")
-SES_CONFIGURATION_SET = os.environ.get("SES_CONFIGURATION_SET", "")
+FROM_EMAIL     = os.environ.get("FROM_EMAIL", "")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+UI_BASE_URL    = os.environ.get("UI_BASE_URL", "http://localhost:3001")
 
 # Template directory
 TEMPLATES_DIR = Path(__file__).parent / "templates" / "journeys"
@@ -280,46 +280,39 @@ def send_journey_email(
         log.error("Failed to render journey email for %s %s: %s", journey_type, journey_step, exc)
         raise
 
-    # Skip sending if FROM_EMAIL not configured (local dev)
-    if not FROM_EMAIL:
+    # Skip sending if FROM_EMAIL / RESEND_API_KEY not configured (local dev)
+    if not FROM_EMAIL or not RESEND_API_KEY:
         log.info(
-            "Journey email (FROM_EMAIL unset — not sent via SES) to=%s journey=%s/%s",
+            "Journey email (FROM_EMAIL/RESEND_API_KEY unset — not sent) to=%s journey=%s/%s",
             to_email, journey_type, journey_step
         )
         return
 
-    # Send via SES
-    import boto3  # Import only when needed
-    ses = boto3.client("ses")
+    # Send via Resend
+    import resend  # noqa: PLC0415
+    resend.api_key = RESEND_API_KEY
     from_name = rendered["from_name"]
     source_email = f"{from_name} <{FROM_EMAIL}>" if from_name else FROM_EMAIL
 
-    send_kwargs = {
-        "Source": source_email,
-        "Destination": {"ToAddresses": [to_email]},
-        "Message": {
-            "Subject": {"Data": rendered["subject"]},
-            "Body": {
-                "Text": {"Data": rendered["text_body"]},
-                "Html": {"Data": rendered["html_body"]},
-            },
-        },
+    send_params = {
+        "from":    source_email,
+        "to":      [to_email],
+        "subject": rendered["subject"],
+        "text":    rendered["text_body"],
+        "html":    rendered["html_body"],
+        "tags": [
+            {"name": "user_id",          "value": user_data.get("userId", "")},
+            {"name": "journey_type",     "value": journey_type},
+            {"name": "journey_step",     "value": journey_step},
+            {"name": "template_variant", "value": template_variant},
+        ],
     }
 
-    if SES_CONFIGURATION_SET:
-        send_kwargs["ConfigurationSetName"] = SES_CONFIGURATION_SET
-        send_kwargs["Tags"] = [
-            {"Name": "user_id", "Value": user_data.get("userId", "")},
-            {"Name": "journey_type", "Value": journey_type},
-            {"Name": "journey_step", "Value": journey_step},
-            {"Name": "template_variant", "Value": template_variant},
-        ]
-
     try:
-        ses.send_email(**send_kwargs)
+        resend.Emails.send(send_params)
         log.info("Journey email sent to %s: %s/%s", to_email, journey_type, journey_step)
     except Exception as exc:
-        log.error("SES send_email failed for %s: %s", to_email, exc)
+        log.error("Resend send failed for %s: %s", to_email, exc)
         raise
 
     # Log event after successful send

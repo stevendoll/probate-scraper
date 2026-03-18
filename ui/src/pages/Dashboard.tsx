@@ -6,11 +6,20 @@ import { Badge } from '@/components/ui/badge'
 import { TrialBanner } from '@/components/trial-banner'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  active:   'default',
-  trialing: 'secondary',
-  past_due: 'destructive',
-  canceled: 'outline',
-  inactive: 'outline',
+  active:              'default',
+  trialing:            'secondary',
+  free_trial:          'secondary',
+  past_due:            'destructive',
+  canceled:            'outline',
+  inactive:            'outline',
+  prospect:            'outline',
+  inbound:             'outline',
+  unsubscribed:        'outline',
+  invited_to_waitlist: 'outline',
+  accepted_waitlist:   'secondary',
+  invited_to_join:     'secondary',
+  invited_to_trial:    'secondary',
+  trial_expired:       'destructive',
 }
 
 export default function Dashboard() {
@@ -36,7 +45,7 @@ export default function Dashboard() {
   if (isError || !user) return <Navigate to="/login" replace />
 
   const variant  = statusVariant[user.status] ?? 'outline'
-  const isActive = user.status === 'active' || user.status === 'trialing'
+  const isActive = ['active', 'trialing', 'free_trial'].includes(user.status)
 
   const handleSubscribe = async () => {
     // For trial users, we'd need to create a prospect token
