@@ -375,17 +375,30 @@ def test_stripe_webhook() -> None:
 # ---------------------------------------------------------------------------
 
 def cleanup_smoke_users() -> None:
-    """Delete any lingering smoke-test users (email starts with 'smoke-')."""
+    """Delete any lingering smoke-test users (email starts with 'smoke-').
+
+    Note: This function can only clean up users created via the /users endpoint
+    (subscribers), not users created via admin endpoints, since admin endpoints
+    require Bearer JWT authentication which is complex for smoke tests.
+    """
     r = get("/users")
     if r.status_code != 200:
+        print(f"\n{YELLOW}── Cleanup skipped — couldn't list users (HTTP {r.status_code}) ──{RESET}")
         return
+
     users = r.json().get("users", [])
     smoke_ids = [u["userId"] for u in users if u.get("email", "").startswith("smoke-")]
+
     if smoke_ids:
         print(f"\n{YELLOW}── Cleanup — removing {len(smoke_ids)} smoke user(s) ──────────────────{RESET}")
         for uid in smoke_ids:
-            delete(f"/users/{uid}")
-            print(f"  {GREEN}✓{RESET}  deleted {uid}")
+            r = delete(f"/users/{uid}")
+            if r.status_code == 200:
+                print(f"  {GREEN}✓{RESET}  deleted {uid}")
+            else:
+                print(f"  {RED}✗{RESET}  failed to delete {uid} (HTTP {r.status_code})")
+    else:
+        print(f"\n{YELLOW}── Cleanup — no smoke users found ──{RESET}")
 
 
 # ---------------------------------------------------------------------------

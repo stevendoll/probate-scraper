@@ -4,10 +4,12 @@ import type { ProspectSendResult } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export default function ProspectSend() {
   const [emailsText, setEmailsText]   = useState('')
   const [leadCount, setLeadCount]     = useState(10)
+  const [journeyType, setJourneyType] = useState('prospect')
   const [results, setResults]         = useState<ProspectSendResult[] | null>(null)
   const [loading, setLoading]         = useState(false)
   const [error, setError]             = useState<string | null>(null)
@@ -29,7 +31,7 @@ export default function ProspectSend() {
 
     setLoading(true)
     try {
-      const resp = await adminSendProspect(emails, leadCount)
+      const resp = await adminSendProspect(emails, leadCount, journeyType)
       setResults(resp.results)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -43,8 +45,8 @@ export default function ProspectSend() {
       <div>
         <h1 className="text-2xl font-semibold">Send Prospect Emails</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Create prospect users and send each a leads email with a subscribe link.
-          Prices are assigned in round-robin order: $19, $39, $59, $79.
+          Create users in the selected customer journey and send them personalized emails.
+          Journey types determine email content and user flow.
         </p>
       </div>
 
@@ -63,20 +65,49 @@ export default function ProspectSend() {
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="leadCount">
-            Sample leads to include (1–50)
-          </label>
-          <input
-            id="leadCount"
-            type="number"
-            min={1}
-            max={50}
-            className="w-28 rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={leadCount}
-            onChange={(e) => setLeadCount(Number(e.target.value))}
-            disabled={loading}
-          />
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Customer Journey Type</label>
+            <Select value={journeyType} onValueChange={setJourneyType} disabled={loading}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="prospect">
+                  Prospect - Traditional leads email with subscribe link & pricing
+                </SelectItem>
+                <SelectItem value="coming_soon">
+                  Coming Soon - Waitlist invitation for early access
+                </SelectItem>
+                <SelectItem value="free_trial">
+                  Free Trial - Direct trial invitation (14-day trial)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {journeyType === 'prospect' && 'Users will be created as prospects and receive leads samples with pricing.'}
+              {journeyType === 'coming_soon' && 'Users will be invited to join the waitlist for early access.'}
+              {journeyType === 'free_trial' && 'Users will get immediate trial access with 14-day expiration.'}
+            </p>
+          </div>
+
+          {journeyType === 'prospect' && (
+            <div className="space-y-1">
+              <label className="text-sm font-medium" htmlFor="leadCount">
+                Sample leads to include (1–50)
+              </label>
+              <input
+                id="leadCount"
+                type="number"
+                min={1}
+                max={50}
+                className="w-28 rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={leadCount}
+                onChange={(e) => setLeadCount(Number(e.target.value))}
+                disabled={loading}
+              />
+            </div>
+          )}
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
