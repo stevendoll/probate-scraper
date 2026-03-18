@@ -224,28 +224,36 @@ class TestGetBearerPayload(unittest.TestCase):
 class TestSendMagicLink(unittest.TestCase):
 
     def test_logs_when_from_email_unset(self):
-        """When FROM_EMAIL is empty, no SES call is made (just logs)."""
-        original = auth_helpers.FROM_EMAIL
-        auth_helpers.FROM_EMAIL = ""
+        """When FROM_EMAIL is empty, no Resend call is made (just logs)."""
+        original_from = auth_helpers.FROM_EMAIL
+        original_key  = auth_helpers.RESEND_API_KEY
+        auth_helpers.FROM_EMAIL     = ""
+        auth_helpers.RESEND_API_KEY = ""
         try:
-            with patch("boto3.client") as mock_boto:
+            with patch("resend.Emails.send") as mock_send:
                 token = auth_helpers.create_magic_token("x@y.com")
                 auth_helpers.send_magic_link("x@y.com", token)
-                mock_boto.assert_not_called()
+                mock_send.assert_not_called()
         finally:
-            auth_helpers.FROM_EMAIL = original
+            auth_helpers.FROM_EMAIL     = original_from
+            auth_helpers.RESEND_API_KEY = original_key
 
-    def test_calls_ses_when_from_email_set(self):
-        original = auth_helpers.FROM_EMAIL
-        auth_helpers.FROM_EMAIL = "noreply@example.com"
+    def test_calls_resend_when_credentials_set(self):
+        original_from = auth_helpers.FROM_EMAIL
+        original_key  = auth_helpers.RESEND_API_KEY
+        auth_helpers.FROM_EMAIL     = "noreply@example.com"
+        auth_helpers.RESEND_API_KEY = "re_test_key"
         try:
-            mock_ses = MagicMock()
-            with patch("boto3.client", return_value=mock_ses):
+            with patch("resend.Emails.send") as mock_send:
                 token = auth_helpers.create_magic_token("x@y.com")
                 auth_helpers.send_magic_link("x@y.com", token)
-            mock_ses.send_email.assert_called_once()
+            mock_send.assert_called_once()
+            call_params = mock_send.call_args[0][0]
+            self.assertEqual(call_params["to"], ["x@y.com"])
+            self.assertIn("Your login link", call_params["subject"])
         finally:
-            auth_helpers.FROM_EMAIL = original
+            auth_helpers.FROM_EMAIL     = original_from
+            auth_helpers.RESEND_API_KEY = original_key
 
 
 # ---------------------------------------------------------------------------
