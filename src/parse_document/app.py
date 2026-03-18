@@ -13,8 +13,9 @@ Flow:
   5. Parse the JSON response from Bedrock.
   6. Write contact records to the contacts table.
   7. Write property records to the properties table.
-  8. Stamp parsed_at + parse_error on the documents table.
-  9. Return a summary response.
+  8. Enrich up to 10 non-deceased contacts via Enformion (if credentials set).
+  9. Stamp parsed_at + parse_error on the documents table.
+  10. Return a summary response.
 
 Environment variables:
   DOCUMENTS_TABLE_NAME  — documents table (default: documents)
@@ -23,6 +24,8 @@ Environment variables:
   LINKS_TABLE_NAME      — links table (default: links)
   DOCUMENTS_BUCKET      — S3 bucket where PDFs are stored
   BEDROCK_MODEL_ID      — Bedrock model ID (default: us.amazon.nova-pro-v1:0)
+  ENFORMION_AP_NAME     — Enformion galaxy-ap-name credential
+  ENFORMION_AP_PASSWORD — Enformion galaxy-ap-password credential
   AWS_DEFAULT_REGION    — AWS region (injected by Lambda runtime)
 """
 
@@ -68,7 +71,9 @@ _model_id             = os.environ.get(
     "us.amazon.nova-pro-v1:0",
 )
 
-_links_table_name    = os.environ.get("LINKS_TABLE_NAME", "links")
+_links_table_name        = os.environ.get("LINKS_TABLE_NAME", "links")
+_enformion_ap_name       = os.environ.get("ENFORMION_AP_NAME", "")
+_enformion_ap_password   = os.environ.get("ENFORMION_AP_PASSWORD", "")
 
 _dynamodb          = boto3.resource("dynamodb", region_name=_region)
 _documents_table   = _dynamodb.Table(_documents_table_name)
@@ -242,13 +247,15 @@ def _call_bedrock(pdf_bytes: bytes) -> tuple[dict, str]:
 
 def _write_contacts(
     document_id: str, parsed: dict, model_id: str, parsed_at: str, raw_response: str
-) -> int:
+) -> tuple[int, list[dict]]:
     """
     Write one Contact record per person extracted from the document.
     Includes the deceased person (from deceased_* fields) + people list.
-    Returns the number of contacts written.
+    Returns (count_written, contacts_list) where contacts_list contains
+    dicts with at minimum contact_id, name, role (for enrichment).
     """
     written = 0
+    contacts: list[dict] = []
 
     # Deceased contact
     deceased_name    = _capitalize_name(parsed.get("deceased_name") or "")
@@ -282,6 +289,7 @@ def _write_contacts(
             "parsed_address": deceased_address,
             "parsed_notes":   "",
         })
+        contacts.append({"contact_id": deceased_contact_id, "name": deceased_name, "role": "deceased"})
         written += 1
         # Auto-insert a Legacy.com obituary search link for the deceased
         try:
@@ -310,8 +318,9 @@ def _write_contacts(
         role  = (person.get("role") or "other").lower()
         email = person.get("email") or ""
         notes = person.get("notes") or ""
+        contact_id = str(uuid.uuid4())
         _contacts_table.put_item(Item={
-            "contact_id":     str(uuid.uuid4()),
+            "contact_id":     contact_id,
             "document_id":    document_id,
             # editable (ground-truth) fields — start as the parsed values
             "role":           role,
@@ -335,9 +344,10 @@ def _write_contacts(
             "parsed_address": "",
             "parsed_notes":   notes,
         })
+        contacts.append({"contact_id": contact_id, "name": name, "role": role})
         written += 1
 
-    return written
+    return written, contacts
 
 
 def _try_usaddress(raw: str) -> tuple[str, str, str, bool]:
@@ -454,6 +464,36 @@ def _write_properties(
                 logger.warning("Failed to insert Google Maps link: %s", exc)
 
     return written
+
+
+def _apply_enrichment(enrichment_results: list[dict]) -> None:
+    """
+    Write Enformion enrichment results back to DynamoDB contacts table.
+    Uses UpdateItem so only enrichment columns are touched.
+    """
+    for result in enrichment_results:
+        contact_id = result.get("contact_id")
+        if not contact_id:
+            continue
+        try:
+            _contacts_table.update_item(
+                Key={"contact_id": contact_id},
+                UpdateExpression=(
+                    "SET enrichment_status = :es, enriched_at = :ea,"
+                    " enriched_phone = :ep, enriched_email = :ee,"
+                    " enriched_name = :en, enriched_identity_score = :ei"
+                ),
+                ExpressionAttributeValues={
+                    ":es": result.get("enrichment_status", ""),
+                    ":ea": result.get("enriched_at", ""),
+                    ":ep": result.get("enriched_phone", ""),
+                    ":ee": result.get("enriched_email", ""),
+                    ":en": result.get("enriched_name", ""),
+                    ":ei": result.get("enriched_identity_score", ""),
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to write enrichment for contact %s: %s", contact_id, exc)
 
 
 def _clear_existing(document_id: str) -> tuple[int, int]:
@@ -586,13 +626,30 @@ def parse_document(document_id: str):
 
     contacts_written = 0
     properties_written = 0
+    contacts_list: list[dict] = []
     try:
-        contacts_written   = _write_contacts(document_id, parsed, _model_id, now, raw_response)
+        contacts_written, contacts_list = _write_contacts(document_id, parsed, _model_id, now, raw_response)
         properties_written = _write_properties(document_id, parsed, _model_id, now, raw_response)
     except Exception as exc:
         logger.error("DynamoDB write failed: %s", exc)
         _update_document_status(document_id, _model_id, now, error=str(exc))
         return {"error": f"DynamoDB write failed: {exc}"}, 500
+
+    # Enrich contacts via Enformion (best-effort — never blocks parse success)
+    if _enformion_ap_name and _enformion_ap_password:
+        try:
+            from enformion import enrich_contacts  # noqa: PLC0415
+            enrichment_results = enrich_contacts(
+                contacts_list, _enformion_ap_name, _enformion_ap_password
+            )
+            if enrichment_results:
+                _apply_enrichment(enrichment_results)
+                logger.info(
+                    "Enformion enrichment complete: %d contacts processed",
+                    len(enrichment_results),
+                )
+        except Exception as exc:
+            logger.error("Enformion enrichment failed (non-fatal): %s", exc)
 
     # 5. Stamp status on the documents table
     summary = parsed.get("summary") or ""

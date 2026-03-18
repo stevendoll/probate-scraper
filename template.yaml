@@ -109,6 +109,21 @@ Parameters:
       Resend webhook signing secret (whsec_...).
       Leave blank to skip signature verification (local dev / CI).
 
+  EnformionApName:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Enformion galaxy-ap-name credential for contact enrichment.
+      Leave blank to skip enrichment (local dev / CI).
+
+  EnformionApPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Enformion galaxy-ap-password credential for contact enrichment.
+      Leave blank to skip enrichment (local dev / CI).
 
   UiBucketName:
     Type: String
@@ -1085,6 +1100,8 @@ Resources:
           CONTACTS_TABLE_NAME: !Ref ContactsTable
           PROPERTIES_TABLE_NAME: !Ref PropertiesTable
           LINKS_TABLE_NAME: !Ref LinksTable
+          ENFORMION_AP_NAME: !Ref EnformionApName
+          ENFORMION_AP_PASSWORD: !Ref EnformionApPassword
       Policies:
         # Documents — read + stamp parsed_at
         - Statement:
@@ -1093,12 +1110,13 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt DocumentsTable.Arn
-        # Contacts — write parsed contacts + query/delete for re-parse clearing
+        # Contacts — write parsed contacts + query/delete for re-parse clearing + enrichment updates
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:PutItem
                 - dynamodb:BatchWriteItem
+                - dynamodb:UpdateItem
               Resource: !GetAtt ContactsTable.Arn
             - Effect: Allow
               Action:
