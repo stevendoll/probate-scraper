@@ -85,6 +85,13 @@ export interface Contact {
   parsedModel?: string
   rawResponse?: string
   links?: Link[]
+  // Enformion enrichment fields
+  enrichmentStatus?: 'success' | 'no_match' | 'error' | 'skipped' | ''
+  enrichedAt?: string
+  enrichedPhone?: string
+  enrichedEmail?: string
+  enrichedName?: string
+  enrichedIdentityScore?: string
 }
 
 export interface Property {

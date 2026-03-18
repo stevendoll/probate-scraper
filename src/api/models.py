@@ -144,54 +144,73 @@ class Contact:
     parsed_dod:     str = ""
     parsed_address: str = ""
     parsed_notes:   str = ""
+    # ── Enformion enrichment fields ────────────────────────────────────────
+    enrichment_status:       str = ""  # success | no_match | error | skipped
+    enriched_at:             str = ""  # ISO timestamp of enrichment attempt
+    enriched_phone:          str = ""
+    enriched_email:          str = ""
+    enriched_name:           str = ""
+    enriched_identity_score: str = ""
 
     @classmethod
     def from_dynamo(cls, item: dict) -> "Contact":
         return cls(
-            contact_id=     item.get("contact_id", ""),
-            document_id=    item.get("document_id", ""),
-            role=           item.get("role", ""),
-            name=           item.get("name", ""),
-            email=          item.get("email", ""),
-            dob=            item.get("dob", ""),
-            dod=            item.get("dod", ""),
-            address=        item.get("address", ""),
-            notes=          item.get("notes", ""),
-            edited_at=      item.get("edited_at", ""),
-            parsed_at=      item.get("parsed_at", ""),
-            parsed_model=   item.get("parsed_model", ""),
-            raw_response=   item.get("raw_response", ""),
-            parsed_role=    item.get("parsed_role", ""),
-            parsed_name=    item.get("parsed_name", ""),
-            parsed_email=   item.get("parsed_email", ""),
-            parsed_dob=     item.get("parsed_dob", ""),
-            parsed_dod=     item.get("parsed_dod", ""),
-            parsed_address= item.get("parsed_address", ""),
-            parsed_notes=   item.get("parsed_notes", ""),
+            contact_id=              item.get("contact_id", ""),
+            document_id=             item.get("document_id", ""),
+            role=                    item.get("role", ""),
+            name=                    item.get("name", ""),
+            email=                   item.get("email", ""),
+            dob=                     item.get("dob", ""),
+            dod=                     item.get("dod", ""),
+            address=                 item.get("address", ""),
+            notes=                   item.get("notes", ""),
+            edited_at=               item.get("edited_at", ""),
+            parsed_at=               item.get("parsed_at", ""),
+            parsed_model=            item.get("parsed_model", ""),
+            raw_response=            item.get("raw_response", ""),
+            parsed_role=             item.get("parsed_role", ""),
+            parsed_name=             item.get("parsed_name", ""),
+            parsed_email=            item.get("parsed_email", ""),
+            parsed_dob=              item.get("parsed_dob", ""),
+            parsed_dod=              item.get("parsed_dod", ""),
+            parsed_address=          item.get("parsed_address", ""),
+            parsed_notes=            item.get("parsed_notes", ""),
+            enrichment_status=       item.get("enrichment_status", ""),
+            enriched_at=             item.get("enriched_at", ""),
+            enriched_phone=          item.get("enriched_phone", ""),
+            enriched_email=          item.get("enriched_email", ""),
+            enriched_name=           item.get("enriched_name", ""),
+            enriched_identity_score= item.get("enriched_identity_score", ""),
         )
 
     def to_dict(self) -> dict:
         return {
-            "contactId":     self.contact_id,
-            "documentId":    self.document_id,
-            "role":          self.role,
-            "name":          self.name,
-            "email":         self.email,
-            "dob":           self.dob,
-            "dod":           self.dod,
-            "address":       self.address,
-            "notes":         self.notes,
-            "editedAt":      self.edited_at,
-            "parsedAt":      self.parsed_at,
-            "parsedModel":   self.parsed_model,
-            "rawResponse":   self.raw_response,
-            "parsedRole":    self.parsed_role,
-            "parsedName":    self.parsed_name,
-            "parsedEmail":   self.parsed_email,
-            "parsedDob":     self.parsed_dob,
-            "parsedDod":     self.parsed_dod,
-            "parsedAddress": self.parsed_address,
-            "parsedNotes":   self.parsed_notes,
+            "contactId":             self.contact_id,
+            "documentId":            self.document_id,
+            "role":                  self.role,
+            "name":                  self.name,
+            "email":                 self.email,
+            "dob":                   self.dob,
+            "dod":                   self.dod,
+            "address":               self.address,
+            "notes":                 self.notes,
+            "editedAt":              self.edited_at,
+            "parsedAt":              self.parsed_at,
+            "parsedModel":           self.parsed_model,
+            "rawResponse":           self.raw_response,
+            "parsedRole":            self.parsed_role,
+            "parsedName":            self.parsed_name,
+            "parsedEmail":           self.parsed_email,
+            "parsedDob":             self.parsed_dob,
+            "parsedDod":             self.parsed_dod,
+            "parsedAddress":         self.parsed_address,
+            "parsedNotes":           self.parsed_notes,
+            "enrichmentStatus":      self.enrichment_status,
+            "enrichedAt":            self.enriched_at,
+            "enrichedPhone":         self.enriched_phone,
+            "enrichedEmail":         self.enriched_email,
+            "enrichedName":          self.enriched_name,
+            "enrichedIdentityScore": self.enriched_identity_score,
         }
 
 

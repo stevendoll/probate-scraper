@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { CheckCircle, ExternalLink, Link2, Pencil, Trash2, X } from 'lucide-react'
+import { CheckCircle, ExternalLink, Link2, MinusCircle, Pencil, Trash2, X, XCircle } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +48,38 @@ function roleBadgeVariant(role: string): 'default' | 'secondary' | 'outline' {
   if (role === 'deceased') return 'default'
   if (role === 'executor') return 'secondary'
   return 'outline'
+}
+
+function EnrichmentIcon({ contact }: { contact: Contact }) {
+  const status = contact.enrichmentStatus
+  if (!status) return null
+
+  if (status === 'success') {
+    const tip = [
+      contact.enrichedName  && `Name: ${contact.enrichedName}`,
+      contact.enrichedPhone && `Phone: ${contact.enrichedPhone}`,
+      contact.enrichedEmail && `Email: ${contact.enrichedEmail}`,
+      contact.enrichedIdentityScore && `Score: ${contact.enrichedIdentityScore}`,
+    ].filter(Boolean).join(' · ') || 'Enriched'
+    return (
+      <span title={`Enformion: ${tip}`} className="shrink-0">
+        <CheckCircle size={13} className="text-green-500" />
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span title="Enformion: enrichment error" className="shrink-0">
+        <XCircle size={13} className="text-destructive" />
+      </span>
+    )
+  }
+  // no_match or skipped
+  return (
+    <span title={`Enformion: ${status}`} className="shrink-0">
+      <MinusCircle size={13} className="text-muted-foreground" />
+    </span>
+  )
 }
 
 const ROLE_ORDER: Record<string, number> = {
@@ -505,6 +537,7 @@ function ContactRow({
         <TableCell className="font-medium whitespace-nowrap">
           <span className="flex items-center gap-1.5">
             {contact.name || '—'}
+            <EnrichmentIcon contact={contact} />
             {links.map(link => (
               <LinkIcon
                 key={link.linkId}

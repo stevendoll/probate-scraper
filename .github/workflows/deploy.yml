@@ -180,6 +180,8 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          ENFORMION_AP_NAME: ${{ secrets.ENFORMION_AP_NAME }}
+          ENFORMION_AP_PASSWORD: ${{ secrets.ENFORMION_AP_PASSWORD }}
           USERNAME_COLLINTX: ${{ secrets.USERNAME_COLLINTX }}
           PASSWORD_COLLINTX: ${{ secrets.PASSWORD_COLLINTX }}
           MAGIC_LINK_BASE_URL: ${{ vars.MAGIC_LINK_BASE_URL || 'https://collincountyleads.com/auth/verify' }}
@@ -210,6 +212,8 @@ jobs:
           [ -n "$STRIPE_WEBHOOK_SECRET" ] && OVERRIDES+=("StripeWebhookSecret=$STRIPE_WEBHOOK_SECRET")
           [ -n "$RESEND_API_KEY" ]        && OVERRIDES+=("ResendApiKey=$RESEND_API_KEY")
           [ -n "$RESEND_WEBHOOK_SECRET" ] && OVERRIDES+=("ResendWebhookSecret=$RESEND_WEBHOOK_SECRET")
+          [ -n "$ENFORMION_AP_NAME" ]     && OVERRIDES+=("EnformionApName=$ENFORMION_AP_NAME")
+          [ -n "$ENFORMION_AP_PASSWORD" ] && OVERRIDES+=("EnformionApPassword=$ENFORMION_AP_PASSWORD")
           [ -n "$USERNAME_COLLINTX" ]     && OVERRIDES+=("ScraperUsername=$USERNAME_COLLINTX")
           [ -n "$PASSWORD_COLLINTX" ]     && OVERRIDES+=("ScraperPassword=$PASSWORD_COLLINTX")
 
