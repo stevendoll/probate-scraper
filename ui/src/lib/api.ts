@@ -308,58 +308,46 @@ export async function adminSendProspect(
 ): Promise<ProspectSendResponse> {
   // For non-prospect journeys, use customer journey endpoints
   if (journeyType === 'coming_soon') {
-    // For coming_soon journey, we'll call invite-to-waitlist for each email
-    const results: ProspectSendResult[] = []
-
-    for (const email of emails) {
-      try {
-        await authedFetch('/journeys/invite-to-waitlist', {
-          method: 'POST',
-          body: JSON.stringify({
-            email: email.trim(),
-            first_name: '',
-            last_name: ''
-          }),
-        })
-        results.push({ email, status: 'sent', message: 'Waitlist invitation sent' })
-      } catch (error) {
-        results.push({
-          email,
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to send'
-        })
-      }
+    // Waitlist journey - uses bulk endpoint
+    try {
+      const response = await authedFetch('/journeys/invite-to-waitlist', {
+        method: 'POST',
+        body: JSON.stringify({
+          emails: emails.map(e => e.trim())
+        }),
+      })
+      return response as ProspectSendResponse
+    } catch (error) {
+      // If bulk call fails, return error for all emails
+      const results: ProspectSendResult[] = emails.map(email => ({
+        email,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to send waitlist invitation'
+      }))
+      return { requestId: crypto.randomUUID(), results, count: results.length }
     }
-
-    return { requestId: crypto.randomUUID(), results, count: results.length }
   }
 
   if (journeyType === 'free_trial') {
-    // For free_trial journey, we'll call invite-to-trial for each email
-    const results: ProspectSendResult[] = []
-
-    for (const email of emails) {
-      try {
-        await authedFetch('/journeys/invite-to-trial', {
-          method: 'POST',
-          body: JSON.stringify({
-            email: email.trim(),
-            first_name: '',
-            last_name: '',
-            trial_days: 14
-          }),
-        })
-        results.push({ email, status: 'sent', message: 'Trial invitation sent' })
-      } catch (error) {
-        results.push({
-          email,
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to send'
-        })
-      }
+    // Trial journey - uses bulk endpoint
+    try {
+      const response = await authedFetch('/journeys/invite-to-trial', {
+        method: 'POST',
+        body: JSON.stringify({
+          emails: emails.map(e => e.trim()),
+          trial_days: 14
+        }),
+      })
+      return response as ProspectSendResponse
+    } catch (error) {
+      // If bulk call fails, return error for all emails
+      const results: ProspectSendResult[] = emails.map(email => ({
+        email,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to send trial invitation'
+      }))
+      return { requestId: crypto.randomUUID(), results, count: results.length }
     }
-
-    return { requestId: crypto.randomUUID(), results, count: results.length }
   }
 
   // Default prospect journey - use existing bulk endpoint

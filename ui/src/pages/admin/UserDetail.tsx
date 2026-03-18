@@ -44,8 +44,8 @@ export default function AdminUserDetail() {
         ...(locationCodes !== ''
           ? { location_codes: locationCodes.split(',').map((s) => s.trim()).filter(Boolean) }
           : {}),
-        ...(journeyType ? { journey_type: journeyType } : {}),
-        ...(journeyStep ? { journey_step: journeyStep } : {}),
+        ...(journeyType ? { journey_type: journeyType === 'none' ? '' : journeyType } : {}),
+        ...(journeyStep ? { journey_step: journeyStep === 'none' ? '' : journeyStep } : {}),
         ...(trialExpiresOn ? { trial_expires_on: trialExpiresOn } : {}),
       }),
     onSuccess: () => {
@@ -208,7 +208,7 @@ export default function AdminUserDetail() {
                 <SelectValue placeholder="Select journey type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">None</SelectItem>
+                <SelectItem value="none">None</SelectItem>
                 <SelectItem value="prospect">Prospect</SelectItem>
                 <SelectItem value="coming_soon">Coming Soon</SelectItem>
                 <SelectItem value="free_trial">Free Trial</SelectItem>
@@ -223,7 +223,7 @@ export default function AdminUserDetail() {
                 <SelectValue placeholder="Select journey step" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">None</SelectItem>
+                <SelectItem value="none">None</SelectItem>
                 <SelectItem value="prospect">Prospect</SelectItem>
                 <SelectItem value="inbound">Inbound</SelectItem>
                 <SelectItem value="invited_to_waitlist">Invited to Waitlist</SelectItem>
